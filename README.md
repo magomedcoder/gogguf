@@ -1,19 +1,17 @@
-# gguf.go
+# gguf.go - запуск ML-моделей в формате **GGUF** на чистом **Go**.
 
 > **Ранний этап разработки.**
-> **Это экспериментальный проект по запуску моделей в формате GGUF на языке Go.**
 
-## О проекте
+Формат **GGUF** используется в экосистеме llama.cpp. **gguf.go** - лёгковесный способ запуска GGUF-моделей на языке Go без использования llama.cpp.
 
-`gguf.go` - это попытка собрать на чистом **Go** полный цикл работы с ML-моделями в формате **GGUF**: от чтения файла до генерации текста. 
-
-Формат GGUF используется в экосистеме llama.cpp.
+---
 
 ## Что уже работает
 
-- парсинг GGUF v2/v3 (метаданные, тензоры);
-- деквантизация Q8_0 и загрузка весов;
-- базовые операции: `quant`, `tensor`, `ops`.
+- парсинг GGUF v2/v3 (`info`, `inspect`);
+- деквантизация Q8_0, загрузка весов (`quant`, `tensor`, `weights`);
+- базовые ops: RoPE, RMSNorm, GQA attention, SwiGLU;
+- forward pass Qwen3 + KV-cache (`model/qwen3`, `runtime`).
 
 Генерация текста (inference) пока не реализована.
 
@@ -27,7 +25,7 @@ https://huggingface.co/Qwen/Qwen3-0.6B-GGUF?show_file_info=Qwen3-0.6B-Q8_0.gguf
 go build -o build/gguf ./cmd/gguf
 
 # Краткая информация о модели
-./build/gguf info -m ./model/Qwen3-0.6B-Q8_0.gguf
+./build/gguf info -m ./models/Qwen3-0.6B-Q8_0.gguf
 # Просмотр метаданных и тензоров
-./build/gguf inspect ./model/Qwen3-0.6B-Q8_0.gguf
+./build/gguf inspect ./models/Qwen3-0.6B-Q8_0.gguf
 ```
