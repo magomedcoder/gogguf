@@ -14,18 +14,21 @@ import (
 )
 
 type Server struct {
-	engine *runtime.Engine
-	mu     sync.Mutex
+	engine    *runtime.Engine
+	modelPath string
+	mu        sync.Mutex
 }
 
-func New(engine *runtime.Engine) *Server {
+func New(engine *runtime.Engine, modelPath string) *Server {
 	return &Server{
-		engine: engine,
+		engine:    engine,
+		modelPath: modelPath,
 	}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/models", s.handleModels)
 	mux.HandleFunc("/generate", s.handleGenerate)
 	return mux
 }
@@ -61,6 +64,45 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+type healthResponse struct {
+	Status string `json:"status"`
+}
+
+type modelInfo struct {
+	ID             string `json:"id"`
+	Path           string `json:"path,omitempty"`
+	Architecture   string `json:"architecture,omitempty"`
+	Name           string `json:"name,omitempty"`
+	ContextLength  int    `json:"context_length,omitempty"`
+	ChatTemplate   bool   `json:"chat_template"`
+}
+
+type modelsResponse struct {
+	Models []modelInfo `json:"models"`
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, _ *http.Request) {
+	meta := s.engine.Metadata()
+	arch, _ := meta.String("general.architecture")
+	name, _ := meta.String("general.name")
+
+	ctxLen := 0
+	if arch != "" {
+		ctxLen = meta.IntOptional(arch+".context_length", 0)
+	}
+
+	writeJSON(w, modelsResponse{
+		Models: []modelInfo{{
+			ID:            name,
+			Path:          s.modelPath,
+			Architecture:  arch,
+			Name:          name,
+			ContextLength: ctxLen,
+			ChatTemplate:  chat.HasTemplateMeta(meta),
+		}},
+	})
 }
 
 type completionRequest struct {

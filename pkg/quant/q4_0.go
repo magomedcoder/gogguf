@@ -8,7 +8,7 @@ import (
 // QK4_0 - число значений в одном блоке Q4_0
 const QK4_0 = 32
 
-// BlockQ4_0Size - размер блока Q4_0 в байтах (scale fp16 + 16×nibble pairs)
+// BlockQ4_0Size - размер блока Q4_0 в байтах (scale fp16 + 16*nibble pairs)
 const BlockQ4_0Size = 2 + QK4_0/2
 
 // DequantBlockQ4_0 деквантизирует один блок Q4_0 в 32 float32

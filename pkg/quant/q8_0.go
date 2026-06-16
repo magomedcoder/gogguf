@@ -8,7 +8,7 @@ import (
 // QK8_0 - число значений в одном блоке Q8_0
 const QK8_0 = 32
 
-// BlockQ8_0Size - размер блока Q8_0 в байтах (scale fp16 + 32×int8)
+// BlockQ8_0Size - размер блока Q8_0 в байтах (scale fp16 + 32*int8)
 const BlockQ8_0Size = 2 + QK8_0
 
 // DequantBlockQ8_0 деквантизирует один блок Q8_0 в 32 float32

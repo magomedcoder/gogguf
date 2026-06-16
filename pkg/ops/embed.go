@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gguf.go/pkg/quant"
 )
 
-// EmbeddingQ8_0 извлекает строку embedding из Q8_0-матрицы [vocab×dim]
+// EmbeddingQ8_0 извлекает строку embedding из Q8_0-матрицы [vocab*dim]
 func EmbeddingQ8_0(raw []byte, dim, tokenID int) ([]float32, error) {
 	if dim%quant.QK8_0 != 0 {
 		return nil, fmt.Errorf("ops: dim=%d не кратно %d", dim, quant.QK8_0)
@@ -23,7 +23,7 @@ func EmbeddingQ8_0(raw []byte, dim, tokenID int) ([]float32, error) {
 	return quant.DequantQ8_0(raw[off:off+rowBytes], dim)
 }
 
-// EmbeddingQ4_0 извлекает строку embedding из Q4_0-матрицы [vocab×dim]
+// EmbeddingQ4_0 извлекает строку embedding из Q4_0-матрицы [vocab*dim]
 func EmbeddingQ4_0(raw []byte, dim, tokenID int) ([]float32, error) {
 	if dim%quant.QK4_0 != 0 {
 		return nil, fmt.Errorf("ops: dim=%d не кратно %d", dim, quant.QK4_0)
@@ -39,7 +39,7 @@ func EmbeddingQ4_0(raw []byte, dim, tokenID int) ([]float32, error) {
 	return quant.DequantQ4_0(raw[off:off+rowBytes], dim)
 }
 
-// EmbeddingQ4_K извлекает строку embedding из Q4_K-матрицы [vocab×dim]
+// EmbeddingQ4_K извлекает строку embedding из Q4_K-матрицы [vocab*dim]
 func EmbeddingQ4_K(raw []byte, dim, tokenID int) ([]float32, error) {
 	if dim%quant.QK_K != 0 {
 		return nil, fmt.Errorf("ops: dim=%d не кратно %d", dim, quant.QK_K)

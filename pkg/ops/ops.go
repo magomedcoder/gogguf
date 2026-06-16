@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gguf.go/pkg/quant"
 )
 
-// MatMulVec умножает матрицу [rows×cols] на вектор [cols]
+// MatMulVec умножает матрицу [rows*cols] на вектор [cols]
 func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, error) {
 	if len(vec) != cols {
 		return nil, fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -29,7 +29,7 @@ func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, erro
 	return out, nil
 }
 
-// MatMulVecQ8_0 умножает Q8_0-матрицу [rows×cols] на float32-вектор [cols]
+// MatMulVecQ8_0 умножает Q8_0-матрицу [rows*cols] на float32-вектор [cols]
 func MatMulVecQ8_0(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if len(vec) != cols {
 		return nil, fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -64,7 +64,7 @@ func MatMulVecQ8_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ4_0 умножает Q4_0-матрицу [rows×cols] на float32-вектор [cols]
+// MatMulVecQ4_0 умножает Q4_0-матрицу [rows*cols] на float32-вектор [cols]
 func MatMulVecQ4_0(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if len(vec) != cols {
 		return nil, fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -99,7 +99,7 @@ func MatMulVecQ4_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ4_K умножает Q4_K-матрицу [rows×cols] на float32-вектор [cols]
+// MatMulVecQ4_K умножает Q4_K-матрицу [rows*cols] на float32-вектор [cols]
 func MatMulVecQ4_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if len(vec) != cols {
 		return nil, fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)

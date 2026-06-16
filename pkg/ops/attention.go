@@ -6,9 +6,9 @@ import (
 )
 
 // AttentionScores вычисляет scaled dot-product attention для одной позиции
-// q: [nHeads×headDim]
-// k: [seqLen×nKVHeads×headDim]
-// v: [seqLen×nKVHeads×headDim]
+// q: [nHeads*headDim]
+// k: [seqLen*nKVHeads*headDim]
+// v: [seqLen*nKVHeads*headDim]
 func AttentionScores(q, k, v []float32, seqLen, nHeads, nKVHeads, headDim int) ([]float32, error) {
 	if nHeads%nKVHeads != 0 {
 		return nil, fmt.Errorf("ops: nHeads=%d не кратно nKVHeads=%d", nHeads, nKVHeads)

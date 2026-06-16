@@ -30,7 +30,7 @@ func runServe(args []string) error {
 		return err
 	}
 
-	srv := server.New(engine)
+	srv := server.New(engine, *modelPath)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

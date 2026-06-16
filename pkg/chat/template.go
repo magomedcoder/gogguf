@@ -9,7 +9,7 @@ import (
 // Options задаёт параметры chat template
 type Options struct {
 	System   string
-	Thinking *bool // nil — выключено; true включает размышление
+	Thinking *bool // nil - выключено; true включает размышление
 	Metadata format.Metadata
 }
 

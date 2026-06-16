@@ -44,7 +44,7 @@ func (c *KVCache) Advance() {
 	c.length++
 }
 
-// KLayer возвращает K слоя [seqLen×kvDim]
+// KLayer возвращает K слоя [seqLen*kvDim]
 func (c *KVCache) KLayer(layer int) []float32 {
 	return c.layers[layer].k
 }

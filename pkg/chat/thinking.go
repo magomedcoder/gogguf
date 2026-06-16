@@ -30,7 +30,7 @@ func ThinkingTags(meta format.Metadata) (open, close string) {
 	return open, close
 }
 
-// EmptyThinkingBlock — hard switch Qwen3: пустой thinking-блок отключает размышление
+// EmptyThinkingBlock - hard switch Qwen3: пустой thinking-блок отключает размышление
 func EmptyThinkingBlock(meta format.Metadata) string {
 	open, close := ThinkingTags(meta)
 	return open + "\n\n" + close + "\n\n"
