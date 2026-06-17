@@ -42,18 +42,19 @@ type (
 	Engine         = runtime.Engine
 	Context        = runtime.Context
 	GenerateParams = runtime.GenerateParams
+	LoadOptions    = runtime.Options
 	SamplerFunc    = sampler.Func
 	SamplerConfig  = sampler.Config
 )
 
 // Load загружает модель и tokenizer из GGUF-файла
-func Load(path string) (*Engine, error) {
-	return runtime.Load(path)
+func Load(path string, opts LoadOptions) (*Engine, error) {
+	return runtime.Load(path, opts)
 }
 
 // LoadMapped загружает модель через mmap (zero-copy веса)
-func LoadMapped(path string) (*Engine, error) {
-	return runtime.LoadMapped(path)
+func LoadMapped(path string, opts LoadOptions) (*Engine, error) {
+	return runtime.LoadMapped(path, opts)
 }
 
 // NewSampler возвращает функцию выбора следующего токена (greedy, temperature, top-k, top-p)

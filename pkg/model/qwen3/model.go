@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/magomedcoder/gguf.go/pkg/format"
+	"github.com/magomedcoder/gguf.go/pkg/gpu"
 	"github.com/magomedcoder/gguf.go/pkg/ops"
 	"github.com/magomedcoder/gguf.go/pkg/weights"
 )
@@ -13,18 +14,27 @@ type Model struct {
 	cfg     Config
 	weights *weights.Store
 	cache   *KVCache
+	gpu     gpu.Backend
+	ngl     int
 }
 
 // Load создаёт Qwen3 из весов
-func Load(w *weights.Store) (*Model, error) {
+func Load(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
 	}
+
+	if ngl > cfg.NumLayers {
+		return nil, fmt.Errorf("qwen3: ngl=%d больше числа слоёв %d", ngl, cfg.NumLayers)
+	}
+
 	return &Model{
 		cfg:     cfg,
 		weights: w,
 		cache:   NewKVCache(cfg),
+		gpu:     g,
+		ngl:     ngl,
 	}, nil
 }
 
@@ -120,17 +130,17 @@ func (m *Model) forwardBlock(layer int, x []float32, pos int) ([]float32, error)
 		return nil, err
 	}
 
-	q, err := m.matmul(p+"attn_q.weight", m.cfg.NumHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, h)
+	q, err := m.matmul(p+"attn_q.weight", m.cfg.NumHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, h, layer)
 	if err != nil {
 		return nil, err
 	}
 
-	k, err := m.matmul(p+"attn_k.weight", m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, h)
+	k, err := m.matmul(p+"attn_k.weight", m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, h, layer)
 	if err != nil {
 		return nil, err
 	}
 
-	v, err := m.matmul(p+"attn_v.weight", m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, h)
+	v, err := m.matmul(p+"attn_v.weight", m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, h, layer)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +166,7 @@ func (m *Model) forwardBlock(layer int, x []float32, pos int) ([]float32, error)
 		return nil, err
 	}
 
-	attnOut, err := m.matmul(p+"attn_output.weight", m.cfg.EmbeddingDim, m.cfg.NumHeads*m.cfg.HeadDim, attn)
+	attnOut, err := m.matmul(p+"attn_output.weight", m.cfg.EmbeddingDim, m.cfg.NumHeads*m.cfg.HeadDim, attn, layer)
 	if err != nil {
 		return nil, err
 	}
@@ -172,18 +182,18 @@ func (m *Model) forwardBlock(layer int, x []float32, pos int) ([]float32, error)
 		return nil, err
 	}
 
-	gate, err := m.matmul(p+"ffn_gate.weight", m.cfg.FFNHidden, m.cfg.EmbeddingDim, h)
+	gate, err := m.matmul(p+"ffn_gate.weight", m.cfg.FFNHidden, m.cfg.EmbeddingDim, h, layer)
 	if err != nil {
 		return nil, err
 	}
 
-	up, err := m.matmul(p+"ffn_up.weight", m.cfg.FFNHidden, m.cfg.EmbeddingDim, h)
+	up, err := m.matmul(p+"ffn_up.weight", m.cfg.FFNHidden, m.cfg.EmbeddingDim, h, layer)
 	if err != nil {
 		return nil, err
 	}
 	hidden := ops.SwiGLU(gate, up)
 
-	down, err := m.matmul(p+"ffn_down.weight", m.cfg.EmbeddingDim, m.cfg.FFNHidden, hidden)
+	down, err := m.matmul(p+"ffn_down.weight", m.cfg.EmbeddingDim, m.cfg.FFNHidden, hidden, layer)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +203,11 @@ func (m *Model) forwardBlock(layer int, x []float32, pos int) ([]float32, error)
 	return x, nil
 }
 
-func (m *Model) matmul(name string, rows, cols int, vec []float32) ([]float32, error) {
+func (m *Model) matmul(name string, rows, cols int, vec []float32, layer int) ([]float32, error) {
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		return m.matmulGPU(name, rows, cols, vec)
+	}
+
 	raw, err := m.weights.Raw(name)
 	if err != nil {
 		return nil, err
@@ -219,6 +233,16 @@ func (m *Model) matmul(name string, rows, cols int, vec []float32) ([]float32, e
 
 		return ops.MatMulVec(f32, rows, cols, vec)
 	}
+}
+
+// matmulGPU выполняет matmul на GPU (веса деквантизуются в FP32 и кешируются на GPU)
+func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32, error) {
+	f32, err := m.weights.Floats(name)
+	if err != nil {
+		return nil, err
+	}
+
+	return m.gpu.MatMulVecCached(name, f32, rows, cols, vec)
 }
 
 func (m *Model) logits(x []float32) ([]float32, error) {

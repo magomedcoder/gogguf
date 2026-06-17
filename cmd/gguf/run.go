@@ -21,6 +21,7 @@ func runRun(args []string) error {
 	seed := fs.Uint64("seed", 0, "seed PRNG для sampling")
 	chat := fs.Bool("chat", false, "обернуть промпт в Qwen chat template")
 	thinking := fs.Bool("thinking", false, "Qwen3: включить режим размышления (с --chat)")
+	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -35,9 +36,12 @@ func runRun(args []string) error {
 
 	promptText := *prompt
 
-	engine, err := gguf.Load(*modelPath)
+	engine, err := gguf.Load(*modelPath, gguf.LoadOptions{NGL: *ngl})
 	if err != nil {
 		return err
+	}
+	if *ngl > 0 {
+		fmt.Fprintf(os.Stderr, "GPU offload: %d слоёв\n", *ngl)
 	}
 
 	if *chat {

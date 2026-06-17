@@ -11,28 +11,29 @@ type Engine struct {
 	Model model.Model
 	tok   *tokenizer.Tokenizer
 	meta  format.Metadata
+	opts  Options
 }
 
 // LoadMapped загружает модель через mmap (zero-copy веса)
-func LoadMapped(path string) (*Engine, error) {
+func LoadMapped(path string, opts Options) (*Engine, error) {
 	mr, err := format.OpenFileMapped(path)
 	if err != nil {
 		return nil, err
 	}
-	return loadFromReader(mr.Reader)
+	return loadFromReader(mr.Reader, opts)
 }
 
 // Load открывает GGUF-файл и загружает модель
-func Load(path string) (*Engine, error) {
+func Load(path string, opts Options) (*Engine, error) {
 	r, err := format.OpenFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return loadFromReader(r)
+	return loadFromReader(r, opts)
 }
 
-func loadFromReader(r *format.Reader) (*Engine, error) {
-	m, err := model.Load(r)
+func loadFromReader(r *format.Reader, opts Options) (*Engine, error) {
+	m, err := model.Load(r, opts.modelOpts())
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +47,12 @@ func loadFromReader(r *format.Reader) (*Engine, error) {
 		Model: m,
 		tok:   tok,
 		meta:  r.Metadata,
+		opts:  opts,
 	}, nil
+}
+
+func (e *Engine) LoadOptions() Options {
+	return e.opts
 }
 
 // Metadata возвращает KV-метаданные модели

@@ -13,7 +13,7 @@ func main() {
 		path = os.Args[1]
 	}
 
-	engine, err := gguf.Load(path)
+	engine, err := gguf.Load(path, gguf.LoadOptions{})
 	if err != nil {
 		panic(err)
 	}

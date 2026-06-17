@@ -16,6 +16,7 @@ func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	modelPath := fs.String("m", "", "путь к файлу GGUF")
 	addr := fs.String("addr", "127.0.0.1:8000", "адрес HTTP-сервера")
+	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -25,7 +26,7 @@ func runServe(args []string) error {
 		return fmt.Errorf("использование: gguf serve -m файл.gguf [--addr 127.0.0.1:8000]")
 	}
 
-	engine, err := gguf.Load(*modelPath)
+	engine, err := gguf.Load(*modelPath, gguf.LoadOptions{NGL: *ngl})
 	if err != nil {
 		return err
 	}

@@ -34,7 +34,7 @@ func modelPath(t *testing.T) string {
 }
 
 func TestTokenizerHello(t *testing.T) {
-	engine, err := gguf.Load(modelPath(t))
+	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestTokenizerHello(t *testing.T) {
 }
 
 func TestGreedyNextAfterChatPrefill(t *testing.T) {
-	engine, err := gguf.Load(modelPath(t))
+	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestGreedyNextAfterChatPrefill(t *testing.T) {
 }
 
 func TestGreedyGenerationShort(t *testing.T) {
-	engine, err := gguf.Load(modelPath(t))
+	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -114,12 +114,12 @@ func TestGreedyGenerationShort(t *testing.T) {
 func TestLoadMappedMatchesLoad(t *testing.T) {
 	path := modelPath(t)
 
-	engine, err := gguf.Load(path)
+	engine, err := gguf.Load(path, gguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
 
-	mapped, err := gguf.LoadMapped(path)
+	mapped, err := gguf.LoadMapped(path, gguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель через mmap: %v", err)
 	}
