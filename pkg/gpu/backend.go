@@ -11,6 +11,9 @@ type Backend interface {
 	// MatMulVecCached как MatMulVec, но matrix загружается на GPU один раз по name
 	MatMulVecCached(name string, matrix []float32, rows, cols int, vec []float32) ([]float32, error)
 
+	// MatMulVecQ8_0Cached matmul Q8_0-матрицы без деквантизации в FP32
+	MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
 	Close() error
 }
 

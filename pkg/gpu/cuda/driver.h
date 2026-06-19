@@ -81,8 +81,8 @@ void gguf_cuda_shutdown(cuda_driver_t *drv, CUcontext ctx);
 // gguf_cuda_last_error возвращает текст последней CUDA-ошибки (если доступен)
 const char *gguf_cuda_last_error(cuda_driver_t *drv, CUresult err);
 
-// gguf_cuda_load_module загружает PTX-модуль и находит kernel matmul_vec
-int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx, CUmodule *module, CUfunction *fn, char *errbuf, size_t errbuf_len);
+// gguf_cuda_load_module загружает PTX-модуль и находит kernels matmul_vec и matmul_vec_q8_0
+int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx, CUmodule *module, CUfunction *fn, CUfunction *fn_q8, char *errbuf, size_t errbuf_len);
 
 // gguf_cuda_upload_matrix загружает matrix на GPU
 int gguf_cuda_upload_matrix(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const float *matrix, int rows, int cols);
@@ -95,5 +95,11 @@ void gguf_cuda_free(cuda_driver_t *drv, CUdeviceptr ptr);
 
 // gguf_cuda_matmul_vec загружает matrix и запускает kernel (без кеша)
 int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *matrix, const float *vec, float *out, int rows, int cols);
+
+// gguf_cuda_upload_q8_0 загружает Q8_0-матрицу на GPU
+int gguf_cuda_upload_q8_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_matmul_vec_q8_0_device matmul Q8_0 с весами уже на GPU
+int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
 #endif

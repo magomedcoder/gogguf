@@ -66,7 +66,7 @@ CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
 
 `-ngl N` - matmul первых N transformer-слоёв на GPU (макс. `block_count` из `gguf inspect`; Qwen3-0.6B - 28).
 
-Сейчас на GPU только matmul (веса деквантизуются в FP32); attention, norm и RoPE - на CPU.
+Сейчас на GPU только matmul: Q8_0 без деквантизации в FP32, остальные типы — через FP32. Attention, norm и RoPE — на CPU. Q8_0 kernel требует GPU sm_70+.
 
 Без `-tags cuda` при `-ngl > 0` будет ошибка `gpu: CUDA недоступна`.
 

@@ -31,3 +31,16 @@ func TestModelsEmptyEngine(t *testing.T) {
 		t.Fatalf("path = %q, ожидали /models/test.gguf", resp.Models[0].Path)
 	}
 }
+
+func TestHandlerRoutes(t *testing.T) {
+	srv := New(&runtime.Engine{}, "")
+	h := srv.Handler()
+
+	for _, path := range []string{"/models"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: статус = %d, ожидали 200", path, rec.Code)
+		}
+	}
+}

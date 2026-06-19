@@ -125,7 +125,7 @@ enum {
 };
 
 int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
-	CUmodule *module, CUfunction *fn, char *errbuf, size_t errbuf_len) {
+	CUmodule *module, CUfunction *fn, CUfunction *fn_q8, char *errbuf, size_t errbuf_len) {
 	CUresult err;
 
 	if (drv->cuCtxSetCurrent) {
@@ -172,11 +172,21 @@ int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
 	err = drv->cuModuleGetFunction(fn, *module, "matmul_vec");
 	if (err != CUDA_SUCCESS) {
 		if (errbuf && errbuf_len > 0) {
-			snprintf(errbuf, errbuf_len, "cuModuleGetFunction: %s",	gguf_cuda_last_error(drv, err));
+			snprintf(errbuf, errbuf_len, "cuModuleGetFunction matmul_vec: %s", gguf_cuda_last_error(drv, err));
 		}
 		return -2;
 	}
-	
+
+	if (fn_q8) {
+		err = drv->cuModuleGetFunction(fn_q8, *module, "matmul_vec_q8_0");
+		if (err != CUDA_SUCCESS) {
+			if (errbuf && errbuf_len > 0) {
+				snprintf(errbuf, errbuf_len, "cuModuleGetFunction matmul_vec_q8_0: %s", gguf_cuda_last_error(drv, err));
+			}
+			return -3;
+		}
+	}
+
 	return 0;
 }
 
@@ -270,4 +280,76 @@ int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const
 	rc = gguf_cuda_matmul_vec_device(drv, ctx, fn, d_matrix, vec, out, rows, cols);
 	gguf_cuda_free(drv, d_matrix);
 	return rc;
+}
+
+int gguf_cuda_upload_q8_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix,
+	const void *raw, size_t nbytes) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (drv->cuMemAlloc(d_matrix, nbytes) != CUDA_SUCCESS) {
+		return -1;
+	}
+
+	if (drv->cuMemcpyHtoD(*d_matrix, raw, nbytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(*d_matrix);
+		*d_matrix = 0;
+		return -2;
+	}
+
+	return 0;
+}
+
+int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn,
+	CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	CUdeviceptr d_vec = 0;
+	CUdeviceptr d_out = 0;
+
+	size_t vec_bytes = (size_t)cols * sizeof(float);
+	size_t out_bytes = (size_t)rows * sizeof(float);
+
+	if (drv->cuMemAlloc(&d_vec, vec_bytes) != CUDA_SUCCESS) {
+		return -1;
+	}
+
+	if (drv->cuMemAlloc(&d_out, out_bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_vec);
+		return -2;
+	}
+
+	if (drv->cuMemcpyHtoD(d_vec, vec, vec_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	void *params[5];
+	params[0] = &d_matrix;
+	params[1] = &d_vec;
+	params[2] = &d_out;
+	params[3] = &rows;
+	params[4] = &cols;
+
+	unsigned int block = 256;
+	unsigned int grid = ((unsigned int)rows + block - 1) / block;
+
+	if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyDtoH(out, d_out, out_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	drv->cuMemFree(d_vec);
+	drv->cuMemFree(d_out);
+	return 0;
+
+fail:
+	drv->cuMemFree(d_vec);
+	drv->cuMemFree(d_out);
+	return -3;
 }
