@@ -1,0 +1,27 @@
+{
+  "model": "Qwen3-0.6B-Q8_0",
+  "cases": [
+    {
+      "name": "encode_hello",
+      "input": "Hello",
+      "encode": [9707]
+    },
+    {
+      "name": "raw_hello_greedy",
+      "input": "Hello",
+      "greedy_next": 1479,
+      "top_logits": [
+        {"id": 1479, "logit": 9.1345},
+        {"id": 477, "logit": 8.43},
+        {"id": 21806, "logit": 7.8983},
+        {"id": 64418, "logit": 7.8521},
+        {"id": 198, "logit": 7.5891}
+      ]
+    },
+    {
+      "name": "chat_hello_greedy",
+      "chat_user": "Hello",
+      "greedy_next": 9707
+    }
+  ]
+}

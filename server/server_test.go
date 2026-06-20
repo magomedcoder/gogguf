@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,25 @@ import (
 
 	"github.com/magomedcoder/gguf.go/pkg/runtime"
 )
+
+func TestHealth(t *testing.T) {
+	srv := New(&runtime.Engine{}, "")
+	rec := httptest.NewRecorder()
+	srv.handleHealth(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("статус = %d, ожидали 200", rec.Code)
+	}
+
+	var resp healthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("не удалось разобрать ответ: %v", err)
+	}
+
+	if resp.Status != "ok" {
+		t.Fatalf("status = %q, ожидали ok", resp.Status)
+	}
+}
 
 func TestModelsEmptyEngine(t *testing.T) {
 	srv := New(&runtime.Engine{}, "/models/test.gguf")
@@ -36,11 +56,22 @@ func TestHandlerRoutes(t *testing.T) {
 	srv := New(&runtime.Engine{}, "")
 	h := srv.Handler()
 
-	for _, path := range []string{"/models"} {
+	for _, path := range []string{"/health", "/models"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: статус = %d, ожидали 200", path, rec.Code)
 		}
+	}
+}
+
+func TestChatCompletionsBadRequest(t *testing.T) {
+	srv := New(&runtime.Engine{}, "")
+	body := bytes.NewBufferString(`{"messages":[]}`)
+	rec := httptest.NewRecorder()
+	srv.handleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("статус = %d, ожидали 400", rec.Code)
 	}
 }

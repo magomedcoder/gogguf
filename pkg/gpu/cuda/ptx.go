@@ -2,7 +2,7 @@
 
 package cuda
 
-// kernelsPTX — FP32 matmul_vec и Q8_0 matmul_vec_q8_0 (sm_70+, f16 scale)
+// kernelsPTX - FP32 matmul_vec и Q8_0 matmul_vec_q8_0 (sm_70+, f16 scale)
 const kernelsPTX = `.version 7.0
 .target sm_70
 .address_size 64

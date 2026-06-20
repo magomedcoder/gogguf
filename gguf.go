@@ -39,12 +39,13 @@ func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 // Inference (pkg/runtime, pkg/sampler)
 
 type (
-	Engine         = runtime.Engine
-	Context        = runtime.Context
-	GenerateParams = runtime.GenerateParams
-	LoadOptions    = runtime.Options
-	SamplerFunc    = sampler.Func
-	SamplerConfig  = sampler.Config
+	Engine            = runtime.Engine
+	Context           = runtime.Context
+	GenerationSession = runtime.GenerationSession
+	GenerateParams    = runtime.GenerateParams
+	LoadOptions       = runtime.Options
+	SamplerFunc       = sampler.Func
+	SamplerConfig     = sampler.Config
 )
 
 // Load загружает модель и tokenizer из GGUF-файла

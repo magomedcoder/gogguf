@@ -53,44 +53,16 @@ func (c *Context) Generate(prompt string, params GenerateParams) (string, error)
 		params.MaxTokens = 128
 	}
 
-	c.engine.Model.ResetCache()
-
-	promptTokens, err := c.tok.Encode(prompt)
+	sess, err := c.StartGeneration(prompt)
 	if err != nil {
 		return "", err
 	}
 
-	logits, err := c.engine.Model.Forward(promptTokens, 0)
-	if err != nil {
+	if err := sess.GenerateSteps(params.MaxTokens, params.Sampler, params.OnToken); err != nil {
 		return "", err
 	}
 
-	var generated []int
-	eos := c.tok.EOS()
-
-	for i := 0; i < params.MaxTokens; i++ {
-		next := params.Sampler(logits)
-		if next < 0 {
-			break
-		}
-
-		if eos >= 0 && next == eos {
-			break
-		}
-
-		generated = append(generated, next)
-		if params.OnToken != nil && !params.OnToken(next) {
-			break
-		}
-
-		startPos := len(promptTokens) + len(generated) - 1
-		logits, err = c.engine.Model.Forward([]int{next}, startPos)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	return c.tok.Decode(generated), nil
+	return sess.GeneratedText(), nil
 }
 
 // GenerateStream пишет сгенерированные token IDs в w по мере decode

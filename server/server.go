@@ -30,6 +30,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/models", s.handleModels)
 	mux.HandleFunc("/generate", s.handleGenerate)
+	mux.HandleFunc("/completion", s.handleGenerate)
+	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
 	return mux
 }
 
@@ -71,12 +73,12 @@ type healthResponse struct {
 }
 
 type modelInfo struct {
-	ID             string `json:"id"`
-	Path           string `json:"path,omitempty"`
-	Architecture   string `json:"architecture,omitempty"`
-	Name           string `json:"name,omitempty"`
-	ContextLength  int    `json:"context_length,omitempty"`
-	ChatTemplate   bool   `json:"chat_template"`
+	ID            string `json:"id"`
+	Path          string `json:"path,omitempty"`
+	Architecture  string `json:"architecture,omitempty"`
+	Name          string `json:"name,omitempty"`
+	ContextLength int    `json:"context_length,omitempty"`
+	ChatTemplate  bool   `json:"chat_template"`
 }
 
 type modelsResponse struct {

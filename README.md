@@ -66,7 +66,7 @@ CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
 
 `-ngl N` - matmul первых N transformer-слоёв на GPU (макс. `block_count` из `gguf inspect`; Qwen3-0.6B - 28).
 
-Сейчас на GPU только matmul: Q8_0 без деквантизации в FP32, остальные типы — через FP32. Attention, norm и RoPE — на CPU. Q8_0 kernel требует GPU sm_70+.
+Сейчас на GPU только matmul: Q8_0 без деквантизации в FP32, остальные типы - через FP32. Attention, norm и RoPE - на CPU. Q8_0 kernel требует GPU sm_70+.
 
 Без `-tags cuda` при `-ngl > 0` будет ошибка `gpu: CUDA недоступна`.
 
@@ -202,10 +202,12 @@ Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 
 #### API
 
-| Метод | Путь        | Описание                        |
-|-------|-------------|---------------------------------|
-| GET   | `/models`   | метаданные загруженной модели   |
-| POST  | `/generate` | генерация текста (JSON или SSE) |
+| Метод | Путь                   | Описание                        |
+|-------|------------------------|---------------------------------|
+| GET   | `/models`              | метаданные загруженной модели   |
+| POST  | `/generate`            | генерация текста (JSON или SSE) |
+| POST  | `/completion`          | алиас `/generate`               |
+| POST  | `/v1/chat/completions` | chat API (messages + stream)    |
 
 Тело `POST /generate` (`Content-Type: application/json`):
 
@@ -241,6 +243,29 @@ curl -s localhost:8000/generate -H 'Content-Type: application/json' -d '{"prompt
 curl -N localhost:8000/generate -H 'Content-Type: application/json' -d '{"prompt":"Привет","chat":true,"stream":true,"max_tokens":32}'
 
 curl -s localhost:8000/models
+
+curl -s localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{"messages":[{"role":"user","content":"Привет"}],"max_tokens":32}'
+```
+
+Пример ответа `/v1/chat/completions`:
+
+```json
+{
+  "object": "chat.completion",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "..."
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 5,
+    "total_tokens": 15
+  }
+}
 ```
 
 ---
@@ -284,6 +309,20 @@ text, err := ctx.Generate(prompt, gguf.GenerateParams{
   MaxTokens: 128,
   Sampler:   gguf.Greedy,
 })
+```
+
+### Пошаговый decode
+
+```go
+sess, err := ctx.StartGeneration(prompt)
+for i := 0; i < maxTokens; i++ {
+  id, err := sess.DecodeStep(gguf.Greedy)
+  if id < 0 {
+    break
+  }
+
+  fmt.Print(sess.DecodeToken(id))
+}
 ```
 
 ### Sampling с temperature / top-k / top-p
