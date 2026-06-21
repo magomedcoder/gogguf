@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/magomedcoder/gguf.go/pkg/chat/jinja"
 	"github.com/magomedcoder/gguf.go/pkg/format"
 )
 
@@ -16,22 +17,28 @@ const (
 	defaultThinkingClose = " "
 )
 
-// Render форматирует диалог в ChatML/Qwen-стиле
-// Использует messages и add_generation_prompt; наличие tokenizer.chat_template в метаданных проверяется через HasTemplateMeta, Jinja не парсится
-func Render(meta format.Metadata, messages []Message, addGenerationPrompt bool) (string, error) {
-	if !HasTemplateMeta(meta) {
+// Render форматирует диалог через Jinja2 tokenizer.chat_template из метаданных
+func Render(meta format.Metadata, messages []Message, addGenerationPrompt bool, opts Options) (string, error) {
+	tmpl, err := meta.String("tokenizer.chat_template")
+	if err != nil {
 		return "", fmt.Errorf("chat: tokenizer.chat_template не найден")
 	}
 
-	return renderChatML(messages, addGenerationPrompt), nil
+	ctx := jinjaContext(messages, addGenerationPrompt, opts)
+	out, err := jinja.Render(tmpl, ctx)
+	if err != nil {
+		return renderChatML(messages, addGenerationPrompt, opts), nil
+	}
+
+	return out, nil
 }
 
 // RenderFromReader рендерит prompt из GGUF reader
-func RenderFromReader(r *format.Reader, messages []Message, addGenerationPrompt bool) (string, error) {
-	return Render(r.Metadata, messages, addGenerationPrompt)
+func RenderFromReader(r *format.Reader, messages []Message, addGenerationPrompt bool, opts Options) (string, error) {
+	return Render(r.Metadata, messages, addGenerationPrompt, opts)
 }
 
-func renderChatML(messages []Message, addGenerationPrompt bool) string {
+func renderChatML(messages []Message, addGenerationPrompt bool, opts Options) string {
 	var b strings.Builder
 
 	for _, msg := range messages {
@@ -42,7 +49,7 @@ func renderChatML(messages []Message, addGenerationPrompt bool) string {
 	}
 
 	if addGenerationPrompt {
-		writeAssistantPrompt(&b, true, nil)
+		writeAssistantPrompt(&b, ThinkingEnabled(opts), opts.Metadata)
 	}
 
 	return b.String()

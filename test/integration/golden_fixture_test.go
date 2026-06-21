@@ -18,12 +18,14 @@ type goldenFile struct {
 }
 
 type goldenCase struct {
-	Name       string        `json:"name"`
-	Input      string        `json:"input,omitempty"`
-	ChatUser   string        `json:"chat_user,omitempty"`
-	Encode     []int         `json:"encode,omitempty"`
-	GreedyNext int           `json:"greedy_next,omitempty"`
-	TopLogits  []goldenLogit `json:"top_logits,omitempty"`
+	Name         string        `json:"name"`
+	Input        string        `json:"input,omitempty"`
+	ChatUser     string        `json:"chat_user,omitempty"`
+	Encode       []int         `json:"encode,omitempty"`
+	GreedyNext   int           `json:"greedy_next,omitempty"`
+	GreedyTokens []int         `json:"greedy_tokens,omitempty"`
+	MaxTokens    int           `json:"max_tokens,omitempty"`
+	TopLogits    []goldenLogit `json:"top_logits,omitempty"`
 }
 
 type goldenLogit struct {
@@ -84,6 +86,44 @@ func TestGoldenFixture(t *testing.T) {
 				for i := range ids {
 					if ids[i] != tc.Encode[i] {
 						t.Fatalf("Encode(%q)[%d] = %d, ожидали %d", tc.Input, i, ids[i], tc.Encode[i])
+					}
+				}
+
+			case tc.ChatUser != "" && len(tc.GreedyTokens) > 0:
+				prompt, err := chat.FormatUser(tc.ChatUser, chat.Options{
+					Metadata: engine.Metadata(),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				ctx, err := engine.NewContext()
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				sess, err := ctx.StartGeneration(prompt)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				maxTok := tc.MaxTokens
+				if maxTok <= 0 {
+					maxTok = len(tc.GreedyTokens)
+				}
+
+				if err := sess.GenerateSteps(maxTok, gguf.Greedy, nil); err != nil {
+					t.Fatal(err)
+				}
+
+				got := sess.GeneratedTokens()
+				if len(got) != len(tc.GreedyTokens) {
+					t.Fatalf("greedy tokens = %v (len %d), ожидали %v (len %d)", got, len(got), tc.GreedyTokens, len(tc.GreedyTokens))
+				}
+
+				for i := range got {
+					if got[i] != tc.GreedyTokens[i] {
+						t.Fatalf("token[%d] = %d, ожидали %d (full: %v)", i, got[i], tc.GreedyTokens[i], got)
 					}
 				}
 

@@ -52,9 +52,9 @@ func FormatUser(user string, opts Options) (string, error) {
 	}
 
 	if opts.Metadata != nil && HasTemplateMeta(opts.Metadata) {
-		prompt, err := Render(opts.Metadata, msgs, true)
+		prompt, err := Render(opts.Metadata, msgs, true, opts)
 		if err == nil {
-			return applyThinkingMode(prompt, ThinkingEnabled(opts), opts.Metadata), nil
+			return prompt, nil
 		}
 	}
 

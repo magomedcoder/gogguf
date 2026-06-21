@@ -64,6 +64,13 @@ func (s *GenerationSession) DecodeStep(samp sampler.Func) (int, error) {
 	return next, nil
 }
 
+// GeneratedTokens возвращает ID сгенерированных токенов
+func (s *GenerationSession) GeneratedTokens() []int {
+	out := make([]int, len(s.generated))
+	copy(out, s.generated)
+	return out
+}
+
 // GeneratedText возвращает текст сгенерированных токенов
 func (s *GenerationSession) GeneratedText() string {
 	return s.ctx.tok.Decode(s.generated)
