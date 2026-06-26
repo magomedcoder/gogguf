@@ -19,13 +19,9 @@ func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, erro
 
 	out := make([]float32, rows)
 	for r := range rows {
-		row := matrix[r*cols : (r+1)*cols]
-		var sum float32
-		for c := range cols {
-			sum += row[c] * vec[c]
-		}
-		out[r] = sum
+		out[r] = dot(matrix[r*cols:(r+1)*cols], vec)
 	}
+
 	return out, nil
 }
 

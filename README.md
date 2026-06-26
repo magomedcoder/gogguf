@@ -16,6 +16,7 @@
 - парсинг GGUF v2/v3 (`info`, `inspect`), memory-map (`LoadMapped`, zero-copy `RawView`);
 - деквантизация и matmul: Q8_0, Q4_0, Q4_K;
 - базовые ops: RoPE, RMSNorm, GQA attention, SwiGLU;
+- **SIMD** matmul FP32: AVX2 (amd64), NEON (arm64);
 - forward pass **Qwen3** + KV-cache;
 - tokenizer BPE из метаданных GGUF;
 - chat template ChatML/Qwen и Jinja (`--chat`, `--thinking`, `FormatChatUser`);
@@ -50,4 +51,5 @@ go build -o build/gguf ./cmd/gguf
 | [docs/api.md](docs/api.md)                 | HTTP API сервера                       |
 | [docs/library.md](docs/library.md)         | Inference из Go-кода                   |
 | [docs/tools.md](docs/tools.md)             | `debugtok`, `vocab`, `bench`           |
+| [docs/testing.md](docs/testing.md)         | Golden-тесты, сверка с llama.cpp       |
 | [docs/GGUF-FORMAT.md](docs/GGUF-FORMAT.md) | Формат GGUF                            |
