@@ -1,6 +1,6 @@
-# Library usage
+# Использование как библиотеки
 
-[Русская версия](library-ru.md)
+[English version](library.md)
 
 ## Inference
 
@@ -8,11 +8,11 @@
 import "github.com/magomedcoder/gguf.go"
 
 engine, err := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
-	NGL: 0, // matmul N layers on GPU; <= block_count, CUDA build required
+	NGL: 0, // matmul N слоёв на GPU; <= block_count, нужна CUDA-сборка
 })
 ctx, err := engine.NewContext()
 
-prompt, err := gguf.FormatChatUser("Hello", gguf.ChatOptions{
+prompt, err := gguf.FormatChatUser("Привет", gguf.ChatOptions{
 	Metadata: engine.Metadata(),
 })
 text, err := ctx.Generate(prompt, gguf.GenerateParams{
@@ -21,7 +21,7 @@ text, err := ctx.Generate(prompt, gguf.GenerateParams{
 })
 ```
 
-## Step-by-step decode
+## Пошаговый decode
 
 ```go
 sess, err := ctx.StartGeneration(prompt)
@@ -35,7 +35,7 @@ for i := 0; i < maxTokens; i++ {
 }
 ```
 
-## Sampling with temperature / top-k / top-p / min-p
+## Sampling с temperature / top-k / top-p / min-p
 
 ```go
 sampler := gguf.NewSampler(gguf.SamplerConfig{
@@ -53,7 +53,7 @@ text, err := ctx.Generate(prompt, gguf.GenerateParams{
 })
 ```
 
-## Load via mmap (zero-copy weights)
+## Загрузка через mmap (zero-copy веса)
 
 ```go
 engine, err := gguf.LoadMapped("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
@@ -61,15 +61,15 @@ engine, err := gguf.LoadMapped("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions
 })
 ```
 
-## GPU offload from code
+## GPU offload из кода
 
 ```go
 engine, err := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
-	NGL: 28, // requires build with -tags cuda
+	NGL: 28, // нужна сборка -tags cuda
 })
 ```
 
-## Parse GGUF without inference
+## Парсинг GGUF без inference
 
 ```go
 import "github.com/magomedcoder/gguf.go"
@@ -79,7 +79,7 @@ r, err := gguf.OpenFile("./models/Qwen3-0.6B-Q8_0.gguf")
 arch, _ := r.Metadata.String("general.architecture")
 ```
 
-## HTTP server from code
+## HTTP-сервер из кода
 
 ```go
 import (

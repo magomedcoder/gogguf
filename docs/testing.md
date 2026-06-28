@@ -1,27 +1,29 @@
-# Тестирование и сверка с llama.cpp
+# Testing and llama.cpp comparison
 
-**gguf.go** сверяется с [llama.cpp](https://github.com/ggerganov/llama.cpp) через golden-тесты и опциональный скрипт
+[Русская версия](testing-ru.md)
 
-## Unit- и integration-тесты
+**gguf.go** is validated against llama.cpp using golden tests and an optional script.
+
+## Unit and integration tests
 
 ```bash
 go test ./...
 
-# с моделью Qwen3-0.6B-Q8_0.gguf
+# with Qwen3-0.6B-Q8_0.gguf
 go test -tags=integration ./test/integration/...
 ```
 
-Переменная `GGUF_MODEL` - путь к `.gguf`, если файл не в `models/`
+Set `GGUF_MODEL` to the `.gguf` path if the file is not in `models/`.
 
 ### Golden fixture
 
-`test/fixtures/qwen3_golden.json` - эталон для:
+`test/fixtures/qwen3_golden.json` - reference for:
 
-- encode промпта;
-- greedy-токены после chat-prefill;
-- 50 greedy decode-токенов.
+- prompt encoding;
+- greedy tokens after chat prefill;
+- 50 greedy decode tokens.
 
-Запуск:
+Run:
 
 ```bash
 go test -tags=integration ./test/integration/ -run Golden
@@ -32,43 +34,42 @@ go test -tags=integration ./test/integration/ -run Golden
 ```bash
 go test -bench=. ./pkg/ops/...
 
-go run ./cmd/bench -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 128
+go run ./cmd/bench -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 128
 ```
 
-## Сверка с llama.cpp
+## llama.cpp comparison
 
-Требуется собранный `llama-cli` из llama.cpp в `PATH` или переменная `LLAMA_CLI`.
+Requires `llama-cli` from llama.cpp in `PATH`, or set `LLAMA_CLI`.
 
 ```bash
 ./test/compare-llama-cpp.sh models/Qwen3-0.6B-Q8_0.gguf
 ```
 
-Скрипт:
+The script:
 
-1. Запускает greedy decode в llama.cpp (50 токенов, chat-промпт из fixture).
-2. Запускает тот же сценарий через `go test -tags=integration`.
-3. Сравнивает token id.
+1. Runs golden integration tests (reference from llama.cpp in the fixture).
+2. Optionally runs an llama.cpp smoke test if `llama-cli` is available.
 
-Если `llama-cli` не найден - скрипт завершается с кодом 0 и сообщением «пропуск».
+If `llama-cli` is not found - exits with code 0 and a skip message.
 
-### Ручная сверка logits
-
-```bash
-go run ./cmd/debugtok ./models/Qwen3-0.6B-Q8_0.gguf "Привет"
-```
-
-Сравните top-5 и greedy next с:
+### Manual logit comparison
 
 ```bash
-llama-cli -m model.gguf -p "Привет" --temp 0 -n 0 --log-disable 2>/dev/null
+go run ./cmd/debugtok ./models/Qwen3-0.6B-Q8_0.gguf "Hello"
 ```
 
-Для chat-промпта Qwen3 используйте `--chat` / chat template в обоих инструментах
+Compare top-5 and greedy next with:
 
-## Допустимое расхождение
+```bash
+llama-cli -m model.gguf -p "Hello" --temp 0 -n 0 --log-disable 2>/dev/null
+```
 
-| Уровень       | Критерий                             |
-|---------------|--------------------------------------|
-| Tokenizer     | token id совпадают                   |
-| Greedy decode | полное совпадение последовательности |
-| Logits        | цель: abs diff < 1e-4 (в работе)     |
+For Qwen3 chat prompts use `--chat` / chat template in both tools.
+
+## Acceptable drift
+
+| Level         | Criterion                             |
+|---------------|---------------------------------------|
+| Tokenizer     | token IDs match                       |
+| Greedy decode | full sequence match                   |
+| Logits        | target: abs diff < 1e-4 (in progress) |
