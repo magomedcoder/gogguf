@@ -46,6 +46,7 @@ Text generation: prompt prefill -> autoregressive decode -> stdout.
 | `--seed`           | `0`     | PRNG seed                                       |
 | `--chat`           | `false` | wrap prompt in ChatML/Qwen template             |
 | `--thinking`       | `false` | Qwen3 thinking mode (with `--chat`)             |
+| `-i`               | `false` | interactive REPL (stdin)                        |
 | `-ngl`             | `0`     | matmul N transformer layers on GPU (CUDA build) |
 
 For **Qwen3 Instruct** use `--chat`, otherwise the model will respond incorrectly.
@@ -53,8 +54,7 @@ For **Qwen3 Instruct** use `--chat`, otherwise the model will respond incorrectl
 Sampling example:
 
 ```bash
-./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 64 \
-  --temp 0.7 --top-k 40 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.1 --seed 42
+./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 64 --temp 0.7 --top-k 40 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.1 --seed 42
 ```
 
 With thinking mode:
@@ -67,6 +67,12 @@ With GPU offload (28 layers, CUDA build):
 
 ```bash
 ./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -ngl 28
+```
+
+Interactive mode:
+
+```bash
+./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -i
 ```
 
 ## `gguf serve`

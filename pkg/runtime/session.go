@@ -23,6 +23,10 @@ func (c *Context) StartGeneration(prompt string) (*GenerationSession, error) {
 		return nil, err
 	}
 
+	if ctxLen := c.engine.ContextLength(); ctxLen > 0 && len(promptTokens) > ctxLen {
+		return nil, fmt.Errorf("runtime: промпт %d токенов превышает context_length=%d", len(promptTokens), ctxLen)
+	}
+
 	logits, err := c.engine.Model.Forward(promptTokens, 0)
 	if err != nil {
 		return nil, err
@@ -62,6 +66,10 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 	s.generated = append(s.generated, next)
 
 	startPos := len(s.promptTokens) + len(s.generated) - 1
+	if ctxLen := s.ctx.engine.ContextLength(); ctxLen > 0 && startPos >= ctxLen {
+		return -1, fmt.Errorf("runtime: позиция %d >= context_length=%d", startPos, ctxLen)
+	}
+
 	logits, err := s.ctx.engine.Model.Forward([]int{next}, startPos)
 	if err != nil {
 		return -1, err

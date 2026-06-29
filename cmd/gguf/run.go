@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/magomedcoder/gguf.go"
 	chattmpl "github.com/magomedcoder/gguf.go/pkg/chat"
@@ -24,6 +27,7 @@ func runRun(args []string) error {
 	seed := fs.Uint64("seed", 0, "seed PRNG для sampling")
 	chat := fs.Bool("chat", false, "обернуть промпт в Qwen chat template")
 	thinking := fs.Bool("thinking", false, "Qwen3: включить режим размышления (с --chat)")
+	interactive := fs.Bool("i", false, "интерактивный режим (REPL)")
 	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
 
 	if err := fs.Parse(args); err != nil {
@@ -31,13 +35,11 @@ func runRun(args []string) error {
 	}
 
 	if *modelPath == "" {
-		return fmt.Errorf("использование: gguf run -m файл.gguf -p \"промпт\" [-n 128] [--temp 0.7] [--top-k 40] [--top-p 0.9] [--seed 42]")
+		return fmt.Errorf("использование: gguf run -m файл.gguf -p \"промпт\" [-n 128] [-i]")
 	}
-	if *prompt == "" {
-		return fmt.Errorf("укажите промпт через -p")
+	if !*interactive && *prompt == "" {
+		return fmt.Errorf("укажите промпт через -p или используйте -i")
 	}
-
-	promptText := *prompt
 
 	engine, err := gguf.Load(*modelPath, gguf.LoadOptions{NGL: *ngl})
 	if err != nil {
@@ -45,17 +47,6 @@ func runRun(args []string) error {
 	}
 	if *ngl > 0 {
 		fmt.Fprintf(os.Stderr, "GPU offload: %d слоёв\n", *ngl)
-	}
-
-	if *chat {
-		var err error
-		promptText, err = chattmpl.FormatUser(*prompt, chattmpl.Options{
-			Metadata: engine.Metadata(),
-			Thinking: thinking,
-		})
-		if err != nil {
-			return err
-		}
 	}
 
 	ctx, err := engine.NewContext()
@@ -71,16 +62,67 @@ func runRun(args []string) error {
 		Seed: *seed,
 	})
 
-	err = ctx.GenerateStream(promptText, gguf.GenerateParams{
+	genParams := gguf.GenerateParams{
 		MaxTokens:     *maxTokens,
 		Sampler:       samp,
 		RepeatPenalty: float32(*repeatPenalty),
 		RepeatLastN:   *repeatLastN,
-	}, os.Stdout)
+	}
+
+	if *interactive {
+		return runInteractive(ctx, engine, *chat, thinking, genParams, os.Stdin, os.Stdout)
+	}
+
+	promptText, err := formatPrompt(engine, *prompt, *chat, thinking)
 	if err != nil {
+		return err
+	}
+
+	if err := ctx.GenerateStream(promptText, genParams, os.Stdout); err != nil {
 		return err
 	}
 
 	fmt.Fprintln(os.Stdout)
 	return nil
+}
+
+func formatPrompt(engine *gguf.Engine, user string, chat bool, thinking *bool) (string, error) {
+	if !chat {
+		return user, nil
+	}
+
+	return chattmpl.FormatUser(user, chattmpl.Options{
+		Metadata: engine.Metadata(),
+		Thinking: thinking,
+	})
+}
+
+func runInteractive(ctx *gguf.Context, engine *gguf.Engine, chat bool, thinking *bool, params gguf.GenerateParams, in io.Reader, out io.Writer) error {
+	fmt.Fprintln(os.Stderr, "Интерактивный режим. Пустая строка или Ctrl+D - выход")
+	scanner := bufio.NewScanner(in)
+
+	for {
+		fmt.Fprint(os.Stderr, "> ")
+		if !scanner.Scan() {
+			break
+		}
+
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			break
+		}
+
+		prompt, err := formatPrompt(engine, line, chat, thinking)
+		if err != nil {
+			return err
+		}
+
+		if err := ctx.GenerateStream(prompt, params, out); err != nil {
+			return err
+		}
+
+		fmt.Fprintln(out)
+	}
+
+	return scanner.Err()
 }

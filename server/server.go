@@ -28,6 +28,7 @@ func New(engine *runtime.Engine, modelPath string) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/models", s.handleModels)
 	mux.HandleFunc("/generate", s.handleGenerate)
 	mux.HandleFunc("/completions", s.handleChatCompletions)
@@ -82,6 +83,10 @@ type modelInfo struct {
 
 type modelsResponse struct {
 	Models []modelInfo `json:"models"`
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, healthResponse{Status: "ok"})
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, _ *http.Request) {

@@ -65,6 +65,16 @@ func (e *Engine) Tokenizer() *tokenizer.Tokenizer {
 	return e.tok
 }
 
+// ContextLength возвращает максимальную длину контекста из метаданных (0 если неизвестно)
+func (e *Engine) ContextLength() int {
+	arch, err := e.meta.String("general.architecture")
+	if err != nil || arch == "" {
+		return 0
+	}
+
+	return e.meta.IntOptional(arch+".context_length", 0)
+}
+
 // ForwardTokenIDs выполняет forward pass для token IDs
 func (e *Engine) ForwardTokenIDs(tokens []int, startPos int) ([]float32, error) {
 	return e.Model.Forward(tokens, startPos)

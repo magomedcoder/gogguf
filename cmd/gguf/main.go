@@ -11,6 +11,7 @@ const usage = `gguf - система запуска GGUF-моделей на Go 
   gguf inspect файл.gguf          просмотр метаданных и тензоров
   gguf info -m файл.gguf          краткая информация о модели
   gguf run -m файл.gguf -p "..."  генерация текста
+  gguf run -m файл.gguf -i        интерактивный режим (REPL)
   gguf serve -m файл.gguf         HTTP API (SSE streaming)
 `
 

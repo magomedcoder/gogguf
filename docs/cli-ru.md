@@ -46,6 +46,7 @@
 | `--seed`           | `0`          | seed PRNG                                       |
 | `--chat`           | `false`      | обернуть промпт в ChatML/Qwen template          |
 | `--thinking`       | `false`      | режим размышления Qwen3 (с `--chat`)            |
+| `-i`               | `false`      | интерактивный режим (REPL)                      |
 | `-ngl`             | `0`          | matmul N transformer-слоёв на GPU (CUDA-сборка) |
 
 Для **Qwen3 Instruct** используйте `--chat`, иначе модель ответит некорректно.
@@ -66,6 +67,12 @@
 
 ```bash
 ./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -ngl 28
+```
+
+Интерактивный режим:
+
+```bash
+./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -i
 ```
 
 ## `gguf serve`
