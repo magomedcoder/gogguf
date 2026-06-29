@@ -69,7 +69,7 @@ With GPU offload (28 layers, CUDA build):
 ./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -ngl 28
 ```
 
-Interactive mode:
+Interactive mode (with `--chat`, history is kept across turns; `/clear` resets it):
 
 ```bash
 ./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -i

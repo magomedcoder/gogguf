@@ -138,10 +138,7 @@ func RMSNorm(x, weight []float32, eps float32) ([]float32, error) {
 		return nil, fmt.Errorf("ops: x и weight разной длины")
 	}
 
-	var sumSq float32
-	for _, v := range x {
-		sumSq += v * v
-	}
+	sumSq := dot(x, x)
 	scale := float32(1) / float32(math.Sqrt(float64(sumSq/float32(len(x))+eps)))
 
 	out := make([]float32, len(x))

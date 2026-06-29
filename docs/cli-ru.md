@@ -69,7 +69,7 @@
 ./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -ngl 28
 ```
 
-Интерактивный режим:
+Интерактивный режим (с `--chat` история диалога сохраняется между репликами; `/clear` - сброс):
 
 ```bash
 ./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -i

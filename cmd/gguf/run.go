@@ -91,14 +91,28 @@ func formatPrompt(engine *gguf.Engine, user string, chat bool, thinking *bool) (
 		return user, nil
 	}
 
-	return chattmpl.FormatUser(user, chattmpl.Options{
-		Metadata: engine.Metadata(),
+	return formatChatHistory(engine.Metadata(), []chattmpl.Message{
+		{
+			Role:    "user",
+			Content: user,
+		},
+	}, thinking)
+}
+
+func formatChatHistory(meta map[string]any, messages []chattmpl.Message, thinking *bool) (string, error) {
+	return chattmpl.FormatMessages(messages, chattmpl.Options{
+		Metadata: meta,
 		Thinking: thinking,
 	})
 }
 
 func runInteractive(ctx *gguf.Context, engine *gguf.Engine, chat bool, thinking *bool, params gguf.GenerateParams, in io.Reader, out io.Writer) error {
 	fmt.Fprintln(os.Stderr, "Интерактивный режим. Пустая строка или Ctrl+D - выход")
+	if chat {
+		fmt.Fprintln(os.Stderr, "Команды: /clear - сбросить историю диалога")
+	}
+
+	var messages []chattmpl.Message
 	scanner := bufio.NewScanner(in)
 
 	for {
@@ -111,17 +125,42 @@ func runInteractive(ctx *gguf.Context, engine *gguf.Engine, chat bool, thinking 
 		if line == "" {
 			break
 		}
+		if chat && line == "/clear" {
+			messages = nil
+			fmt.Fprintln(os.Stderr, "История очищена")
+			continue
+		}
 
-		prompt, err := formatPrompt(engine, line, chat, thinking)
+		var prompt string
+		var err error
+		if chat {
+			messages = append(messages, chattmpl.Message{
+				Role:    "user",
+				Content: line,
+			})
+			prompt, err = formatChatHistory(engine.Metadata(), messages, thinking)
+		} else {
+			prompt, err = formatPrompt(engine, line, false, thinking)
+		}
 		if err != nil {
 			return err
 		}
 
-		if err := ctx.GenerateStream(prompt, params, out); err != nil {
+		var reply strings.Builder
+		if err := ctx.GenerateStream(prompt, params, io.MultiWriter(out, &reply)); err != nil {
+			if chat {
+				messages = messages[:len(messages)-1]
+			}
 			return err
 		}
 
 		fmt.Fprintln(out)
+		if chat {
+			messages = append(messages, chattmpl.Message{
+				Role:    "assistant",
+				Content: reply.String(),
+			})
+		}
 	}
 
 	return scanner.Err()
