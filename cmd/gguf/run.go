@@ -112,6 +112,7 @@ func runInteractive(ctx *gguf.Context, engine *gguf.Engine, chat bool, thinking 
 		fmt.Fprintln(os.Stderr, "Команды: /clear - сбросить историю диалога")
 	}
 
+	conv := ctx.NewConversation()
 	var messages []chattmpl.Message
 	scanner := bufio.NewScanner(in)
 
@@ -127,6 +128,7 @@ func runInteractive(ctx *gguf.Context, engine *gguf.Engine, chat bool, thinking 
 		}
 		if chat && line == "/clear" {
 			messages = nil
+			conv.Reset()
 			fmt.Fprintln(os.Stderr, "История очищена")
 			continue
 		}
@@ -147,7 +149,7 @@ func runInteractive(ctx *gguf.Context, engine *gguf.Engine, chat bool, thinking 
 		}
 
 		var reply strings.Builder
-		if err := ctx.GenerateStream(prompt, params, io.MultiWriter(out, &reply)); err != nil {
+		if err := conv.GenerateStream(prompt, params, io.MultiWriter(out, &reply)); err != nil {
 			if chat {
 				messages = messages[:len(messages)-1]
 			}

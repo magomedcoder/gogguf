@@ -122,7 +122,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ctx, err := s.engine.NewContext()
+	conv, err := s.conversation()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -142,20 +142,24 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Stream {
-		s.serveChatStream(w, ctx, prompt, modelName, genParams)
+		s.serveChatStream(w, conv, prompt, modelName, genParams)
 		return
 	}
 
-	sess, err := ctx.StartGeneration(prompt)
+	snap := conv.TokenCount()
+	sess, err := conv.StartGeneration(prompt)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := sess.GenerateSteps(genParams); err != nil {
+		conv.Rollback(snap)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	conv.Commit(sess)
 
 	text := sess.GeneratedText()
 	writeJSON(w, chatCompletionResponse{
@@ -179,7 +183,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) serveChatStream(w http.ResponseWriter, ctx *runtime.Context, prompt, model string, params runtime.GenerateParams) {
+func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming не поддерживается", http.StatusInternalServerError)
@@ -209,7 +213,8 @@ func (s *Server) serveChatStream(w http.ResponseWriter, ctx *runtime.Context, pr
 		flusher.Flush()
 	}
 
-	sess, err := ctx.StartGeneration(prompt)
+	snap := conv.TokenCount()
+	sess, err := conv.StartGeneration(prompt)
 	if err != nil {
 		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
 		flusher.Flush()
@@ -229,10 +234,13 @@ func (s *Server) serveChatStream(w http.ResponseWriter, ctx *runtime.Context, pr
 
 	err = sess.GenerateSteps(params)
 	if err != nil {
+		conv.Rollback(snap)
 		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
 		flusher.Flush()
 		return
 	}
+
+	conv.Commit(sess)
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()

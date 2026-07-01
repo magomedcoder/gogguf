@@ -17,6 +17,7 @@ type Server struct {
 	engine    *runtime.Engine
 	modelPath string
 	mu        sync.Mutex
+	conv      *runtime.Conversation
 }
 
 func New(engine *runtime.Engine, modelPath string) *Server {
@@ -83,6 +84,19 @@ type modelInfo struct {
 
 type modelsResponse struct {
 	Models []modelInfo `json:"models"`
+}
+
+func (s *Server) conversation() (*runtime.Conversation, error) {
+	if s.conv == nil {
+		ctx, err := s.engine.NewContext()
+		if err != nil {
+			return nil, err
+		}
+
+		s.conv = ctx.NewConversation()
+	}
+
+	return s.conv, nil
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

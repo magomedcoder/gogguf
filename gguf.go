@@ -41,6 +41,7 @@ func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 type (
 	Engine            = runtime.Engine
 	Context           = runtime.Context
+	Conversation      = runtime.Conversation
 	GenerationSession = runtime.GenerationSession
 	GenerateParams    = runtime.GenerateParams
 	LoadOptions       = runtime.Options
