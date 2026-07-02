@@ -27,6 +27,7 @@ Run:
 
 ```bash
 go test -tags=integration ./test/integration/ -run Golden
+go test -tags=integration ./test/integration/ -run Layers
 ```
 
 ## Benchmark
@@ -57,6 +58,17 @@ If `llama-cli` is not found - exits with code 0 and a skip message.
 ```bash
 go run ./cmd/debugtok ./models/Qwen3-0.6B-Q8_0.gguf "Hello"
 ```
+
+### Per-layer hidden state comparison
+
+Dump RMS of hidden states per layer (json) for comparison with llama.cpp:
+
+```bash
+go run ./cmd/debuglayers -m ./models/Qwen3-0.6B-Q8_0.gguf -p "Hello"
+go test -tags=integration ./test/integration/ -run Layers
+```
+
+Reference values: `test/fixtures/qwen3_layers.json`.
 
 Compare top-5 and greedy next with:
 

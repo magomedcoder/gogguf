@@ -21,6 +21,10 @@ echo "gguf.go: golden-тесты (эталон llama.cpp в test/fixtures/qwen3_
 go test -tags=integration ./test/integration/ -run Golden -count=1 -v
 
 echo ""
+echo "gguf.go: layer RMS fixture (test/fixtures/qwen3_layers.json)"
+go test -tags=integration ./test/integration/ -run Layers -count=1 -v
+
+echo ""
 echo "OK: greedy-токены совпадают с fixture"
 
 LLAMA_CLI="${LLAMA_CLI:-llama-cli}"

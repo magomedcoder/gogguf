@@ -16,6 +16,7 @@ type Model struct {
 	cache   *KVCache
 	gpu     gpu.Backend
 	ngl     int
+	debug   *DebugHooks
 }
 
 // Load создаёт Qwen3 из весов
@@ -48,6 +49,11 @@ func (m *Model) ResetCache() {
 	m.cache.Reset()
 }
 
+// SetDebugHooks включает колбэки для пошаговой отладки forward pass
+func (m *Model) SetDebugHooks(h *DebugHooks) {
+	m.debug = h
+}
+
 // Forward выполняет forward pass для последовательности tokenIDs начиная с startPos
 // Возвращает logits для последнего токена [vocabSize]
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
@@ -60,7 +66,8 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 
 	for i, tok := range tokenIDs {
 		pos := startPos + i
-		x, err = m.forwardToken(tok, pos)
+		last := i == len(tokenIDs)-1
+		x, err = m.forwardToken(tok, pos, last)
 		if err != nil {
 			return nil, err
 		}
@@ -69,16 +76,24 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	return m.logits(x)
 }
 
-func (m *Model) forwardToken(tokenID, pos int) ([]float32, error) {
+func (m *Model) forwardToken(tokenID, pos int, debug bool) ([]float32, error) {
 	x, err := m.embedToken(tokenID)
 	if err != nil {
 		return nil, err
+	}
+
+	if debug && m.debug != nil && m.debug.OnEmbed != nil {
+		m.debug.OnEmbed(x)
 	}
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
 		x, err = m.forwardBlock(layer, x, pos)
 		if err != nil {
 			return nil, err
+		}
+
+		if debug && m.debug != nil && m.debug.OnLayer != nil {
+			m.debug.OnLayer(layer, x)
 		}
 	}
 	m.cache.Advance()
@@ -286,21 +301,32 @@ func (m *Model) logits(x []float32) ([]float32, error) {
 		return nil, err
 	}
 
+	var out []float32
 	switch info.Type {
 	case format.GgmlQ8_0:
-		return ops.MatMulVecQ8_0(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, x)
+		out, err = ops.MatMulVecQ8_0(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, x)
 	case format.GgmlQ4_0:
-		return ops.MatMulVecQ4_0(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, x)
+		out, err = ops.MatMulVecQ4_0(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, x)
 	case format.GgmlQ4_K:
-		return ops.MatMulVecQ4_K(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, x)
+		out, err = ops.MatMulVecQ4_K(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, x)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
 			return nil, err
 		}
 
-		return ops.MatMulVec(f32, m.cfg.VocabSize, m.cfg.EmbeddingDim, x)
+		out, err = ops.MatMulVec(f32, m.cfg.VocabSize, m.cfg.EmbeddingDim, x)
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if m.debug != nil && m.debug.OnLogits != nil {
+		m.debug.OnLogits(out)
+	}
+
+	return out, nil
 }
 
 func applyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {

@@ -172,3 +172,17 @@ func Scale(x []float32, s float32) []float32 {
 func SiLU(x float32) float32 {
 	return x / (1 + float32(math.Exp(float64(-x))))
 }
+
+// VectorRMS возвращает sqrt(mean(x²)) - метрика для сверки hidden states
+func VectorRMS(x []float32) float32 {
+	if len(x) == 0 {
+		return 0
+	}
+
+	var sumSq float64
+	for _, v := range x {
+		sumSq += float64(v) * float64(v)
+	}
+
+	return float32(math.Sqrt(sumSq / float64(len(x))))
+}

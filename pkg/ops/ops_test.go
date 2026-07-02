@@ -40,6 +40,14 @@ func TestRMSNorm(t *testing.T) {
 	}
 }
 
+func TestVectorRMS(t *testing.T) {
+	x := []float32{3, 4}
+	want := float32(math.Sqrt(12.5))
+	if got := VectorRMS(x); math.Abs(float64(got-want)) > 1e-5 {
+		t.Fatalf("VectorRMS = %v, want %v", got, want)
+	}
+}
+
 func TestMatMulVecQ8_0(t *testing.T) {
 	cols, rows := 32, 2
 	raw := make([]byte, rows*quant.BlockQ8_0Size)

@@ -27,6 +27,7 @@ go test -tags=integration ./test/integration/...
 
 ```bash
 go test -tags=integration ./test/integration/ -run Golden
+go test -tags=integration ./test/integration/ -run Layers
 ```
 
 ## Benchmark
@@ -58,6 +59,17 @@ go run ./cmd/bench -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 12
 ```bash
 go run ./cmd/debugtok ./models/Qwen3-0.6B-Q8_0.gguf "Привет"
 ```
+
+### Сверка hidden states по слоям
+
+json-отчёт с RMS hidden state на каждом слое:
+
+```bash
+go run ./cmd/debuglayers -m ./models/Qwen3-0.6B-Q8_0.gguf -p "Привет"
+go test -tags=integration ./test/integration/ -run Layers
+```
+
+Эталон: `test/fixtures/qwen3_layers.json`.
 
 Сравните top-5 и greedy next с:
 
