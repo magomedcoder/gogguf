@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { fetchModels, streamChat } from '@/api'
+import { APP_LOCALES, setLocale } from '@/i18n'
 import type { Message, ModelInfo } from '@/types'
+
+const { t, locale } = useI18n()
 
 const messages = ref<Message[]>([])
 const input = ref('')
@@ -24,7 +28,7 @@ const modelMeta = computed(() => {
   }
 
   if (model.value?.context_length) {
-    parts.push(`${model.value.context_length} ctx`)
+    parts.push(t('meta.contextLength', { n: model.value.context_length }))
   }
 
   return parts.join(' · ')
@@ -142,20 +146,34 @@ watch(messages, () => {
         <h1 class="truncate text-base font-semibold">{{ modelTitle }}</h1>
         <p v-if="modelMeta" class="mt-1 text-xs text-[#888]">{{ modelMeta }}</p>
       </div>
-      <button
-        type="button"
-        class="shrink-0 border-none bg-transparent text-sm text-[#888] hover:text-[#e8e8e8]"
-        @click="newChat"
-      >
-        новый чат
-      </button>
+      <div class="flex shrink-0 items-center gap-3">
+        <div class="flex gap-1 text-xs">
+          <button
+            v-for="{ code, label } in APP_LOCALES"
+            :key="code"
+            type="button"
+            class="rounded px-1.5 py-0.5 border-none bg-transparent"
+            :class="locale === code ? 'text-[#e8e8e8]' : 'text-[#888] hover:text-[#e8e8e8]'"
+            @click="setLocale(code)"
+          >
+            {{ label }}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="border-none bg-transparent text-sm text-[#888] hover:text-[#e8e8e8]"
+          @click="newChat"
+        >
+          {{ t('chat.newChat') }}
+        </button>
+      </div>
     </header>
 
     <details class="border-b border-[#2a2a2a] py-2.5 text-xs text-[#888] open:[&>summary]:mb-2.5">
-      <summary class="cursor-pointer select-none">настройки</summary>
+      <summary class="cursor-pointer select-none">{{ t('chat.settings') }}</summary>
       <div class="flex flex-wrap gap-x-5 gap-y-3">
         <label class="inline-flex items-center gap-2">
-          max_tokens
+          {{ t('settings.maxTokens') }}
           <input
             v-model.number="settings.maxTokens"
             type="number"
@@ -165,7 +183,7 @@ watch(messages, () => {
           />
         </label>
         <label class="inline-flex items-center gap-2">
-          temperature
+          {{ t('settings.temperature') }}
           <input
             v-model.number="settings.temperature"
             type="number"
@@ -181,7 +199,7 @@ watch(messages, () => {
             type="checkbox"
             class="accent-[#6ea8fe]"
           />
-          thinking
+          {{ t('settings.thinking') }}
         </label>
       </div>
     </details>
@@ -191,7 +209,7 @@ watch(messages, () => {
         v-if="messages.length === 0"
         class="m-auto text-center text-sm text-[#888]"
       >
-        Напишите сообщение, чтобы начать диалог
+        {{ t('chat.emptyMessage') }}
       </p>
 
       <div
@@ -215,7 +233,7 @@ watch(messages, () => {
       <textarea
         v-model="input"
         rows="2"
-        placeholder="Напишите сообщение…"
+        :placeholder="t('chat.placeholder')"
         :disabled="loading"
         class="w-full resize-none rounded-xl border border-[#2a2a2a] bg-[#141414] px-3.5 py-3 text-[#e8e8e8] placeholder:text-[#888] focus:border-[#6ea8fe] focus:outline-none disabled:opacity-60"
         @keydown="onKeydown"
@@ -227,7 +245,7 @@ watch(messages, () => {
           class="rounded-lg border border-[#ee5555] bg-[#1a1a1a] px-4 py-2 text-[#ee5555]"
           @click="stopGeneration"
         >
-          Стоп
+          {{ t('chat.stop') }}
         </button>
         <button
           type="button"
@@ -235,7 +253,7 @@ watch(messages, () => {
           :disabled="!canSend"
           @click="sendMessage"
         >
-          Отправить
+          {{ t('chat.send') }}
         </button>
       </div>
     </footer>

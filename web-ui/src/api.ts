@@ -1,3 +1,4 @@
+import { i18n } from '@/i18n'
 import type { ChatSettings, ChatStreamChunk, Message, ModelInfo } from './types'
 
 const API_BASE = '/api'
@@ -39,7 +40,7 @@ export async function* streamChat(
 
   const reader = res.body?.getReader()
   if (!reader) {
-    throw new Error('streaming не поддерживается')
+    throw new Error(i18n.global.t('errors.streamingNotSupported'))
   }
 
   const decoder = new TextDecoder()

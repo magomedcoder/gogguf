@@ -1,37 +1,39 @@
-# web-ui для gguf.go
+# web-ui for gguf.go
 
-Веб-чат для [gguf.go](../) - интерфейс к HTTP API `gguf serve`.
+[Русская версия](README-ru.md)
+
+Web chat for [gguf.go](../) - interface to the HTTP API `gguf serve`.
 
 Vue 3 + TypeScript + Vite + Tailwind CSS.
 
-## Запуск
+## Running
 
-В одном терминале - сервер с моделью:
+In one terminal - server with the model:
 
 ```bash
 ./build/gguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --addr 127.0.0.1:8000
 ```
 
-В другом - UI:
+In another - the UI:
 
 ```bash
 cd web-ui
 
-yarn install # или npm install
+yarn install # or npm install
 
-yarn dev  # или npm run dev
+yarn dev  # or npm run dev
 
 # `http://localhost:5173`
 ```
 
-В режиме разработки запросы к API проксируются: `/api/*` → `http://127.0.0.1:8000/*` (`vite.config.ts`).
+In development mode, API requests are proxied: `/api/*` -> `http://127.0.0.1:8000/*` (`vite.config.ts`).
 
-## Возможности
+## Features
 
-- диалог с историей сообщений
-- стриминг ответа в реальном времени
-- название и метаданные модели
-- настройки: `max_tokens`, `temperature`, `thinking`
-- остановка генерации, сброс чата
+- chat with message history
+- real-time response streaming
+- model name and metadata
+- settings: `max_tokens`, `temperature`, `thinking`
+- stop generation, reset chat
 
-Подробнее об эндпоинтах: [docs/api.md](../docs/api.md).
+More on endpoints: [docs/api.md](../docs/api.md).
