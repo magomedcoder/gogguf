@@ -3,9 +3,13 @@ package ops
 import (
 	"fmt"
 	"math"
+	"runtime"
+	"sync"
 
 	"github.com/magomedcoder/gguf.go/pkg/quant"
 )
+
+const parallelMatMulMinRows = 64
 
 // MatMulVec умножает матрицу [rows*cols] на вектор [cols]
 func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, error) {
@@ -18,11 +22,39 @@ func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, erro
 	}
 
 	out := make([]float32, rows)
-	for r := range rows {
-		out[r] = dot(matrix[r*cols:(r+1)*cols], vec)
+	if rows < parallelMatMulMinRows {
+		matMulVecRows(matrix, vec, out, 0, rows, cols)
+		return out, nil
 	}
 
+	workers := runtime.GOMAXPROCS(0)
+	if workers > rows {
+		workers = rows
+	}
+
+	chunk := (rows + workers - 1) / workers
+	var wg sync.WaitGroup
+	for start := 0; start < rows; start += chunk {
+		end := start + chunk
+		if end > rows {
+			end = rows
+		}
+
+		wg.Add(1)
+		go func(rowStart, rowEnd int) {
+			defer wg.Done()
+			matMulVecRows(matrix, vec, out, rowStart, rowEnd, cols)
+		}(start, end)
+	}
+
+	wg.Wait()
 	return out, nil
+}
+
+func matMulVecRows(matrix, vec, out []float32, rowStart, rowEnd, cols int) {
+	for r := rowStart; r < rowEnd; r++ {
+		out[r] = dot(matrix[r*cols:(r+1)*cols], vec)
+	}
 }
 
 // MatMulVecQ8_0 умножает Q8_0-матрицу [rows*cols] на float32-вектор [cols]

@@ -40,6 +40,35 @@ func TestRMSNorm(t *testing.T) {
 	}
 }
 
+func TestMatMulVecParallel(t *testing.T) {
+	rows, cols := 128, 8
+	matrix := make([]float32, rows*cols)
+	vec := make([]float32, cols)
+	for i := range matrix {
+		matrix[i] = float32(i%11) - 5
+	}
+
+	for i := range vec {
+		vec[i] = float32(i) * 0.1
+	}
+
+	got, err := MatMulVec(matrix, rows, cols, vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for r := range rows {
+		var want float32
+		for c := range cols {
+			want += matrix[r*cols+c] * vec[c]
+		}
+
+		if math.Abs(float64(got[r]-want)) > 1e-5 {
+			t.Fatalf("row %d: got %v want %v", r, got[r], want)
+		}
+	}
+}
+
 func TestVectorRMS(t *testing.T) {
 	x := []float32{3, 4}
 	want := float32(math.Sqrt(12.5))

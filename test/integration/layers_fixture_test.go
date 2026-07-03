@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/magomedcoder/gguf.go"
+	"github.com/magomedcoder/gguf.go/pkg/chat"
 	"github.com/magomedcoder/gguf.go/pkg/model/qwen3"
 	"github.com/magomedcoder/gguf.go/pkg/ops"
 )
@@ -20,7 +21,8 @@ type layersFile struct {
 
 type layersCase struct {
 	Name       string    `json:"name"`
-	Input      string    `json:"input"`
+	Input      string    `json:"input,omitempty"`
+	ChatUser   string    `json:"chat_user,omitempty"`
 	EmbedRMS   float32   `json:"embed_rms"`
 	LayerRMS   []float32 `json:"layer_rms"`
 	GreedyNext int       `json:"greedy_next"`
@@ -70,7 +72,18 @@ func TestLayersFixture(t *testing.T) {
 
 	for _, tc := range lf.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			ids, err := engine.Tokenizer().Encode(tc.Input)
+			prompt := tc.Input
+			if tc.ChatUser != "" {
+				var err error
+				prompt, err = chat.FormatUser(tc.ChatUser, chat.Options{
+					Metadata: engine.Metadata(),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			ids, err := engine.Tokenizer().Encode(prompt)
 			if err != nil {
 				t.Fatal(err)
 			}

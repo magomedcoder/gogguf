@@ -65,6 +65,25 @@ func TestHandlerRoutes(t *testing.T) {
 	}
 }
 
+func TestReset(t *testing.T) {
+	srv := New(&runtime.Engine{}, "")
+	rec := httptest.NewRecorder()
+	srv.handleReset(rec, httptest.NewRequest(http.MethodPost, "/reset", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("статус = %d, ожидали 200", rec.Code)
+	}
+
+	var resp healthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("не удалось разобрать ответ: %v", err)
+	}
+
+	if resp.Status != "ok" {
+		t.Fatalf("status = %q, ожидали ok", resp.Status)
+	}
+}
+
 func TestChatCompletionsBadRequest(t *testing.T) {
 	srv := New(&runtime.Engine{}, "")
 	body := bytes.NewBufferString(`{"messages":[]}`)

@@ -6,11 +6,13 @@
 
 ## Эндпоинты
 
-| Метод | Путь           | Описание                        |
-|-------|----------------|---------------------------------|
-| GET   | `/models`      | метаданные загруженной модели   |
-| POST  | `/generate`    | генерация текста (JSON или SSE) |
-| POST  | `/completions` | chat API (messages + stream)    |
+| Метод | Путь           | Описание                              |
+|-------|----------------|---------------------------------------|
+| GET   | `/health`      | проверка состояния сервера            |
+| GET   | `/models`      | метаданные загруженной модели         |
+| POST  | `/reset`       | сброс KV-cache на сервере (новый чат) |
+| POST  | `/generate`    | генерация текста (JSON или SSE)       |
+| POST  | `/completions` | chat API (messages + stream)          |
 
 ## `POST /generate`
 
@@ -56,6 +58,16 @@ curl -N 127.0.0.1:8000/generate \
 
 curl -s 127.0.0.1:8000/models
 ```
+
+## `POST /reset`
+
+Сбрасывает KV-cache на сервере для multi-turn чата. 
+
+```bash
+curl -s -X POST 127.0.0.1:8000/reset
+```
+
+Ответ: `{"status":"ok"}`
 
 ## `POST /completions`
 

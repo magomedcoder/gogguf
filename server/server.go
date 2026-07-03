@@ -31,6 +31,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/models", s.handleModels)
+	mux.HandleFunc("/reset", s.handleReset)
 	mux.HandleFunc("/generate", s.handleGenerate)
 	mux.HandleFunc("/completions", s.handleChatCompletions)
 	return mux
@@ -100,6 +101,22 @@ func (s *Server) conversation() (*runtime.Conversation, error) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, healthResponse{Status: "ok"})
+}
+
+func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "метод не разрешен", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.conv != nil {
+		s.conv.Reset()
+	}
+
 	writeJSON(w, healthResponse{Status: "ok"})
 }
 

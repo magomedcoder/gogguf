@@ -16,6 +16,15 @@ export async function fetchModels(): Promise<ModelInfo[]> {
   return data.models
 }
 
+export async function resetConversation(): Promise<void> {
+  const res = await fetch(`${API_BASE}/reset`, {
+    method: 'POST'
+  })
+  if (!res.ok) {
+    throw new Error(await res.text())
+  }
+}
+
 export async function* streamChat(
   messages: Message[],
   settings: ChatSettings,

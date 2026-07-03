@@ -6,11 +6,13 @@ Start the server with `gguf serve` (see [CLI](cli.md)).
 
 ## Endpoints
 
-| Method | Path           | Description                   |
-|--------|----------------|-------------------------------|
-| GET    | `/models`      | loaded model metadata         |
-| POST   | `/generate`    | text generation (JSON or SSE) |
-| POST   | `/completions` | chat API (messages + stream)  |
+| Method | Path           | Description                              |
+|--------|----------------|------------------------------------------|
+| GET    | `/health`      | server health check                      |
+| GET    | `/models`      | loaded model metadata                    |
+| POST   | `/reset`       | reset server-side KV-cache (new chat)    |
+| POST   | `/generate`    | text generation (JSON or SSE)            |
+| POST   | `/completions` | chat API (messages + stream)             |
 
 ## `POST /generate`
 
@@ -56,6 +58,16 @@ curl -N 127.0.0.1:8000/generate \
 
 curl -s 127.0.0.1:8000/models
 ```
+
+## `POST /reset`
+
+Clears the server-side KV-cache for multi-turn chat. 
+
+```bash
+curl -s -X POST 127.0.0.1:8000/reset
+```
+
+Response: `{"status":"ok"}`
 
 ## `POST /completions`
 

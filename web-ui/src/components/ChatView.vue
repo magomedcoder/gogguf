@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { fetchModels, streamChat } from '@/api'
+import { fetchModels, resetConversation, streamChat } from '@/api'
 import { APP_LOCALES, setLocale } from '@/i18n'
 import type { Message, ModelInfo } from '@/types'
 
@@ -55,11 +55,16 @@ async function loadModel() {
   }
 }
 
-function newChat() {
+async function newChat() {
   stopGeneration()
   messages.value = []
-  error.value = ''
   input.value = ''
+  error.value = ''
+  try {
+    await resetConversation()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
 }
 
 function stopGeneration() {
