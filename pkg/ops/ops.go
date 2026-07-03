@@ -3,8 +3,6 @@ package ops
 import (
 	"fmt"
 	"math"
-	"runtime"
-	"sync"
 
 	"github.com/magomedcoder/gguf.go/pkg/quant"
 )
@@ -22,32 +20,9 @@ func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, erro
 	}
 
 	out := make([]float32, rows)
-	if rows < parallelMatMulMinRows {
-		matMulVecRows(matrix, vec, out, 0, rows, cols)
-		return out, nil
-	}
-
-	workers := runtime.GOMAXPROCS(0)
-	if workers > rows {
-		workers = rows
-	}
-
-	chunk := (rows + workers - 1) / workers
-	var wg sync.WaitGroup
-	for start := 0; start < rows; start += chunk {
-		end := start + chunk
-		if end > rows {
-			end = rows
-		}
-
-		wg.Add(1)
-		go func(rowStart, rowEnd int) {
-			defer wg.Done()
-			matMulVecRows(matrix, vec, out, rowStart, rowEnd, cols)
-		}(start, end)
-	}
-
-	wg.Wait()
+	parallelForRows(rows, func(rowStart, rowEnd int) {
+		matMulVecRows(matrix, vec, out, rowStart, rowEnd, cols)
+	})
 	return out, nil
 }
 
@@ -74,22 +49,25 @@ func MatMulVecQ8_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	}
 
 	out := make([]float32, rows)
-	for r := range rows {
+	parallelForRows(rows, func(rowStart, rowEnd int) {
+		matMulVecQ8_0Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	})
+
+	return out, nil
+}
+
+func matMulVecQ8_0Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) {
+	for r := rowStart; r < rowEnd; r++ {
 		var sum float32
 		rowOff := r * blocksPerRow * quant.BlockQ8_0Size
 		for b := range blocksPerRow {
 			block := raw[rowOff+b*quant.BlockQ8_0Size:]
 			vecOff := b * quant.QK8_0
-			dot, err := quant.DotBlockQ8_0(block, vec[vecOff:vecOff+quant.QK8_0])
-			if err != nil {
-				return nil, err
-			}
+			dot, _ := quant.DotBlockQ8_0(block, vec[vecOff:vecOff+quant.QK8_0])
 			sum += dot
 		}
 		out[r] = sum
 	}
-
-	return out, nil
 }
 
 // MatMulVecQ4_0 умножает Q4_0-матрицу [rows*cols] на float32-вектор [cols]
@@ -109,22 +87,25 @@ func MatMulVecQ4_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	}
 
 	out := make([]float32, rows)
-	for r := range rows {
+	parallelForRows(rows, func(rowStart, rowEnd int) {
+		matMulVecQ4_0Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	})
+
+	return out, nil
+}
+
+func matMulVecQ4_0Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) {
+	for r := rowStart; r < rowEnd; r++ {
 		var sum float32
 		rowOff := r * blocksPerRow * quant.BlockQ4_0Size
 		for b := range blocksPerRow {
 			block := raw[rowOff+b*quant.BlockQ4_0Size:]
 			vecOff := b * quant.QK4_0
-			dot, err := quant.DotBlockQ4_0(block, vec[vecOff:vecOff+quant.QK4_0])
-			if err != nil {
-				return nil, err
-			}
+			dot, _ := quant.DotBlockQ4_0(block, vec[vecOff:vecOff+quant.QK4_0])
 			sum += dot
 		}
 		out[r] = sum
 	}
-
-	return out, nil
 }
 
 // MatMulVecQ4_K умножает Q4_K-матрицу [rows*cols] на float32-вектор [cols]
@@ -144,24 +125,25 @@ func MatMulVecQ4_K(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	}
 
 	out := make([]float32, rows)
-	for r := range rows {
+	parallelForRows(rows, func(rowStart, rowEnd int) {
+		matMulVecQ4_KRows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	})
+
+	return out, nil
+}
+
+func matMulVecQ4_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) {
+	for r := rowStart; r < rowEnd; r++ {
 		var sum float32
 		rowOff := r * blocksPerRow * quant.BlockQ4_KSize
 		for b := range blocksPerRow {
 			block := raw[rowOff+b*quant.BlockQ4_KSize:]
 			vecOff := b * quant.QK_K
-			dot, err := quant.DotBlockQ4_K(block, vec[vecOff:vecOff+quant.QK_K])
-			if err != nil {
-				return nil, err
-			}
-
+			dot, _ := quant.DotBlockQ4_K(block, vec[vecOff:vecOff+quant.QK_K])
 			sum += dot
 		}
-
 		out[r] = sum
 	}
-
-	return out, nil
 }
 
 // RMSNorm применяет RMS-нормализацию: x * weight / RMS(x)
