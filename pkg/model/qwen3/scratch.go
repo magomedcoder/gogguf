@@ -8,6 +8,7 @@ type scratch struct {
 	k      []float32 // numKVHeads * headDim
 	v      []float32 // numKVHeads * headDim
 	attn   []float32 // numHeads * headDim
+	scores []float32 // context_length - softmax scores в attention
 	gate   []float32 // ffn hidden
 	up     []float32 // ffn hidden
 	logits []float32 // vocab
@@ -23,6 +24,7 @@ func newScratch(cfg Config) scratch {
 		k:      make([]float32, kvDim),
 		v:      make([]float32, kvDim),
 		attn:   make([]float32, qDim),
+		scores: make([]float32, cfg.ContextLength),
 		gate:   make([]float32, cfg.FFNHidden),
 		up:     make([]float32, cfg.FFNHidden),
 		logits: make([]float32, cfg.VocabSize),

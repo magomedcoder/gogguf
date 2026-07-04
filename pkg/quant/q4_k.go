@@ -62,30 +62,43 @@ func DequantBlockQ4_K(block []byte) ([QK_K]float32, error) {
 
 // DequantQ4_K деквантизирует буфер Q4_K в n float32
 func DequantQ4_K(data []byte, n int) ([]float32, error) {
+	out := make([]float32, n)
+	if err := DequantQ4_KInto(out, data, n); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// DequantQ4_KInto деквантизирует буфер Q4_K в dst [n]
+func DequantQ4_KInto(dst []float32, data []byte, n int) error {
 	if n < 0 {
-		return nil, fmt.Errorf("quant: n=%d", n)
+		return fmt.Errorf("quant: n=%d", n)
 	}
 
 	if n == 0 {
-		return nil, nil
+		return nil
+	}
+
+	if len(dst) < n {
+		return fmt.Errorf("quant: dst слишком короткий")
 	}
 
 	want := (n + QK_K - 1) / QK_K * BlockQ4_KSize
 	if len(data) < want {
-		return nil, fmt.Errorf("quant: данных Q4_K недостаточно: нужно %d, есть %d", want, len(data))
+		return fmt.Errorf("quant: данных Q4_K недостаточно: нужно %d, есть %d", want, len(data))
 	}
 
-	out := make([]float32, n)
 	for i := 0; i < n; i += QK_K {
 		block, err := DequantBlockQ4_K(data[i/QK_K*BlockQ4_KSize:])
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		copy(out[i:min(i+QK_K, n)], block[:min(QK_K, n-i)])
+		copy(dst[i:min(i+QK_K, n)], block[:min(QK_K, n-i)])
 	}
 
-	return out, nil
+	return nil
 }
 
 // DotBlockQ4_K - dot product блока Q4_K на 256 float32

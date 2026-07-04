@@ -116,14 +116,13 @@ func (m *Model) embedToken(tokenID int) error {
 		return err
 	}
 
-	var row []float32
 	switch info.Type {
 	case format.GgmlQ8_0:
-		row, err = ops.EmbeddingQ8_0(raw, m.cfg.EmbeddingDim, tokenID)
+		return ops.EmbeddingQ8_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ4_0:
-		row, err = ops.EmbeddingQ4_0(raw, m.cfg.EmbeddingDim, tokenID)
+		return ops.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ4_K:
-		row, err = ops.EmbeddingQ4_K(raw, m.cfg.EmbeddingDim, tokenID)
+		return ops.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	default:
 		f32, err := m.weights.Floats("token_embd.weight")
 		if err != nil {
@@ -133,13 +132,6 @@ func (m *Model) embedToken(tokenID int) error {
 		copy(m.scratch.x, f32[off:off+m.cfg.EmbeddingDim])
 		return nil
 	}
-
-	if err != nil {
-		return err
-	}
-
-	copy(m.scratch.x, row)
-	return nil
 }
 
 func (m *Model) forwardBlock(layer int, pos int) error {
@@ -180,7 +172,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	m.cache.Append(layer, m.scratch.k, m.scratch.v)
 	seqLen := m.cache.Len() + 1
 
-	if err := ops.AttentionScoresInto(m.scratch.attn, m.scratch.q, m.cache.KLayer(layer), m.cache.VLayer(layer), seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err != nil {
+	if err := ops.AttentionScoresInto(m.scratch.attn, m.scratch.q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err != nil {
 		return err
 	}
 
