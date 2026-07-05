@@ -5,7 +5,7 @@
 ## Inference
 
 ```go
-import "github.com/magomedcoder/gguf.go"
+import "github.com/magomedcoder/gogguf"
 
 engine, err := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
 	NGL: 0, // matmul N слоёв на GPU; <= block_count, нужна CUDA-сборка
@@ -72,7 +72,7 @@ engine, err := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
 ## Парсинг GGUF без inference
 
 ```go
-import "github.com/magomedcoder/gguf.go"
+import "github.com/magomedcoder/gogguf"
 
 r, err := gguf.OpenFile("./models/Qwen3-0.6B-Q8_0.gguf")
 
@@ -83,8 +83,8 @@ arch, _ := r.Metadata.String("general.architecture")
 
 ```go
 import (
-	"github.com/magomedcoder/gguf.go"
-	"github.com/magomedcoder/gguf.go/server"
+	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/server"
 )
 
 engine, _ := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{})

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
-	"github.com/magomedcoder/gguf.go/pkg/quant"
+	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
 // Tensor - деквантизованный тензор в float32

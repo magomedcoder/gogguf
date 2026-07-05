@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/magomedcoder/gguf.go"
-	"github.com/magomedcoder/gguf.go/pkg/chat"
+	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/pkg/chat"
 )
 
 func modelPath(t *testing.T) string {
@@ -37,7 +37,7 @@ func modelPath(t *testing.T) string {
 }
 
 func TestTokenizerHello(t *testing.T) {
-	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
+	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestTokenizerHello(t *testing.T) {
 }
 
 func TestGreedyNextAfterChatPrefill(t *testing.T) {
-	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
+	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestGreedyNextAfterChatPrefill(t *testing.T) {
 		t.Fatalf("ошибка Forward: %v", err)
 	}
 
-	next := gguf.Greedy(logits)
+	next := gogguf.Greedy(logits)
 	// thinking выключен по умолчанию - модель начинает ответ сразу
 	if next != 9707 {
 		t.Fatalf("greedy next = %d, ожидали 9707 (Hello)", next)
@@ -84,7 +84,7 @@ func TestGreedyNextAfterChatPrefill(t *testing.T) {
 }
 
 func TestGreedyGenerationShort(t *testing.T) {
-	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
+	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -101,9 +101,9 @@ func TestGreedyGenerationShort(t *testing.T) {
 		t.Fatalf("ошибка FormatUser: %v", err)
 	}
 
-	text, err := ctx.Generate(prompt, gguf.GenerateParams{
+	text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 		MaxTokens: 4,
-		Sampler:   gguf.Greedy,
+		Sampler:   gogguf.Greedy,
 	})
 	if err != nil {
 		t.Fatalf("ошибка Generate: %v", err)
@@ -117,12 +117,12 @@ func TestGreedyGenerationShort(t *testing.T) {
 func TestLoadMappedMatchesLoad(t *testing.T) {
 	path := modelPath(t)
 
-	engine, err := gguf.Load(path, gguf.LoadOptions{})
+	engine, err := gogguf.Load(path, gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
 
-	mapped, err := gguf.LoadMapped(path, gguf.LoadOptions{})
+	mapped, err := gogguf.LoadMapped(path, gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель через mmap: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestLoadMappedMatchesLoad(t *testing.T) {
 		t.Fatalf("ошибка Forward (LoadMapped): %v", err)
 	}
 
-	if gguf.Greedy(logits1) != gguf.Greedy(logits2) {
-		t.Fatalf("Load vs LoadMapped: greedy %d != %d", gguf.Greedy(logits1), gguf.Greedy(logits2))
+	if gogguf.Greedy(logits1) != gogguf.Greedy(logits2) {
+		t.Fatalf("Load vs LoadMapped: greedy %d != %d", gogguf.Greedy(logits1), gogguf.Greedy(logits2))
 	}
 }

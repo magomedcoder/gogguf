@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/magomedcoder/gguf.go/pkg/runtime"
+	"github.com/magomedcoder/gogguf/pkg/runtime"
 )
 
 func TestHealth(t *testing.T) {

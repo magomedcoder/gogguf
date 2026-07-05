@@ -3,7 +3,7 @@ package tokenizer
 import (
 	"testing"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
 func TestDecodeGPT2Space(t *testing.T) {

@@ -1,8 +1,8 @@
-# gguf.go
+# GoGGUF
 
 [English version](README.md)
 
-**gguf.go** - лёгковесный способ запуска GGUF-моделей на Go без llama.cpp.
+**GoGGUF** - лёгковесный способ запуска GGUF-моделей на Go без llama.cpp.
 
 > **Ранний этап разработки.**
 

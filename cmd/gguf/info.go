@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/magomedcoder/gguf.go"
+	"github.com/magomedcoder/gogguf"
 )
 
 // runInfo выводит краткую информацию о GGUF-файле
@@ -14,12 +14,12 @@ func runInfo(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	
+
 	if *modelPath == "" {
 		return fmt.Errorf("использование: gguf info -m файл.gguf")
 	}
 
-	r, err := gguf.OpenFile(*modelPath)
+	r, err := gogguf.OpenFile(*modelPath)
 	if err != nil {
 		return err
 	}

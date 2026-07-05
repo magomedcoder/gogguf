@@ -7,8 +7,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/magomedcoder/gguf.go/pkg/ops"
-	"github.com/magomedcoder/gguf.go/pkg/quant"
+	"github.com/magomedcoder/gogguf/pkg/ops"
+	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
 func TestMatMulVecGPU(t *testing.T) {

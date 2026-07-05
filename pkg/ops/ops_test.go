@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/magomedcoder/gguf.go/pkg/quant"
+	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
 func TestMatMulVec(t *testing.T) {

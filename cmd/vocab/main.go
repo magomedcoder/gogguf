@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/magomedcoder/gguf.go"
-	"github.com/magomedcoder/gguf.go/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
 func main() {
@@ -15,7 +15,7 @@ func main() {
 		path = os.Args[1]
 	}
 
-	r, _ := gguf.OpenFile(path)
+	r, _ := gogguf.OpenFile(path)
 	cfg, _ := qwen3.ParseConfig(r)
 	fmt.Printf("config: head_dim=%d heads=%d kv=%d\n", cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads)
 

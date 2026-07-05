@@ -3,7 +3,7 @@ package runtime
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gguf.go/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/sampler"
 )
 
 // GenerationSession - пошаговая генерация после prefill

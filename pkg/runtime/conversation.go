@@ -141,7 +141,7 @@ func tokensPrefixEqual(a, b []int, n int) bool {
 		return false
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if a[i] != b[i] {
 			return false
 		}

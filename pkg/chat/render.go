@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/magomedcoder/gguf.go/pkg/chat/jinja"
-	"github.com/magomedcoder/gguf.go/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/chat/jinja"
+	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
 const (

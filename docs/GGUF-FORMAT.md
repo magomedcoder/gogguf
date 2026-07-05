@@ -652,7 +652,7 @@ const (
     _ // 5, Q4_3 deprecated - otherwise subsequent type IDs shift
     Q5_0 // 6, block_values=32, block_bytes=22
     Q5_1 // 7, block_values=32, block_bytes=26
-    Q8_0 // 8, block_values=32, block_bytes=34 - primary type in gguf.go
+    Q8_0 // 8, block_values=32, block_bytes=34 - primary type in gogguf
     Q8_1 // 9, block_values=32, block_bytes=36 - + sum for matmul
     Q2_K // 10, block_values=256, block_bytes=84 - K-quant family
     Q3_K // 11, block_values=256, block_bytes=110

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/magomedcoder/gguf.go/pkg/quant"
+	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
 const parallelMatMulMinRows = 64

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Сверка gguf.go с эталоном llama.cpp (golden fixture)
+# Сверка GoGGUF с эталоном llama.cpp (golden fixture)
 # Использование ./test/compare-llama-cpp.sh [models/модель.gguf]
 set -euo pipefail
 
@@ -16,12 +16,12 @@ fi
 
 export GGUF_MODEL="$(realpath "$MODEL")"
 
-echo "gguf.go: golden-тесты (эталон llama.cpp в test/fixtures/qwen3_golden.json)"
+echo "GoGGUF: golden-тесты (эталон llama.cpp в test/fixtures/qwen3_golden.json)"
 
 go test -tags=integration ./test/integration/ -run Golden -count=1 -v
 
 echo ""
-echo "gguf.go: layer RMS fixture (test/fixtures/qwen3_layers.json)"
+echo "GoGGUF: layer RMS fixture (test/fixtures/qwen3_layers.json)"
 go test -tags=integration ./test/integration/ -run Layers -count=1 -v
 
 echo ""

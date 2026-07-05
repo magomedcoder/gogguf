@@ -1,6 +1,6 @@
 package model
 
-import "github.com/magomedcoder/gguf.go/pkg/gpu"
+import "github.com/magomedcoder/gogguf/pkg/gpu"
 
 // Options задаёт параметры загрузки модели
 type Options struct {

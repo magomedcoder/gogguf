@@ -3,8 +3,8 @@ package qwen3_test
 import (
 	"testing"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
-	"github.com/magomedcoder/gguf.go/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
 func TestParseConfigHeadDim(t *testing.T) {

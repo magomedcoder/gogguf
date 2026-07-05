@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
 // ToFloat32 деквантизирует сырые байты GGML-тензора в float32

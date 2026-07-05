@@ -1,5 +1,7 @@
 package jinja
 
+import "slices"
+
 import "strings"
 
 type parser struct {
@@ -30,11 +32,9 @@ func (p *parser) parseBlockUntil(endKeywords []string) ([]node, error) {
 			p.advance()
 			if p.at(tokIdent) {
 				kw := p.advance().text
-				for _, end := range endKeywords {
-					if kw == end {
-						p.pos = save
-						return nodes, nil
-					}
+				if slices.Contains(endKeywords, kw) {
+					p.pos = save
+					return nodes, nil
 				}
 			}
 			p.pos = save

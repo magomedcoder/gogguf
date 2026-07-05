@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/magomedcoder/gguf.go"
-	chattmpl "github.com/magomedcoder/gguf.go/pkg/chat"
+	"github.com/magomedcoder/gogguf"
+	chattmpl "github.com/magomedcoder/gogguf/pkg/chat"
 )
 
 const usage = `bench - измерение скорости inference (prefill, decode, TTFT)
@@ -45,7 +45,9 @@ func main() {
 	}
 
 	loadStart := time.Now()
-	engine, err := gguf.Load(*modelPath, gguf.LoadOptions{NGL: *ngl})
+	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{
+		NGL: *ngl,
+	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

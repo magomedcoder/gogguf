@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/magomedcoder/gguf.go"
+	"github.com/magomedcoder/gogguf"
 )
 
 func main() {
@@ -13,7 +13,7 @@ func main() {
 		path = os.Args[1]
 	}
 
-	engine, err := gguf.Load(path, gguf.LoadOptions{})
+	engine, err := gogguf.Load(path, gogguf.LoadOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -52,7 +52,7 @@ func main() {
 		fmt.Printf("  %d: %.4f %q\n", t.id, t.score, tok.Decode([]int{t.id}))
 	}
 
-	next := gguf.Greedy(logits)
+	next := gogguf.Greedy(logits)
 	fmt.Printf("greedy next = %d %q\n", next, tok.Decode([]int{next}))
 }
 

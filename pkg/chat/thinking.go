@@ -1,6 +1,6 @@
 package chat
 
-import "github.com/magomedcoder/gguf.go/pkg/format"
+import "github.com/magomedcoder/gogguf/pkg/format"
 
 const (
 	qwenThinkingOpenID  = 151667

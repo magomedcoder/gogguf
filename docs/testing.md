@@ -2,7 +2,7 @@
 
 [Русская версия](testing-ru.md)
 
-**gguf.go** is validated against llama.cpp using golden tests and an optional script.
+**gogguf** is validated against llama.cpp using golden tests and an optional script.
 
 ## Unit and integration tests
 

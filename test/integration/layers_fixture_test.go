@@ -8,10 +8,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/magomedcoder/gguf.go"
-	"github.com/magomedcoder/gguf.go/pkg/chat"
-	"github.com/magomedcoder/gguf.go/pkg/model/qwen3"
-	"github.com/magomedcoder/gguf.go/pkg/ops"
+	"github.com/magomedcoder/gogguf/pkg/chat"
+	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 type layersFile struct {

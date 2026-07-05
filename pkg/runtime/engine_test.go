@@ -3,7 +3,7 @@ package runtime
 import (
 	"testing"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
 func TestEngineContextLength(t *testing.T) {

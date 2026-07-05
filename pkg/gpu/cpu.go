@@ -1,7 +1,7 @@
 package gpu
 
 import (
-	"github.com/magomedcoder/gguf.go/pkg/ops"
+	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 // CPUBackend выполняет matmul на CPU через pkg/ops

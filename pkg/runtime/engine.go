@@ -1,9 +1,9 @@
 package runtime
 
 import (
-	"github.com/magomedcoder/gguf.go/pkg/format"
-	"github.com/magomedcoder/gguf.go/pkg/model"
-	"github.com/magomedcoder/gguf.go/pkg/tokenizer"
+	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/model"
+	"github.com/magomedcoder/gogguf/pkg/tokenizer"
 )
 
 // Engine загружает GGUF-модель для inference

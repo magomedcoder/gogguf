@@ -1,6 +1,6 @@
 package runtime
 
-import "github.com/magomedcoder/gguf.go/pkg/model"
+import "github.com/magomedcoder/gogguf/pkg/model"
 
 // Options задаёт параметры загрузки inference-движка
 type Options struct {

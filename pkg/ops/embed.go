@@ -3,7 +3,7 @@ package ops
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gguf.go/pkg/quant"
+	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
 func embeddingRowOffset(dim, tokenID, blockSize, qk int) (int, int, error) {

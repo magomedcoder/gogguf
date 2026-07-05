@@ -20,7 +20,7 @@ const settings = reactive({
   thinking: false,
 })
 
-const modelTitle = computed(() => model.value?.name || model.value?.id || 'gguf.go')
+const modelTitle = computed(() => model.value?.name || model.value?.id || 'GoGGUF')
 const modelMeta = computed(() => {
   const parts: string[] = []
   if (model.value?.architecture) {

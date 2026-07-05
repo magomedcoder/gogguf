@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/magomedcoder/gguf.go"
-	"github.com/magomedcoder/gguf.go/pkg/model/qwen3"
-	"github.com/magomedcoder/gguf.go/pkg/ops"
+	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 type layerReport struct {
@@ -38,7 +38,7 @@ func main() {
 	topN := flag.Int("top", 5, "число top logits в отчёте")
 	flag.Parse()
 
-	engine, err := gguf.Load(*modelPath, gguf.LoadOptions{})
+	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -46,7 +46,7 @@ func main() {
 
 	text := *prompt
 	if *chat {
-		text, err = gguf.FormatChatUser(*prompt, gguf.ChatOptions{
+		text, err = gogguf.FormatChatUser(*prompt, gogguf.ChatOptions{
 			Metadata: engine.Metadata(),
 		})
 		if err != nil {
@@ -95,7 +95,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	report.GreedyNext = gguf.Greedy(logits)
+	report.GreedyNext = gogguf.Greedy(logits)
 	report.TopLogits = topLogits(logits, *topN)
 
 	enc := json.NewEncoder(os.Stdout)

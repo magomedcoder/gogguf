@@ -2,6 +2,7 @@ package jinja
 
 import (
 	"encoding/json"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -149,9 +150,7 @@ func (c *execCtx) set(name string, v value) {
 
 func (c *execCtx) fork() *execCtx {
 	vars := make(map[string]value, len(c.vars))
-	for k, v := range c.vars {
-		vars[k] = v
-	}
+	maps.Copy(vars, c.vars)
 
 	return &execCtx{
 		vars: vars,
@@ -530,7 +529,7 @@ func evalCall(e callExpr, ctx *execCtx) (value, error) {
 
 func evalNamespaceCall(args []expr, ctx *execCtx) (value, error) {
 	obj := make(map[string]value)
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if kw, ok := args[i].(kwargExpr); ok {
 			v, err := evalExpr(kw.value, ctx)
 			if err != nil {
@@ -546,10 +545,7 @@ func evalNamespaceCall(args []expr, ctx *execCtx) (value, error) {
 func evalRange(args []value) (value, error) {
 	switch len(args) {
 	case 1:
-		end := int(args[0].num)
-		if end < 0 {
-			end = 0
-		}
+		end := max(int(args[0].num), 0)
 
 		items := make([]value, end)
 		for i := range items {

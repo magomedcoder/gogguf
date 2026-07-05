@@ -1,6 +1,6 @@
 package jinja
 
-type node interface{}
+type node any
 
 type program struct {
 	nodes []node
@@ -42,7 +42,7 @@ type assignment struct {
 	value  expr
 }
 
-type expr interface{}
+type expr any
 
 type litExpr struct {
 	value value

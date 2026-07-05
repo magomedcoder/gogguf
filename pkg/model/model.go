@@ -3,9 +3,9 @@ package model
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
-	"github.com/magomedcoder/gguf.go/pkg/model/qwen3"
-	"github.com/magomedcoder/gguf.go/pkg/weights"
+	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
 // Model - интерфейс архитектуры для forward pass

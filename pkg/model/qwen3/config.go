@@ -3,7 +3,7 @@ package qwen3
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
 // Config - гиперпараметры Qwen3 из метаданных GGUF

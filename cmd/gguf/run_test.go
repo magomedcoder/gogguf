@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	chattmpl "github.com/magomedcoder/gguf.go/pkg/chat"
+	chattmpl "github.com/magomedcoder/gogguf/pkg/chat"
 )
 
 func TestFormatChatHistoryIncludesRoles(t *testing.T) {

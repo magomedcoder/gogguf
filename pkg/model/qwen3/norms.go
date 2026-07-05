@@ -3,7 +3,7 @@ package qwen3
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gguf.go/pkg/weights"
+	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
 type layerNorms struct {

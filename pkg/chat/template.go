@@ -3,7 +3,7 @@ package chat
 import (
 	"strings"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
 // Options задаёт параметры chat template

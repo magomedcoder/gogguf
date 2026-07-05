@@ -3,7 +3,7 @@ package main
 import (
 	"time"
 
-	"github.com/magomedcoder/gguf.go"
+	"github.com/magomedcoder/gogguf"
 )
 
 // Result - метрики одного прогона бенчмарка
@@ -20,7 +20,7 @@ type Result struct {
 }
 
 // Run выполняет один прогон: prefill + greedy decode maxTokens шагов
-func Run(ctx *gguf.Context, prompt string, maxTokens int) (Result, error) {
+func Run(ctx *gogguf.Context, prompt string, maxTokens int) (Result, error) {
 	totalStart := time.Now()
 
 	prefillStart := time.Now()
@@ -32,8 +32,8 @@ func Run(ctx *gguf.Context, prompt string, maxTokens int) (Result, error) {
 
 	decodeStart := time.Now()
 	decodeTokens := 0
-	for i := 0; i < maxTokens; i++ {
-		id, err := sess.DecodeStep(gguf.Greedy)
+	for range maxTokens {
+		id, err := sess.DecodeStep(gogguf.Greedy)
 		if err != nil {
 			return Result{}, err
 		}

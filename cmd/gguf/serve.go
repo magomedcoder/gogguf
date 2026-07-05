@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/magomedcoder/gguf.go"
-	"github.com/magomedcoder/gguf.go/server"
+	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/server"
 )
 
 func runServe(args []string) error {
@@ -26,7 +26,9 @@ func runServe(args []string) error {
 		return fmt.Errorf("использование: gguf serve -m файл.gguf [--addr 127.0.0.1:8000]")
 	}
 
-	engine, err := gguf.Load(*modelPath, gguf.LoadOptions{NGL: *ngl})
+	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{
+		NGL: *ngl,
+	})
 	if err != nil {
 		return err
 	}

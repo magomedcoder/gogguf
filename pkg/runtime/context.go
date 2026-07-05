@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/magomedcoder/gguf.go/pkg/sampler"
-	"github.com/magomedcoder/gguf.go/pkg/tokenizer"
+	"github.com/magomedcoder/gogguf/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/tokenizer"
 )
 
 // GenerateParams - параметры генерации

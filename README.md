@@ -1,8 +1,8 @@
-# gguf.go
+# GoGGUF
 
 [Русская версия](README-ru.md)
 
-**gguf.go** is a lightweight way to run GGUF models in Go without llama.cpp.
+**GoGGUF** is a lightweight way to run GGUF models in Go without llama.cpp.
 
 > **Early stage of development.**
 

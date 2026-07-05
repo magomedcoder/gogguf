@@ -1,8 +1,8 @@
-# web-ui for gguf.go
+# web-ui for GoGGUF
 
 [Русская версия](README-ru.md)
 
-Web chat for [gguf.go](../) - interface to the HTTP API `gguf serve`.
+Web chat for [GoGGUF](../) - interface to the HTTP API `gguf serve`.
 
 Vue 3 + TypeScript + Vite + Tailwind CSS.
 

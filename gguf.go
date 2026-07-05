@@ -1,12 +1,12 @@
-package gguf
+package gogguf
 
 import (
 	"io"
 
-	"github.com/magomedcoder/gguf.go/pkg/chat"
-	"github.com/magomedcoder/gguf.go/pkg/format"
-	"github.com/magomedcoder/gguf.go/pkg/runtime"
-	"github.com/magomedcoder/gguf.go/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/chat"
+	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/runtime"
+	"github.com/magomedcoder/gogguf/pkg/sampler"
 )
 
 // Парсинг GGUF (pkg/format)

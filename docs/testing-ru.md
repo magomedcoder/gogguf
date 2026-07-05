@@ -2,7 +2,7 @@
 
 [English version](testing.md)
 
-**gguf.go** сверяется с llama.cpp через golden-тесты и опциональный скрипт
+**gogguf** сверяется с llama.cpp через golden-тесты и опциональный скрипт
 
 ## Unit- и integration-тесты
 

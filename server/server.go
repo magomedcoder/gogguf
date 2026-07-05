@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/magomedcoder/gguf.go/pkg/chat"
-	"github.com/magomedcoder/gguf.go/pkg/runtime"
-	"github.com/magomedcoder/gguf.go/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/chat"
+	"github.com/magomedcoder/gogguf/pkg/runtime"
+	"github.com/magomedcoder/gogguf/pkg/sampler"
 )
 
 type Server struct {

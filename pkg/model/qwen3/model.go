@@ -3,10 +3,10 @@ package qwen3
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
-	"github.com/magomedcoder/gguf.go/pkg/gpu"
-	"github.com/magomedcoder/gguf.go/pkg/ops"
-	"github.com/magomedcoder/gguf.go/pkg/weights"
+	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/ops"
+	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
 // Model - Qwen3 transformer

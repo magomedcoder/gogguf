@@ -3,9 +3,9 @@ package weights
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gguf.go/pkg/format"
-	"github.com/magomedcoder/gguf.go/pkg/quant"
-	"github.com/magomedcoder/gguf.go/pkg/tensor"
+	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/quant"
+	"github.com/magomedcoder/gogguf/pkg/tensor"
 )
 
 // Store хранит тензоры модели, загружаемые лениво по имени

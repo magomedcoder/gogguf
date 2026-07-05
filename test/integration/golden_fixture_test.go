@@ -8,8 +8,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/magomedcoder/gguf.go"
-	"github.com/magomedcoder/gguf.go/pkg/chat"
+	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/pkg/chat"
 )
 
 type goldenFile struct {

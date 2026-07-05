@@ -6,12 +6,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/magomedcoder/gguf.go"
+	"github.com/magomedcoder/gogguf"
 )
 
 // runInspect выводит метаданные и список тензоров файла
 func runInspect(path string) error {
-	r, err := gguf.OpenFile(path)
+	r, err := gogguf.OpenFile(path)
 	if err != nil {
 		return err
 	}

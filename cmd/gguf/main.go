@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const usage = `gguf - система запуска GGUF-моделей на Go (gguf.go)
+const usage = `GoGGUF - система запуска GGUF-моделей на Go
 
 Использование:
   gguf inspect файл.gguf          просмотр метаданных и тензоров

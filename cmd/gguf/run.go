@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/magomedcoder/gguf.go"
-	chattmpl "github.com/magomedcoder/gguf.go/pkg/chat"
+	"github.com/magomedcoder/gogguf"
+	chattmpl "github.com/magomedcoder/gogguf/pkg/chat"
 )
 
 // runRun выполняет генерацию текста
@@ -41,7 +41,9 @@ func runRun(args []string) error {
 		return fmt.Errorf("укажите промпт через -p или используйте -i")
 	}
 
-	engine, err := gguf.Load(*modelPath, gguf.LoadOptions{NGL: *ngl})
+	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{
+		NGL: *ngl,
+	})
 	if err != nil {
 		return err
 	}
@@ -54,7 +56,7 @@ func runRun(args []string) error {
 		return err
 	}
 
-	samp := gguf.NewSampler(gguf.SamplerConfig{
+	samp := gogguf.NewSampler(gogguf.SamplerConfig{
 		Temp: float32(*temp),
 		TopK: *topK,
 		TopP: float32(*topP),
@@ -62,7 +64,7 @@ func runRun(args []string) error {
 		Seed: *seed,
 	})
 
-	genParams := gguf.GenerateParams{
+	genParams := gogguf.GenerateParams{
 		MaxTokens:     *maxTokens,
 		Sampler:       samp,
 		RepeatPenalty: float32(*repeatPenalty),
@@ -86,7 +88,7 @@ func runRun(args []string) error {
 	return nil
 }
 
-func formatPrompt(engine *gguf.Engine, user string, chat bool, thinking *bool) (string, error) {
+func formatPrompt(engine *gogguf.Engine, user string, chat bool, thinking *bool) (string, error) {
 	if !chat {
 		return user, nil
 	}
@@ -106,7 +108,7 @@ func formatChatHistory(meta map[string]any, messages []chattmpl.Message, thinkin
 	})
 }
 
-func runInteractive(ctx *gguf.Context, engine *gguf.Engine, chat bool, thinking *bool, params gguf.GenerateParams, in io.Reader, out io.Writer) error {
+func runInteractive(ctx *gogguf.Context, engine *gogguf.Engine, chat bool, thinking *bool, params gogguf.GenerateParams, in io.Reader, out io.Writer) error {
 	fmt.Fprintln(os.Stderr, "Интерактивный режим. Пустая строка или Ctrl+D - выход")
 	if chat {
 		fmt.Fprintln(os.Stderr, "Команды: /clear - сбросить историю диалога")
