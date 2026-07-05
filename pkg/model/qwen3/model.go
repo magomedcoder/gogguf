@@ -11,16 +11,17 @@ import (
 
 // Model - Qwen3 transformer
 type Model struct {
-	cfg         Config
-	weights     *weights.Store
-	cache       *KVCache
-	gpu         gpu.Backend
-	ngl         int
-	debug       *DebugHooks
-	scratch     scratch
-	layerNorms  []layerNorms
-	outNorm     []float32
-	blockPrefix []string
+	cfg          Config
+	weights      *weights.Store
+	cache        *KVCache
+	gpu          gpu.Backend
+	ngl          int
+	debug        *DebugHooks
+	scratch      scratch
+	layerNorms   []layerNorms
+	layerTensors []layerTensors
+	outNorm      []float32
+	lmHeadName   string
 }
 
 // Load создаёт Qwen3 из весов
@@ -39,21 +40,22 @@ func Load(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
 		return nil, err
 	}
 
-	blockPrefix := make([]string, cfg.NumLayers)
-	for i := range cfg.NumLayers {
-		blockPrefix[i] = fmt.Sprintf("blk.%d.", i)
+	lmHeadName, err := resolveLMHeadName(w)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Model{
-		cfg:         cfg,
-		weights:     w,
-		cache:       NewKVCache(cfg),
-		gpu:         g,
-		ngl:         ngl,
-		scratch:     newScratch(cfg),
-		layerNorms:  layerNorms,
-		outNorm:     outNorm,
-		blockPrefix: blockPrefix,
+		cfg:          cfg,
+		weights:      w,
+		cache:        NewKVCache(cfg),
+		gpu:          g,
+		ngl:          ngl,
+		scratch:      newScratch(cfg),
+		layerNorms:   layerNorms,
+		layerTensors: loadLayerTensors(cfg.NumLayers),
+		outNorm:      outNorm,
+		lmHeadName:   lmHeadName,
 	}, nil
 }
 
@@ -152,21 +154,21 @@ func (m *Model) embedToken(tokenID int) error {
 
 func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
-	p := m.blockPrefix[layer]
+	lt := m.layerTensors[layer]
 
 	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
-	if err := m.matmulInto(p+"attn_q.weight", m.cfg.NumHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.q, layer); err != nil {
+	if err := m.matmulInto(lt.attnQ, m.cfg.NumHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.q, layer); err != nil {
 		return err
 	}
 
-	if err := m.matmulInto(p+"attn_k.weight", m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.k, layer); err != nil {
+	if err := m.matmulInto(lt.attnK, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.k, layer); err != nil {
 		return err
 	}
 
-	if err := m.matmulInto(p+"attn_v.weight", m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.v, layer); err != nil {
+	if err := m.matmulInto(lt.attnV, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.v, layer); err != nil {
 		return err
 	}
 
@@ -188,7 +190,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	if err := m.matmulInto(p+"attn_output.weight", m.cfg.EmbeddingDim, m.cfg.NumHeads*m.cfg.HeadDim, m.scratch.attn, m.scratch.h, layer); err != nil {
+	if err := m.matmulInto(lt.attnOut, m.cfg.EmbeddingDim, m.cfg.NumHeads*m.cfg.HeadDim, m.scratch.attn, m.scratch.h, layer); err != nil {
 		return err
 	}
 	ops.AddInPlace(m.scratch.x, m.scratch.h)
@@ -197,16 +199,16 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	if err := m.matmulInto(p+"ffn_gate.weight", m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.gate, layer); err != nil {
+	if err := m.matmulInto(lt.ffnGate, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.gate, layer); err != nil {
 		return err
 	}
 
-	if err := m.matmulInto(p+"ffn_up.weight", m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.up, layer); err != nil {
+	if err := m.matmulInto(lt.ffnUp, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.up, layer); err != nil {
 		return err
 	}
 	ops.SwiGLUInPlace(m.scratch.gate, m.scratch.up)
 
-	if err := m.matmulInto(p+"ffn_down.weight", m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate, m.scratch.h, layer); err != nil {
+	if err := m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate, m.scratch.h, layer); err != nil {
 		return err
 	}
 
@@ -312,11 +314,7 @@ func (m *Model) logits() error {
 		return err
 	}
 
-	name := "output.weight"
-	if _, err := m.weights.Info(name); err != nil {
-		name = "token_embd.weight"
-	}
-
+	name := m.lmHeadName
 	raw, err := m.weights.Raw(name)
 	if err != nil {
 		return err

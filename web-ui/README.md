@@ -33,7 +33,7 @@ In development mode, API requests are proxied: `/api/*` -> `http://127.0.0.1:800
 - chat with message history
 - real-time response streaming
 - model name and metadata
-- settings: `max_tokens`, `temperature`, `thinking`
+- settings: `max_tokens`, `temperature`, `thinking`, `repeat_penalty`, `min_p`
 - stop generation, reset chat
 
 More on endpoints: [docs/api.md](../docs/api.md).

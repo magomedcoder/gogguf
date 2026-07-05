@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 	"github.com/magomedcoder/gogguf/pkg/ops"
@@ -57,7 +58,7 @@ func loadLayersFixture(t *testing.T) layersFile {
 
 func TestLayersFixture(t *testing.T) {
 	lf := loadLayersFixture(t)
-	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
+	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestLayersFixture(t *testing.T) {
 				}
 			}
 
-			next := gguf.Greedy(logits)
+			next := gogguf.Greedy(logits)
 			if next != tc.GreedyNext {
 				t.Fatalf("greedy next = %d, ожидали %d", next, tc.GreedyNext)
 			}

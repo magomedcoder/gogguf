@@ -16,6 +16,8 @@ const en: LocaleDefinition<'en'> = {
       maxTokens: 'max_tokens',
       temperature: 'temperature',
       thinking: 'thinking',
+      repeatPenalty: 'repeat_penalty',
+      minP: 'min_p',
     },
     errors: {
       streamingNotSupported: 'Streaming is not supported',

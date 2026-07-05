@@ -10,7 +10,7 @@ import (
 )
 
 func TestJinjaQwen3MatchesFallback(t *testing.T) {
-	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
+	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}

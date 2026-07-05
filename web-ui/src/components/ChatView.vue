@@ -18,6 +18,8 @@ const settings = reactive({
   maxTokens: 512,
   temperature: 0.7,
   thinking: false,
+  repeatPenalty: 1,
+  minP: 0,
 })
 
 const modelTitle = computed(() => model.value?.name || model.value?.id || 'GoGGUF')
@@ -205,6 +207,28 @@ watch(messages, () => {
             class="accent-[#6ea8fe]"
           />
           {{ t('settings.thinking') }}
+        </label>
+        <label class="inline-flex items-center gap-2">
+          {{ t('settings.repeatPenalty') }}
+          <input
+            v-model.number="settings.repeatPenalty"
+            type="number"
+            min="1"
+            max="2"
+            step="0.05"
+            class="w-[72px] rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-2 py-1 text-[#e8e8e8]"
+          />
+        </label>
+        <label class="inline-flex items-center gap-2">
+          {{ t('settings.minP') }}
+          <input
+            v-model.number="settings.minP"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            class="w-[72px] rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-2 py-1 text-[#e8e8e8]"
+          />
         </label>
       </div>
     </details>

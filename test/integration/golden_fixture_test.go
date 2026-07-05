@@ -65,7 +65,7 @@ func loadGolden(t *testing.T) goldenFile {
 
 func TestGoldenFixture(t *testing.T) {
 	gf := loadGolden(t)
-	engine, err := gguf.Load(modelPath(t), gguf.LoadOptions{})
+	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -112,9 +112,9 @@ func TestGoldenFixture(t *testing.T) {
 					maxTok = len(tc.GreedyTokens)
 				}
 
-				if err := sess.GenerateSteps(gguf.GenerateParams{
+				if err := sess.GenerateSteps(gogguf.GenerateParams{
 					MaxTokens: maxTok,
-					Sampler:   gguf.Greedy,
+					Sampler:   gogguf.Greedy,
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -149,7 +149,7 @@ func TestGoldenFixture(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				next := gguf.Greedy(logits)
+				next := gogguf.Greedy(logits)
 				if next != tc.GreedyNext {
 					t.Fatalf("greedy next = %d, ожидали %d", next, tc.GreedyNext)
 				}
@@ -166,7 +166,7 @@ func TestGoldenFixture(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				next := gguf.Greedy(logits)
+				next := gogguf.Greedy(logits)
 				if next != tc.GreedyNext {
 					t.Fatalf("greedy next = %d, ожидали %d", next, tc.GreedyNext)
 				}

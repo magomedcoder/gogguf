@@ -33,7 +33,7 @@ yarn dev  # или npm run dev
 - диалог с историей сообщений
 - стриминг ответа в реальном времени
 - название и метаданные модели
-- настройки: `max_tokens`, `temperature`, `thinking`
+- настройки: `max_tokens`, `temperature`, `thinking`, `repeat_penalty`, `min_p`
 - остановка генерации, сброс чата
 
 Подробнее об эндпоинтах: [docs/api-ru.md](../docs/api-ru.md).

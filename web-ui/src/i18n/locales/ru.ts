@@ -16,6 +16,8 @@ const ru: LocaleDefinition<'ru'> = {
       maxTokens: 'max_tokens',
       temperature: 'temperature',
       thinking: 'thinking',
+      repeatPenalty: 'repeat_penalty',
+      minP: 'min_p',
     },
     errors: {
       streamingNotSupported: 'стриминг не поддерживается',

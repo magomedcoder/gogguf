@@ -17,6 +17,8 @@ export interface ChatSettings {
   maxTokens: number
   temperature: number
   thinking: boolean
+  repeatPenalty: number
+  minP: number
 }
 
 export interface ChatStreamChunk {

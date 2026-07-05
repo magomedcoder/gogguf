@@ -39,6 +39,8 @@ export async function* streamChat(
       max_tokens: settings.maxTokens,
       temperature: settings.temperature,
       thinking: settings.thinking,
+      repeat_penalty: settings.repeatPenalty,
+      min_p: settings.minP,
     }),
     signal,
   })
