@@ -28,7 +28,7 @@ noavx2:
 
 // func dotAVX2Asm(a []float32, b []float32, n int) float32
 // n кратно 8
-TEXT ·dotAVX2Asm(SB), NOSPLIT, $0-28
+TEXT ·dotAVX2Asm(SB), NOSPLIT, $0-60
 	MOVQ  a_base+0(FP), SI
 	MOVQ  b_base+24(FP), DI
 	MOVQ  n+48(FP), CX

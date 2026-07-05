@@ -179,7 +179,7 @@ enum {
 };
 
 int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
-	CUmodule *module, CUfunction *fn, CUfunction *fn_q8, char *errbuf, size_t errbuf_len) {
+	CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, char *errbuf, size_t errbuf_len) {
 	CUresult err;
 
 	if (drv->cuCtxSetCurrent) {
@@ -227,12 +227,14 @@ int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
 		}
 	}
 
-	err = drv->cuModuleGetFunction(fn, *module, "matmul_vec");
-	if (err != CUDA_SUCCESS) {
-		if (errbuf && errbuf_len > 0) {
-			snprintf(errbuf, errbuf_len, "cuModuleGetFunction matmul_vec: %s", gguf_cuda_last_error(drv, err));
+	if (fn) {
+		err = drv->cuModuleGetFunction(fn, *module, "matmul_vec");
+		if (err != CUDA_SUCCESS) {
+			if (errbuf && errbuf_len > 0) {
+				snprintf(errbuf, errbuf_len, "cuModuleGetFunction matmul_vec: %s", gguf_cuda_last_error(drv, err));
+			}
+			return -2;
 		}
-		return -2;
 	}
 
 	if (fn_q8) {
@@ -242,6 +244,16 @@ int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
 				snprintf(errbuf, errbuf_len, "cuModuleGetFunction matmul_vec_q8_0: %s", gguf_cuda_last_error(drv, err));
 			}
 			return -3;
+		}
+	}
+
+	if (fn_rmsnorm) {
+		err = drv->cuModuleGetFunction(fn_rmsnorm, *module, "rmsnorm");
+		if (err != CUDA_SUCCESS) {
+			if (errbuf && errbuf_len > 0) {
+				snprintf(errbuf, errbuf_len, "cuModuleGetFunction rmsnorm: %s", gguf_cuda_last_error(drv, err));
+			}
+			return -4;
 		}
 	}
 
@@ -325,6 +337,72 @@ fail:
 	drv->cuMemFree(d_vec);
 	drv->cuMemFree(d_out);
 	return -3;
+}
+
+int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn,
+	const float *x, const float *weight, float *out, int n, float eps) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (n <= 0) {
+		return -11;
+	}
+
+	CUdeviceptr d_x = 0;
+	CUdeviceptr d_weight = 0;
+	CUdeviceptr d_out = 0;
+
+	size_t nbytes = (size_t)n * sizeof(float);
+
+	if (drv->cuMemAlloc(&d_x, nbytes) != CUDA_SUCCESS) {
+		return -1;
+	}
+
+	if (drv->cuMemAlloc(&d_weight, nbytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_x);
+		return -2;
+	}
+
+	if (drv->cuMemAlloc(&d_out, nbytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_x);
+		drv->cuMemFree(d_weight);
+		return -3;
+	}
+
+	if (drv->cuMemcpyHtoD(d_x, x, nbytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyHtoD(d_weight, weight, nbytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	void *params[5];
+	params[0] = &d_x;
+	params[1] = &d_weight;
+	params[2] = &d_out;
+	params[3] = &n;
+	params[4] = &eps;
+
+	if (drv->cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyDtoH(out, d_out, nbytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	drv->cuMemFree(d_x);
+	drv->cuMemFree(d_weight);
+	drv->cuMemFree(d_out);
+	return 0;
+
+fail:
+	drv->cuMemFree(d_x);
+	drv->cuMemFree(d_weight);
+	drv->cuMemFree(d_out);
+	return -4;
 }
 
 int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *matrix, const float *vec, float *out, int rows, int cols) {

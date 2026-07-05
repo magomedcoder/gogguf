@@ -156,7 +156,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
 
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
+	if err := m.rmsNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, layer); err != nil {
 		return err
 	}
 
@@ -172,11 +172,11 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	if err := m.normHeadsInto(m.scratch.q, ln.qNorm, m.cfg.NumHeads); err != nil {
+	if err := m.normHeadsInto(m.scratch.q, ln.qNorm, m.cfg.NumHeads, layer); err != nil {
 		return err
 	}
 
-	if err := m.normHeadsInto(m.scratch.k, ln.kNorm, m.cfg.NumKVHeads); err != nil {
+	if err := m.normHeadsInto(m.scratch.k, ln.kNorm, m.cfg.NumKVHeads, layer); err != nil {
 		return err
 	}
 
@@ -195,7 +195,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	}
 	ops.AddInPlace(m.scratch.x, m.scratch.h)
 
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
+	if err := m.rmsNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, layer); err != nil {
 		return err
 	}
 
@@ -351,6 +351,16 @@ func (m *Model) logits() error {
 	return nil
 }
 
+func (m *Model) rmsNormInto(dst, x, weight []float32, layer int) error {
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.gpu.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps); err == nil {
+			return nil
+		}
+	}
+
+	return ops.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps)
+}
+
 func applyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
 	for h := range nHeads {
 		off := h * headDim
@@ -358,14 +368,14 @@ func applyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
 	}
 }
 
-func (m *Model) normHeadsInto(v []float32, weight []float32, nHeads int) error {
+func (m *Model) normHeadsInto(v []float32, weight []float32, nHeads, layer int) error {
 	if len(weight) != m.cfg.HeadDim {
 		return fmt.Errorf("qwen3: len(weight)=%d, head_dim=%d", len(weight), m.cfg.HeadDim)
 	}
 
 	for h := range nHeads {
 		off := h * m.cfg.HeadDim
-		if err := ops.RMSNormInto(v[off:off+m.cfg.HeadDim], v[off:off+m.cfg.HeadDim], weight, m.cfg.RMSNormEps); err != nil {
+		if err := m.rmsNormInto(v[off:off+m.cfg.HeadDim], v[off:off+m.cfg.HeadDim], weight, layer); err != nil {
 			return err
 		}
 	}

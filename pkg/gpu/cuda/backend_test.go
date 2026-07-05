@@ -80,3 +80,34 @@ func TestMatMulVecQ8_0GPU(t *testing.T) {
 		}
 	}
 }
+
+func TestRMSNormGPU(t *testing.T) {
+	b, err := Open()
+	if err != nil {
+		t.Skip("CUDA недоступна:", err)
+	}
+
+	if !b.hasRMS {
+		t.Skip("CUDA rmsnorm kernel недоступен")
+	}
+
+	defer b.Close()
+
+	x := []float32{1, 2, 3, 4}
+	weight := []float32{1, 1, 1, 1}
+	dst := make([]float32, len(x))
+	want := make([]float32, len(x))
+	if err := ops.RMSNormInto(want, x, weight, 1e-6); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := b.RMSNormInto(dst, x, weight, 1e-6); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(dst[i]-want[i])) > 1e-4 {
+			t.Fatalf("элемент %d: получили %v, ожидали %v", i, dst[i], want[i])
+		}
+	}
+}

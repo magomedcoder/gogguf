@@ -31,13 +31,16 @@ type gpuQ8Matrix struct {
 
 // Backend - CUDA через Driver API (libcuda.so), без cublas/cudart
 type Backend struct {
-	name   string
-	drv    C.cuda_driver_t
-	lib    unsafe.Pointer
-	ctx    C.CUcontext
-	module C.CUmodule
-	fn     C.CUfunction
-	fnQ8   C.CUfunction
+	name      string
+	drv       C.cuda_driver_t
+	lib       unsafe.Pointer
+	ctx       C.CUcontext
+	module    C.CUmodule
+	moduleOps C.CUmodule
+	fn        C.CUfunction
+	fnQ8      C.CUfunction
+	fnRMS     C.CUfunction
+	hasRMS    bool
 
 	mu         sync.Mutex
 	matrices   map[string]gpuMatrix
@@ -71,17 +74,32 @@ func Open() (*Backend, error) {
 	defer C.free(unsafe.Pointer(cptx))
 
 	var errBuf [4096]C.char
-	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, &errBuf[0], C.size_t(len(errBuf)))
+	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, &errBuf[0], C.size_t(len(errBuf)))
 	if rc != 0 && int(cc) >= 120 {
-		// fallback: sm_60 PTX через forward JIT
 		ptx = kernelsPTX(60)
 		cptx2 := C.CString(ptx)
 		defer C.free(unsafe.Pointer(cptx2))
-		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx2, &b.module, &b.fn, &b.fnQ8, &errBuf[0], C.size_t(len(errBuf)))
+		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx2, &b.module, &b.fn, &b.fnQ8, nil, &errBuf[0], C.size_t(len(errBuf)))
 	}
 	if rc != 0 {
 		C.gguf_cuda_shutdown(&b.drv, b.ctx)
-		return nil, fmt.Errorf("cuda: load module: код %d: %s", int(rc), C.GoString(&errBuf[0]))
+		return nil, fmt.Errorf("cuda: load matmul module: код %d: %s", int(rc), C.GoString(&errBuf[0]))
+	}
+
+	ptxOps := opsPTX(int(cc))
+	cptxOps := C.CString(ptxOps)
+	defer C.free(unsafe.Pointer(cptxOps))
+
+	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps, &b.moduleOps, nil, nil, &b.fnRMS, &errBuf[0], C.size_t(len(errBuf)))
+	if rc != 0 && int(cc) >= 120 {
+		ptxOps = opsPTX(60)
+		cptxOps2 := C.CString(ptxOps)
+		defer C.free(unsafe.Pointer(cptxOps2))
+		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps2, &b.moduleOps, nil, nil, &b.fnRMS, &errBuf[0], C.size_t(len(errBuf)))
+	}
+
+	if rc == 0 {
+		b.hasRMS = true
 	}
 
 	return b, nil
@@ -214,6 +232,29 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 	}
 
 	return out, nil
+}
+
+func (b *Backend) RMSNormInto(dst, x, weight []float32, eps float32) error {
+	if !b.hasRMS {
+		return fmt.Errorf("cuda: rmsnorm kernel недоступен")
+	}
+
+	if len(dst) != len(x) || len(x) != len(weight) || len(x) == 0 {
+		return fmt.Errorf("cuda: RMSNormInto: несовпадение длин")
+	}
+
+	rc := C.gguf_cuda_rmsnorm(
+		&b.drv, b.ctx, b.fnRMS,
+		(*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&weight[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(len(x)), C.float(eps),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: rmsnorm: код %d", int(rc))
+	}
+
+	return nil
 }
 
 func validateMatMul(matrix []float32, rows, cols int, vec []float32) error {

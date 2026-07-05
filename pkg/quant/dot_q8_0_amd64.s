@@ -27,7 +27,7 @@ noavx2:
 	RET
 
 // func dotBlockQ8_0AVX2Asm(d float32, q *byte, x *float32) float32
-TEXT ·dotBlockQ8_0AVX2Asm(SB), NOSPLIT, $0-32
+TEXT ·dotBlockQ8_0AVX2Asm(SB), NOSPLIT, $0-28
 	MOVSS   d+0(FP), X0
 	VBROADCASTSS X0, Y7
 

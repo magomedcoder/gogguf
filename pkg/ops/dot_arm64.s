@@ -6,7 +6,7 @@
 
 // func dotNEONAsm(a []float32, b []float32, n int) float32
 // n кратно 4
-TEXT ·dotNEONAsm(SB), NOSPLIT, $0-28
+TEXT ·dotNEONAsm(SB), NOSPLIT, $0-60
 	MOVD  a_base+0(FP), R0
 	MOVD  b_base+24(FP), R1
 	MOVD  n+48(FP), R2

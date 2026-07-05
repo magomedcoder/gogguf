@@ -2,13 +2,22 @@
 
 package cuda
 
-// kernelsPTX выбирает PTX по compute capability GPU
+// kernelsPTX выбирает PTX matmul-ядер по compute capability GPU
 func kernelsPTX(cc int) string {
 	if cc >= 120 {
-		return ptxHeader120 + kernelsBody
+		return ptxHeader120 + matmulKernelsBody
 	}
 
-	return ptxHeader60 + kernelsBody
+	return ptxHeader60 + matmulKernelsBody
+}
+
+// opsPTX выбирает PTX op-ядер (RMSNorm, ...)
+func opsPTX(cc int) string {
+	if cc >= 120 {
+		return ptxHeader120 + opsKernelsBody
+	}
+
+	return ptxHeader60 + opsKernelsBody
 }
 
 const ptxHeader60 = `.version 7.0
@@ -21,7 +30,7 @@ const ptxHeader120 = `.version 8.0
 .address_size 64
 `
 
-const kernelsBody = `
+const matmulKernelsBody = `
 .visible .entry matmul_vec(
     .param .u64 param_matrix,
     .param .u64 param_vec,
@@ -164,6 +173,75 @@ Q8_DONE:
     st.global.f32   [%rd13], %f1;
 
 Q8_EXIT:
+    ret;
+}
+`
+
+const opsKernelsBody = `
+.visible .entry rmsnorm(
+    .param .u64 param_x,
+    .param .u64 param_weight,
+    .param .u64 param_out,
+    .param .u32 param_n,
+    .param .f32 param_eps
+)
+{
+    .reg .pred      %p<1>;
+    .reg .b32       %r<4>;
+    .reg .b64       %rd<10>;
+    .reg .f32       %f<6>;
+
+    mov.u32         %r1, %tid.x;
+    setp.ne.u32     %p0, %r1, 0;
+    @%p0            bra RN_EXIT;
+
+    ld.param.u64    %rd1, [param_x];
+    ld.param.u64    %rd2, [param_weight];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r2, [param_n];
+    ld.param.f32    %f1, [param_eps];
+
+    mov.f32         %f2, 0f00000000;
+    mov.u32         %r3, 0;
+
+RN_SUM:
+    setp.ge.u32     %p0, %r3, %r2;
+    @%p0            bra RN_SCALE;
+
+    mul.wide.u32    %rd4, %r3, 4;
+    add.u64         %rd5, %rd1, %rd4;
+    ld.global.f32   %f3, [%rd5];
+    mul.f32         %f3, %f3, %f3;
+    add.f32         %f2, %f2, %f3;
+
+    add.u32         %r3, %r3, 1;
+    bra RN_SUM;
+
+RN_SCALE:
+    cvt.rn.f32.u32  %f4, %r2;
+    div.rn.f32      %f4, %f2, %f4;
+    add.f32         %f4, %f4, %f1;
+    rsqrt.approx.f32 %f5, %f4;
+    mov.u32         %r3, 0;
+
+RN_OUT:
+    setp.ge.u32     %p0, %r3, %r2;
+    @%p0            bra RN_EXIT;
+
+    mul.wide.u32    %rd4, %r3, 4;
+    add.u64         %rd5, %rd1, %rd4;
+    ld.global.f32   %f3, [%rd5];
+    add.u64         %rd6, %rd2, %rd4;
+    ld.global.f32   %f4, [%rd6];
+    mul.f32         %f3, %f3, %f5;
+    mul.f32         %f3, %f3, %f4;
+    add.u64         %rd7, %rd3, %rd4;
+    st.global.f32   [%rd7], %f3;
+
+    add.u32         %r3, %r3, 1;
+    bra RN_OUT;
+
+RN_EXIT:
     ret;
 }
 `
