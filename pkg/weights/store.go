@@ -12,6 +12,7 @@ import (
 type Store struct {
 	reader *format.Reader
 	raw    map[string][]byte
+	floats map[string][]float32
 }
 
 // New создаёт хранилище весов поверх GGUF-reader
@@ -19,6 +20,7 @@ func New(r *format.Reader) *Store {
 	return &Store{
 		reader: r,
 		raw:    make(map[string][]byte),
+		floats: make(map[string][]float32),
 	}
 }
 
@@ -55,6 +57,10 @@ func (s *Store) Info(name string) (*format.TensorInfo, error) {
 
 // Floats загружает и деквантизирует тензор (norm weights и т.п.)
 func (s *Store) Floats(name string) ([]float32, error) {
+	if f, ok := s.floats[name]; ok {
+		return f, nil
+	}
+
 	info, err := s.reader.TensorInfo(name)
 	if err != nil {
 		return nil, err
@@ -65,5 +71,11 @@ func (s *Store) Floats(name string) ([]float32, error) {
 		return nil, err
 	}
 
-	return quant.ToFloat32(info.Type, raw, int(info.ValuesCount()))
+	f, err := quant.ToFloat32(info.Type, raw, int(info.ValuesCount()))
+	if err != nil {
+		return nil, err
+	}
+
+	s.floats[name] = f
+	return f, nil
 }

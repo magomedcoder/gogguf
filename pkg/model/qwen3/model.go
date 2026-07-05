@@ -11,13 +11,16 @@ import (
 
 // Model - Qwen3 transformer
 type Model struct {
-	cfg     Config
-	weights *weights.Store
-	cache   *KVCache
-	gpu     gpu.Backend
-	ngl     int
-	debug   *DebugHooks
-	scratch scratch
+	cfg         Config
+	weights     *weights.Store
+	cache       *KVCache
+	gpu         gpu.Backend
+	ngl         int
+	debug       *DebugHooks
+	scratch     scratch
+	layerNorms  []layerNorms
+	outNorm     []float32
+	blockPrefix []string
 }
 
 // Load создаёт Qwen3 из весов
@@ -31,13 +34,26 @@ func Load(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
 		return nil, fmt.Errorf("qwen3: ngl=%d больше числа слоёв %d", ngl, cfg.NumLayers)
 	}
 
+	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)
+	if err != nil {
+		return nil, err
+	}
+
+	blockPrefix := make([]string, cfg.NumLayers)
+	for i := range cfg.NumLayers {
+		blockPrefix[i] = fmt.Sprintf("blk.%d.", i)
+	}
+
 	return &Model{
-		cfg:     cfg,
-		weights: w,
-		cache:   NewKVCache(cfg),
-		gpu:     g,
-		ngl:     ngl,
-		scratch: newScratch(cfg),
+		cfg:         cfg,
+		weights:     w,
+		cache:       NewKVCache(cfg),
+		gpu:         g,
+		ngl:         ngl,
+		scratch:     newScratch(cfg),
+		layerNorms:  layerNorms,
+		outNorm:     outNorm,
+		blockPrefix: blockPrefix,
 	}, nil
 }
 
@@ -135,14 +151,10 @@ func (m *Model) embedToken(tokenID int) error {
 }
 
 func (m *Model) forwardBlock(layer int, pos int) error {
-	p := fmt.Sprintf("blk.%d.", layer)
+	ln := m.layerNorms[layer]
+	p := m.blockPrefix[layer]
 
-	attnNorm, err := m.weights.Floats(p + "attn_norm.weight")
-	if err != nil {
-		return err
-	}
-
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, attnNorm, m.cfg.RMSNormEps); err != nil {
+	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -158,11 +170,11 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	if err := m.normHeadsInto(m.scratch.q, p+"attn_q_norm.weight", m.cfg.NumHeads); err != nil {
+	if err := m.normHeadsInto(m.scratch.q, ln.qNorm, m.cfg.NumHeads); err != nil {
 		return err
 	}
 
-	if err := m.normHeadsInto(m.scratch.k, p+"attn_k_norm.weight", m.cfg.NumKVHeads); err != nil {
+	if err := m.normHeadsInto(m.scratch.k, ln.kNorm, m.cfg.NumKVHeads); err != nil {
 		return err
 	}
 
@@ -181,12 +193,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	}
 	ops.AddInPlace(m.scratch.x, m.scratch.h)
 
-	ffnNorm, err := m.weights.Floats(p + "ffn_norm.weight")
-	if err != nil {
-		return err
-	}
-
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ffnNorm, m.cfg.RMSNormEps); err != nil {
+	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -301,12 +308,7 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logits() error {
-	outNorm, err := m.weights.Floats("output_norm.weight")
-	if err != nil {
-		return err
-	}
-
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, outNorm, m.cfg.RMSNormEps); err != nil {
+	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -358,14 +360,9 @@ func applyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
 	}
 }
 
-func (m *Model) normHeadsInto(v []float32, weightName string, nHeads int) error {
-	weight, err := m.weights.Floats(weightName)
-	if err != nil {
-		return err
-	}
-
+func (m *Model) normHeadsInto(v []float32, weight []float32, nHeads int) error {
 	if len(weight) != m.cfg.HeadDim {
-		return fmt.Errorf("qwen3: %s: len=%d, head_dim=%d", weightName, len(weight), m.cfg.HeadDim)
+		return fmt.Errorf("qwen3: len(weight)=%d, head_dim=%d", len(weight), m.cfg.HeadDim)
 	}
 
 	for h := range nHeads {
