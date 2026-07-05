@@ -5,7 +5,7 @@
 ## Local build
 
 ```bash
-go build -o build/gguf ./cmd/gguf
+go build -o build/gogguf ./cmd/gogguf
 ```
 
 No CGO required - cross-compile to any platform.
@@ -17,7 +17,7 @@ Requires an NVIDIA driver (`libcuda.so`) and CGO.
 CUDA Toolkit is not required - Driver API is used via `dlopen`.
 
 ```bash
-CGO_ENABLED=1 go build -tags cuda -o build/gguf ./cmd/gguf
+CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
 ```
 
 Verify GPU matmul:
@@ -39,22 +39,22 @@ Multi-stage `Dockerfile`: CPU cross-compilation by default, separate CUDA target
 **CPU (default)** - all platforms, `CGO_ENABLED=0`:
 
 ```bash
-docker build -t gguf-build .
-docker run --rm -v "$(pwd)/build:/out" gguf-build
+docker build -t gogguf-build .
+docker run --rm -v "$(pwd)/build:/out" gogguf-build
 ```
 
 **CUDA** - `linux-amd64/gguf-cuda` only:
 
 ```bash
-docker build --target cuda -t gguf-cuda .
-docker run --rm -v "$(pwd)/build:/out" gguf-cuda
+docker build --target cuda -t gogguf-cuda .
+docker run --rm -v "$(pwd)/build:/out" gogguf-cuda
 ```
 
 **CPU + CUDA**:
 
 ```bash
-docker build --target release -t gguf-release .
-docker run --rm -v "$(pwd)/build:/out" gguf-release
+docker build --target release -t gogguf-release .
+docker run --rm -v "$(pwd)/build:/out" gogguf-release
 ```
 
 | Target / mode | Output                         |

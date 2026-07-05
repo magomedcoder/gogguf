@@ -7,17 +7,17 @@
 ```go
 import "github.com/magomedcoder/gogguf"
 
-engine, err := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
+engine, err := gogguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 0, // matmul N слоёв на GPU; <= block_count, нужна CUDA-сборка
 })
 ctx, err := engine.NewContext()
 
-prompt, err := gguf.FormatChatUser("Привет", gguf.ChatOptions{
+prompt, err := gogguf.FormatChatUser("Привет", gogguf.ChatOptions{
 	Metadata: engine.Metadata(),
 })
-text, err := ctx.Generate(prompt, gguf.GenerateParams{
+text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 	MaxTokens: 128,
-	Sampler:   gguf.Greedy,
+	Sampler:   gogguf.Greedy,
 })
 ```
 
@@ -26,7 +26,7 @@ text, err := ctx.Generate(prompt, gguf.GenerateParams{
 ```go
 sess, err := ctx.StartGeneration(prompt)
 for i := 0; i < maxTokens; i++ {
-	id, err := sess.DecodeStep(gguf.Greedy)
+	id, err := sess.DecodeStep(gogguf.Greedy)
 	if id < 0 {
 		break
 	}
@@ -38,14 +38,14 @@ for i := 0; i < maxTokens; i++ {
 ## Sampling с temperature / top-k / top-p / min-p
 
 ```go
-sampler := gguf.NewSampler(gguf.SamplerConfig{
+sampler := gogguf.NewSampler(gogguf.SamplerConfig{
 	Temp: 0.7,
 	TopK: 40,
 	TopP: 0.9,
 	MinP: 0.05,
 	Seed: 42,
 })
-text, err := ctx.Generate(prompt, gguf.GenerateParams{
+text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 	MaxTokens:     64,
 	Sampler:       sampler,
 	RepeatPenalty: 1.1,
@@ -56,7 +56,7 @@ text, err := ctx.Generate(prompt, gguf.GenerateParams{
 ## Загрузка через mmap (zero-copy веса)
 
 ```go
-engine, err := gguf.LoadMapped("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
+engine, err := gogguf.LoadMapped("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 0,
 })
 ```
@@ -64,7 +64,7 @@ engine, err := gguf.LoadMapped("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions
 ## GPU offload из кода
 
 ```go
-engine, err := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
+engine, err := gogguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 28, // нужна сборка -tags cuda
 })
 ```
@@ -74,7 +74,7 @@ engine, err := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{
 ```go
 import "github.com/magomedcoder/gogguf"
 
-r, err := gguf.OpenFile("./models/Qwen3-0.6B-Q8_0.gguf")
+r, err := gogguf.OpenFile("./models/Qwen3-0.6B-Q8_0.gguf")
 
 arch, _ := r.Metadata.String("general.architecture")
 ```
@@ -87,7 +87,7 @@ import (
 	"github.com/magomedcoder/gogguf/server"
 )
 
-engine, _ := gguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gguf.LoadOptions{})
+engine, _ := gogguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{})
 
 srv := server.New(engine, "./models/Qwen3-0.6B-Q8_0.gguf")
 

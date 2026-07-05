@@ -32,14 +32,14 @@ RUN set -e; \
         [ "$os" = "windows" ] && ext=".exe"; \
         out="build/${os}-${arch}/gguf${ext}"; \
         mkdir -p "$(dirname "$out")"; \
-        CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "$out" ./cmd/gguf; \
+        CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "$out" ./cmd/gogguf; \
     done
 
 FROM go-base AS cuda-build
 
 RUN mkdir -p build/linux-amd64
 
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags cuda -trimpath -ldflags="-s -w" -o build/linux-amd64/gguf-cuda ./cmd/gguf
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags cuda -trimpath -ldflags="-s -w" -o build/linux-amd64/gogguf-cuda ./cmd/gogguf
 
 FROM cpu-build AS release-build
 

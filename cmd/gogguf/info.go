@@ -16,7 +16,7 @@ func runInfo(args []string) error {
 	}
 
 	if *modelPath == "" {
-		return fmt.Errorf("использование: gguf info -m файл.gguf")
+		return fmt.Errorf("использование: gogguf info -m файл.gguf")
 	}
 
 	r, err := gogguf.OpenFile(*modelPath)

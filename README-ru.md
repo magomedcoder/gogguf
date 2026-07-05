@@ -33,15 +33,15 @@
 ```bash
 mkdir -p models
 
-curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
+curl -L -o models/Qwen3-0.6B-Q8_0.gogguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
 ```
 
 ## Быстрый старт
 
 ```bash
-go build -o build/gguf ./cmd/gguf
+go build -o build/gogguf ./cmd/gogguf
 
-./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64
+./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gogguf --chat -p "Привет" -n 64
 ```
 
 ## Документация

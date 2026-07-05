@@ -3,7 +3,7 @@ import en from './locales/en'
 import ru from './locales/ru'
 import type { LocaleMessages } from './types'
 
-export const LOCALE_STORAGE_KEY = 'gguf-web-ui-locale'
+export const LOCALE_STORAGE_KEY = 'gogguf-web-ui-locale'
 
 const localeDefinitions = [en, ru] as const
 

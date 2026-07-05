@@ -23,7 +23,7 @@ func runServe(args []string) error {
 	}
 
 	if *modelPath == "" {
-		return fmt.Errorf("использование: gguf serve -m файл.gguf [--addr 127.0.0.1:8000]")
+		return fmt.Errorf("использование: gogguf serve -m файл.gguf [--addr 127.0.0.1:8000]")
 	}
 
 	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{
@@ -38,7 +38,7 @@ func runServe(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Fprintf(os.Stderr, "gguf serve: %s (model: %s)\n", *addr, *modelPath)
+	fmt.Fprintf(os.Stderr, "gogguf serve: %s (model: %s)\n", *addr, *modelPath)
 
 	return srv.Run(ctx, *addr)
 }

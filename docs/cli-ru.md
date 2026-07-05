@@ -7,7 +7,7 @@
 Краткая сводка о модели: версия GGUF, архитектура, имя, число тензоров, размер весов, длина контекста.
 
 ```bash
-./build/gguf info -m ./models/Qwen3-0.6B-Q8_0.gguf
+./build/gogguf info -m ./models/Qwen3-0.6B-Q8_0.gguf
 ```
 
 | Флаг | Описание             |
@@ -19,7 +19,7 @@
 Полный дамп метаданных и списка тензоров (имя, тип, размерности, размер в байтах).
 
 ```bash
-./build/gguf inspect ./models/Qwen3-0.6B-Q8_0.gguf
+./build/gogguf inspect ./models/Qwen3-0.6B-Q8_0.gguf
 ```
 
 Аргумент - путь к файлу, без флагов.
@@ -29,7 +29,7 @@
 Генерация текста: prefill промпта -> autoregressive decode -> вывод в stdout.
 
 ```bash
-./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64
+./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64
 ```
 
 | Флаг               | По умолчанию | Описание                                        |
@@ -54,25 +54,25 @@
 Пример с sampling:
 
 ```bash
-./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64 --temp 0.7 --top-k 40 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.1 --seed 42
+./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64 --temp 0.7 --top-k 40 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.1 --seed 42
 ```
 
 С размышлением:
 
 ```bash
-./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat --thinking -p "Привет" -n 64
+./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat --thinking -p "Привет" -n 64
 ```
 
 С GPU offload (28 слоёв, CUDA-сборка):
 
 ```bash
-./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -ngl 28
+./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -ngl 28
 ```
 
 Интерактивный режим (с `--chat` история диалога сохраняется между репликами; `/clear` - сброс):
 
 ```bash
-./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -i
+./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -i
 ```
 
 ## `gguf serve`
@@ -82,7 +82,7 @@ HTTP-сервер для генерации текста по API.
 Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 
 ```bash
-./build/gguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --addr 127.0.0.1:8000
+./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --addr 127.0.0.1:8000
 ```
 
 | Флаг     | По умолчанию     | Описание                                        |

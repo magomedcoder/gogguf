@@ -35,7 +35,7 @@ func runRun(args []string) error {
 	}
 
 	if *modelPath == "" {
-		return fmt.Errorf("использование: gguf run -m файл.gguf -p \"промпт\" [-n 128] [-i]")
+		return fmt.Errorf("использование: gogguf run -m файл.gguf -p \"промпт\" [-n 128] [-i]")
 	}
 	if !*interactive && *prompt == "" {
 		return fmt.Errorf("укажите промпт через -p или используйте -i")

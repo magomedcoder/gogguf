@@ -8,14 +8,14 @@ import (
 const usage = `GoGGUF - система запуска GGUF-моделей на Go
 
 Использование:
-  gguf inspect файл.gguf          просмотр метаданных и тензоров
-  gguf info -m файл.gguf          краткая информация о модели
-  gguf run -m файл.gguf -p "..."  генерация текста
-  gguf run -m файл.gguf -i        интерактивный режим (REPL)
-  gguf serve -m файл.gguf         HTTP API (SSE streaming)
+  gogguf inspect файл.gguf          просмотр метаданных и тензоров
+  gogguf info -m файл.gguf          краткая информация о модели
+  gogguf run -m файл.gguf -p "..."  генерация текста
+  gogguf run -m файл.gguf -i        интерактивный режим (REPL)
+  gogguf serve -m файл.gguf         HTTP API (SSE streaming)
 `
 
-// main - точка входа CLI gguf
+// main - точка входа CLI gogguf
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Print(usage)
@@ -25,7 +25,7 @@ func main() {
 	switch os.Args[1] {
 	case "inspect":
 		if len(os.Args) != 3 {
-			fmt.Fprintf(os.Stderr, "использование: gguf inspect файл.gguf\n")
+			fmt.Fprintf(os.Stderr, "использование: gogguf inspect файл.gguf\n")
 			os.Exit(1)
 		}
 		if err := runInspect(os.Args[2]); err != nil {

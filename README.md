@@ -38,9 +38,9 @@ curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GG
 ## Quick start
 
 ```bash
-go build -o build/gguf ./cmd/gguf
+go build -o build/gogguf ./cmd/gogguf
 
-./build/gguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 64
+./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 64
 ```
 
 ## Documentation

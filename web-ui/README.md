@@ -11,7 +11,7 @@ Vue 3 + TypeScript + Vite + Tailwind CSS.
 In one terminal - server with the model:
 
 ```bash
-./build/gguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --addr 127.0.0.1:8000
+./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --addr 127.0.0.1:8000
 ```
 
 In another - the UI:
