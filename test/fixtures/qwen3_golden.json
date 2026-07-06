@@ -21,7 +21,14 @@
     {
       "name": "chat_hello_greedy",
       "chat_user": "Hello",
-      "greedy_next": 9707
+      "greedy_next": 9707,
+      "top_logits": [
+        {"id": 9707, "logit": 31.8903},
+        {"id": 13048, "logit": 24.4407},
+        {"id": 14990, "logit": 22.8416},
+        {"id": 21927, "logit": 21.7301},
+        {"id": 18665, "logit": 21.5436}
+      ]
     },
     {
       "name": "chat_count_greedy_50",

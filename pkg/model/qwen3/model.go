@@ -180,8 +180,8 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	applyRoPEHeads(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
-	applyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+	ops.ApplyRoPEHeads(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+	ops.ApplyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
 
 	m.cache.Append(layer, m.scratch.k, m.scratch.v)
 	seqLen := m.cache.Len() + 1
@@ -359,13 +359,6 @@ func (m *Model) rmsNormInto(dst, x, weight []float32, layer int) error {
 	}
 
 	return ops.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps)
-}
-
-func applyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
-	for h := range nHeads {
-		off := h * headDim
-		ops.ApplyRoPE(v[off:off+headDim], pos, freqBase)
-	}
 }
 
 func (m *Model) normHeadsInto(v []float32, weight []float32, nHeads, layer int) error {

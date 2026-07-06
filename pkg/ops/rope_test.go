@@ -21,6 +21,27 @@ func TestSoftmax(t *testing.T) {
 	}
 }
 
+func TestApplyRoPEHeadsMatchesPerHead(t *testing.T) {
+	headDim := 4
+	nHeads := 3
+	v := []float32{1, 0, 1, 0, 0.5, 0.5, 0.5, 0.5, -1, 2, 3, 4}
+	want := make([]float32, len(v))
+	copy(want, v)
+
+	for h := range nHeads {
+		off := h * headDim
+		ApplyRoPE(want[off:off+headDim], 2, 10000)
+	}
+
+	ApplyRoPEHeads(v, nHeads, headDim, 2, 10000)
+
+	for i := range v {
+		if math.Abs(float64(v[i]-want[i])) > 1e-5 {
+			t.Fatalf("[%d] heads=%v per-head=%v", i, v[i], want[i])
+		}
+	}
+}
+
 func TestApplyRoPE(t *testing.T) {
 	v := []float32{1, 0, 1, 0}
 	ApplyRoPE(v, 1, 10000)
