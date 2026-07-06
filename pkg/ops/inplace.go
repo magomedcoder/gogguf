@@ -7,14 +7,13 @@ func RMSNormInto(dst, x, weight []float32, eps float32) error {
 
 // AddInPlace добавляет b к a поэлементно
 func AddInPlace(a, b []float32) {
-	for i := range a {
-		a[i] += b[i]
-	}
+	addInPlace(a, b)
 }
 
 // SwiGLUInPlace вычисляет silu(gate)*up, результат в gate
 func SwiGLUInPlace(gate, up []float32) {
 	for i := range gate {
-		gate[i] = SiLU(gate[i]) * up[i]
+		gate[i] = SiLU(gate[i])
 	}
+	vecMulInPlace(gate, up)
 }

@@ -173,7 +173,7 @@ func TestGoldenFixture(t *testing.T) {
 
 				for _, want := range tc.TopLogits {
 					got := logits[want.ID]
-					if math.Abs(float64(got-want.Logit)) > 1e-3 {
+					if math.Abs(float64(got-want.Logit)) > 1e-4 {
 						t.Fatalf("logit[%d] = %v, ожидали ~%v", want.ID, got, want.Logit)
 					}
 				}
