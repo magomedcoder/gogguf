@@ -249,19 +249,7 @@ func matMulVecQ4_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 
 // RMSNorm применяет RMS-нормализацию: x * weight / RMS(x)
 func RMSNorm(x, weight []float32, eps float32) ([]float32, error) {
-	if len(x) != len(weight) {
-		return nil, fmt.Errorf("ops: x и weight разной длины")
-	}
-
-	sumSq := dot(x, x)
-	scale := float32(1) / float32(math.Sqrt(float64(sumSq/float32(len(x))+eps)))
-
-	out := make([]float32, len(x))
-	for i := range x {
-		out[i] = x[i] * scale * weight[i]
-	}
-
-	return out, nil
+	return rmsnorm(x, weight, eps)
 }
 
 // Add поэлементно складывает a и b

@@ -53,5 +53,4 @@ go build -o build/gogguf ./cmd/gogguf
 | [docs/api-ru.md](docs/api-ru.md)                 | HTTP API сервера                       |
 | [docs/library-ru.md](docs/library-ru.md)         | Inference из Go-кода                   |
 | [docs/tools-ru.md](docs/tools-ru.md)             | `debugtok`, `vocab`, `bench`           |
-| [docs/testing-ru.md](docs/testing-ru.md)         | Golden-тесты, сверка с llama.cpp       |
 | [docs/GGUF-FORMAT-ru.md](docs/GGUF-FORMAT-ru.md) | Формат GGUF                            |
