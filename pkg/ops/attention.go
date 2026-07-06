@@ -36,13 +36,10 @@ func AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHead
 		SoftmaxInPlace(headScores)
 
 		outOff := h * headDim
+		vStride := nKVHeads * headDim
+		vBase := kvHead * headDim
 		for i := range headDim {
-			var sum float32
-			for t := range seqLen {
-				vOff := t*nKVHeads*headDim + kvHead*headDim
-				sum += headScores[t] * v[vOff+i]
-			}
-			dst[outOff+i] = sum
+			dst[outOff+i] = dotStride(headScores, v, vBase+i, vStride, seqLen)
 		}
 	}
 

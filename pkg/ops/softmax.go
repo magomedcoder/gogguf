@@ -8,12 +8,7 @@ func SoftmaxInPlace(x []float32) {
 		return
 	}
 
-	maxVal := x[0]
-	for _, v := range x[1:] {
-		if v > maxVal {
-			maxVal = v
-		}
-	}
+	maxVal := vectorMax(x)
 
 	var sum float64
 	for i, v := range x {
@@ -22,10 +17,7 @@ func SoftmaxInPlace(x []float32) {
 		sum += e
 	}
 
-	inv := float32(1 / sum)
-	for i := range x {
-		x[i] *= inv
-	}
+	vecScaleInPlace(x, float32(1/sum))
 }
 
 // Softmax возвращает softmax(x)
