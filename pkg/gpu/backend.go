@@ -17,6 +17,9 @@ type Backend interface {
 	// RMSNormInto записывает RMS-нормализацию в dst (GPU или CPU)
 	RMSNormInto(dst, x, weight []float32, eps float32) error
 
+	// ApplyRoPEHeads применяет RoPE к nHeads головам в v (in-place)
+	ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error
+
 	Close() error
 }
 

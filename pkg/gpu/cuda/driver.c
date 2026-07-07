@@ -179,7 +179,7 @@ enum {
 };
 
 int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
-	CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, char *errbuf, size_t errbuf_len) {
+	CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, CUfunction *fn_rope, char *errbuf, size_t errbuf_len) {
 	CUresult err;
 
 	if (drv->cuCtxSetCurrent) {
@@ -254,6 +254,16 @@ int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
 				snprintf(errbuf, errbuf_len, "cuModuleGetFunction rmsnorm: %s", gguf_cuda_last_error(drv, err));
 			}
 			return -4;
+		}
+	}
+
+	if (fn_rope) {
+		err = drv->cuModuleGetFunction(fn_rope, *module, "rope_heads");
+		if (err != CUDA_SUCCESS) {
+			if (errbuf && errbuf_len > 0) {
+				snprintf(errbuf, errbuf_len, "cuModuleGetFunction rope_heads: %s", gguf_cuda_last_error(drv, err));
+			}
+			return -5;
 		}
 	}
 
@@ -402,6 +412,84 @@ fail:
 	drv->cuMemFree(d_x);
 	drv->cuMemFree(d_weight);
 	drv->cuMemFree(d_out);
+	return -4;
+}
+
+int gguf_cuda_rope_heads(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, float *v, const float *cos_tbl, const float *sin_tbl, int nheads, int head_dim, int half) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (nheads <= 0 || head_dim <= 0 || half <= 0 || half*2 != head_dim) {
+		return -11;
+	}
+
+	int n = nheads * head_dim;
+	int tbl = half;
+
+	CUdeviceptr d_v = 0;
+	CUdeviceptr d_cos = 0;
+	CUdeviceptr d_sin = 0;
+
+	size_t v_bytes = (size_t)n * sizeof(float);
+	size_t tbl_bytes = (size_t)tbl * sizeof(float);
+
+	if (drv->cuMemAlloc(&d_v, v_bytes) != CUDA_SUCCESS) {
+		return -1;
+	}
+
+	if (drv->cuMemAlloc(&d_cos, tbl_bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_v);
+		return -2;
+	}
+
+	if (drv->cuMemAlloc(&d_sin, tbl_bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_v);
+		drv->cuMemFree(d_cos);
+		return -3;
+	}
+
+	if (drv->cuMemcpyHtoD(d_v, v, v_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyHtoD(d_cos, cos_tbl, tbl_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyHtoD(d_sin, sin_tbl, tbl_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	void *params[6];
+	params[0] = &d_v;
+	params[1] = &d_cos;
+	params[2] = &d_sin;
+	params[3] = &nheads;
+	params[4] = &head_dim;
+	params[5] = &half;
+
+	unsigned int total = (unsigned int)(nheads * half);
+	unsigned int block = 256;
+	unsigned int grid = (total + block - 1) / block;
+
+	if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyDtoH(v, d_v, v_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	drv->cuMemFree(d_v);
+	drv->cuMemFree(d_cos);
+	drv->cuMemFree(d_sin);
+	return 0;
+
+fail:
+	drv->cuMemFree(d_v);
+	drv->cuMemFree(d_cos);
+	drv->cuMemFree(d_sin);
 	return -4;
 }
 

@@ -1,8 +1,9 @@
 package ops
 
-import "math"
-
 const maxRoPEPairs = 128
+
+// MaxRoPEPairs максимальный headDim/2 для batched RoPE на CPU/GPU
+func MaxRoPEPairs() int { return maxRoPEPairs }
 
 // ApplyRoPEHeads применяет RoPE к nHeads головам в v; sin/cos вычисляются один раз на позицию
 func ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
@@ -22,14 +23,7 @@ func ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
 	var cosTab [maxRoPEPairs]float32
 	var sinTab [maxRoPEPairs]float32
 
-	n := float64(headDim)
-	p := float64(pos)
-	fb := float64(freqBase)
-	for i := range half {
-		theta := p * math.Pow(fb, -2*float64(i)/n)
-		cosTab[i] = float32(math.Cos(theta))
-		sinTab[i] = float32(math.Sin(theta))
-	}
+	RoPECosSin(cosTab[:half], sinTab[:half], headDim, pos, freqBase)
 
 	for h := range nHeads {
 		base := h * headDim

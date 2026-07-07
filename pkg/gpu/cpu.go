@@ -27,4 +27,9 @@ func (CPUBackend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 	return ops.RMSNormInto(dst, x, weight, eps)
 }
 
+func (CPUBackend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error {
+	ops.ApplyRoPEHeads(v, nHeads, headDim, pos, freqBase)
+	return nil
+}
+
 func (CPUBackend) Close() error { return nil }

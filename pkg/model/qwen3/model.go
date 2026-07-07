@@ -180,8 +180,8 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	ops.ApplyRoPEHeads(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
-	ops.ApplyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+	m.applyRoPEHeads(m.scratch.q, m.cfg.NumHeads, pos, layer)
+	m.applyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, pos, layer)
 
 	m.cache.Append(layer, m.scratch.k, m.scratch.v)
 	seqLen := m.cache.Len() + 1
@@ -359,6 +359,16 @@ func (m *Model) rmsNormInto(dst, x, weight []float32, layer int) error {
 	}
 
 	return ops.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps)
+}
+
+func (m *Model) applyRoPEHeads(v []float32, nHeads, pos, layer int) {
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.gpu.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase); err == nil {
+			return
+		}
+	}
+
+	ops.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
 }
 
 func (m *Model) normHeadsInto(v []float32, weight []float32, nHeads, layer int) error {

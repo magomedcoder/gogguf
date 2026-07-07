@@ -87,8 +87,8 @@ void gguf_cuda_shutdown(cuda_driver_t *drv, CUcontext ctx);
 // gguf_cuda_last_error возвращает текст последней CUDA-ошибки (если доступен)
 const char *gguf_cuda_last_error(cuda_driver_t *drv, CUresult err);
 
-// gguf_cuda_load_module загружает PTX-модуль; fn/fn_q8/fn_rmsnorm могут быть NULL
-int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx, CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, char *errbuf, size_t errbuf_len);
+// gguf_cuda_load_module загружает PTX-модуль; fn/fn_q8/fn_rmsnorm/fn_rope могут быть NULL
+int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx, CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, CUfunction *fn_rope, char *errbuf, size_t errbuf_len);
 
 // gguf_cuda_upload_matrix загружает matrix на GPU
 int gguf_cuda_upload_matrix(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const float *matrix, int rows, int cols);
@@ -110,5 +110,8 @@ int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfuncti
 
 // gguf_cuda_rmsnorm RMSNorm на GPU
 int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *x, const float *weight, float *out, int n, float eps);
+
+// gguf_cuda_rope_heads RoPE для nHeads голов (cos/sin на CPU, rotate на GPU)
+int gguf_cuda_rope_heads(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, float *v, const float *cos_tbl, const float *sin_tbl, int nheads, int head_dim, int half);
 
 #endif

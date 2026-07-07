@@ -13,6 +13,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
@@ -40,7 +41,9 @@ type Backend struct {
 	fn        C.CUfunction
 	fnQ8      C.CUfunction
 	fnRMS     C.CUfunction
+	fnRoPE    C.CUfunction
 	hasRMS    bool
+	hasRoPE   bool
 
 	mu         sync.Mutex
 	matrices   map[string]gpuMatrix
@@ -74,12 +77,12 @@ func Open() (*Backend, error) {
 	defer C.free(unsafe.Pointer(cptx))
 
 	var errBuf [4096]C.char
-	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, &errBuf[0], C.size_t(len(errBuf)))
+	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
 	if rc != 0 && int(cc) >= 120 {
 		ptx = kernelsPTX(60)
 		cptx2 := C.CString(ptx)
 		defer C.free(unsafe.Pointer(cptx2))
-		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx2, &b.module, &b.fn, &b.fnQ8, nil, &errBuf[0], C.size_t(len(errBuf)))
+		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx2, &b.module, &b.fn, &b.fnQ8, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
 	}
 	if rc != 0 {
 		C.gguf_cuda_shutdown(&b.drv, b.ctx)
@@ -90,16 +93,17 @@ func Open() (*Backend, error) {
 	cptxOps := C.CString(ptxOps)
 	defer C.free(unsafe.Pointer(cptxOps))
 
-	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps, &b.moduleOps, nil, nil, &b.fnRMS, &errBuf[0], C.size_t(len(errBuf)))
+	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &errBuf[0], C.size_t(len(errBuf)))
 	if rc != 0 && int(cc) >= 120 {
 		ptxOps = opsPTX(60)
 		cptxOps2 := C.CString(ptxOps)
 		defer C.free(unsafe.Pointer(cptxOps2))
-		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps2, &b.moduleOps, nil, nil, &b.fnRMS, &errBuf[0], C.size_t(len(errBuf)))
+		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps2, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &errBuf[0], C.size_t(len(errBuf)))
 	}
 
 	if rc == 0 {
 		b.hasRMS = true
+		b.hasRoPE = true
 	}
 
 	return b, nil
@@ -252,6 +256,36 @@ func (b *Backend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 	)
 	if rc != 0 {
 		return fmt.Errorf("cuda: rmsnorm: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error {
+	if !b.hasRoPE {
+		return fmt.Errorf("cuda: rope kernel недоступен")
+	}
+
+	half := headDim / 2
+	if nHeads <= 0 || headDim <= 0 || half*2 != headDim {
+		return fmt.Errorf("cuda: ApplyRoPEHeads: неверные размеры")
+	}
+
+	if len(v) < nHeads*headDim {
+		return fmt.Errorf("cuda: ApplyRoPEHeads: v слишком короткий")
+	}
+
+	if half > ops.MaxRoPEPairs() {
+		return fmt.Errorf("cuda: head_dim=%d слишком велик для GPU RoPE", headDim)
+	}
+
+	cos := make([]float32, half)
+	sin := make([]float32, half)
+	ops.RoPECosSin(cos, sin, headDim, pos, freqBase)
+
+	rc := C.gguf_cuda_rope_heads(&b.drv, b.ctx, b.fnRoPE, (*C.float)(unsafe.Pointer(&v[0])), (*C.float)(unsafe.Pointer(&cos[0])), (*C.float)(unsafe.Pointer(&sin[0])), C.int(nHeads), C.int(headDim), C.int(half))
+	if rc != 0 {
+		return fmt.Errorf("cuda: rope_heads: код %d", int(rc))
 	}
 
 	return nil
