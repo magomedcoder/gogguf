@@ -196,7 +196,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	m.cache.Append(layer, m.scratch.k, m.scratch.v)
 	seqLen := m.cache.Len() + 1
 
-	if err := ops.AttentionScoresInto(m.scratch.attn, m.scratch.q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err != nil {
+	if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, seqLen, layer); err != nil {
 		return err
 	}
 
@@ -216,7 +216,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	if err := m.matmulInto(lt.ffnUp, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.up, layer); err != nil {
 		return err
 	}
-	ops.SwiGLUInPlace(m.scratch.gate, m.scratch.up)
+	m.swigluInPlace(m.scratch.gate, m.scratch.up, layer)
 
 	if err := m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate, m.scratch.h, layer); err != nil {
 		return err
@@ -390,6 +390,26 @@ func (m *Model) applyRoPEHeads(v []float32, nHeads, pos, layer int) {
 	}
 
 	ops.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+}
+
+func (m *Model) swigluInPlace(gate, up []float32, layer int) {
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.gpu.SwiGLUInPlace(gate, up); err == nil {
+			return
+		}
+	}
+
+	ops.SwiGLUInPlace(gate, up)
+}
+
+func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, layer int) error {
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.gpu.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
+			return nil
+		}
+	}
+
+	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim)
 }
 
 func (m *Model) normHeadsInto(v []float32, weight []float32, nHeads, layer int) error {

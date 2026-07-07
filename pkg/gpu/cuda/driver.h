@@ -87,8 +87,8 @@ void gguf_cuda_shutdown(cuda_driver_t *drv, CUcontext ctx);
 // gguf_cuda_last_error возвращает текст последней CUDA-ошибки (если доступен)
 const char *gguf_cuda_last_error(cuda_driver_t *drv, CUresult err);
 
-// gguf_cuda_load_module загружает PTX-модуль; fn/fn_q8/fn_rmsnorm/fn_rope могут быть NULL
-int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx, CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, CUfunction *fn_rope, char *errbuf, size_t errbuf_len);
+// gguf_cuda_load_module загружает PTX-модуль; fn/fn_q8/fn_rmsnorm/fn_rope/fn_swiglu могут быть NULL
+int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx, CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, CUfunction *fn_rope, CUfunction *fn_swiglu, char *errbuf, size_t errbuf_len);
 
 // gguf_cuda_upload_matrix загружает matrix на GPU
 int gguf_cuda_upload_matrix(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const float *matrix, int rows, int cols);
@@ -113,5 +113,14 @@ int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const fl
 
 // gguf_cuda_rope_heads RoPE для nHeads голов (cos/sin на CPU, rotate на GPU)
 int gguf_cuda_rope_heads(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, float *v, const float *cos_tbl, const float *sin_tbl, int nheads, int head_dim, int half);
+
+// gguf_cuda_swiglu silu(gate)*up in-place (результат в gate)
+int gguf_cuda_swiglu(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, float *gate, const float *up, int n);
+
+// gguf_cuda_module_function получает функцию из уже загруженного модуля
+int gguf_cuda_module_function(cuda_driver_t *drv, CUmodule module, const char *name, CUfunction *fn_out);
+
+// gguf_cuda_attention scaled dot-product attention (softmax на CPU для точности)
+int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, float *dst, const float *q, const float *k, const float *v, int seq_len, int n_heads, int n_kv_heads, int head_dim);
 
 #endif

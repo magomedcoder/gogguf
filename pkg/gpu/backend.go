@@ -20,6 +20,12 @@ type Backend interface {
 	// ApplyRoPEHeads применяет RoPE к nHeads головам в v (in-place)
 	ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error
 
+	// SwiGLUInPlace вычисляет silu(gate)*up, результат в gate
+	SwiGLUInPlace(gate, up []float32) error
+
+	// AttentionScoresInto записывает scaled dot-product attention в dst
+	AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error
+
 	Close() error
 }
 

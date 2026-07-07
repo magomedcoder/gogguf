@@ -3,7 +3,7 @@
 package cuda
 
 /*
-#cgo LDFLAGS: -ldl
+#cgo LDFLAGS: -ldl -lm
 #include "driver.h"
 #include <stdlib.h>
 */
@@ -42,8 +42,13 @@ type Backend struct {
 	fnQ8      C.CUfunction
 	fnRMS     C.CUfunction
 	fnRoPE    C.CUfunction
+	fnSwiGLU  C.CUfunction
+	fnAttnQK  C.CUfunction
+	fnAttnV   C.CUfunction
 	hasRMS    bool
 	hasRoPE   bool
+	hasSwiGLU bool
+	hasAttn   bool
 
 	mu         sync.Mutex
 	matrices   map[string]gpuMatrix
@@ -77,12 +82,12 @@ func Open() (*Backend, error) {
 	defer C.free(unsafe.Pointer(cptx))
 
 	var errBuf [4096]C.char
-	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
+	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
 	if rc != 0 && int(cc) >= 120 {
 		ptx = kernelsPTX(60)
 		cptx2 := C.CString(ptx)
 		defer C.free(unsafe.Pointer(cptx2))
-		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx2, &b.module, &b.fn, &b.fnQ8, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
+		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx2, &b.module, &b.fn, &b.fnQ8, nil, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
 	}
 	if rc != 0 {
 		C.gguf_cuda_shutdown(&b.drv, b.ctx)
@@ -93,17 +98,26 @@ func Open() (*Backend, error) {
 	cptxOps := C.CString(ptxOps)
 	defer C.free(unsafe.Pointer(cptxOps))
 
-	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &errBuf[0], C.size_t(len(errBuf)))
+	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &b.fnSwiGLU, &errBuf[0], C.size_t(len(errBuf)))
 	if rc != 0 && int(cc) >= 120 {
 		ptxOps = opsPTX(60)
 		cptxOps2 := C.CString(ptxOps)
 		defer C.free(unsafe.Pointer(cptxOps2))
-		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps2, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &errBuf[0], C.size_t(len(errBuf)))
+		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps2, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &b.fnSwiGLU, &errBuf[0], C.size_t(len(errBuf)))
 	}
 
 	if rc == 0 {
 		b.hasRMS = true
 		b.hasRoPE = true
+		b.hasSwiGLU = true
+
+		cAttnQK := C.CString("attn_qk")
+		cAttnV := C.CString("attn_v")
+		defer C.free(unsafe.Pointer(cAttnQK))
+		defer C.free(unsafe.Pointer(cAttnV))
+		if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnQK, &b.fnAttnQK) == 0 && C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnV, &b.fnAttnV) == 0 {
+			b.hasAttn = true
+		}
 	}
 
 	return b, nil
@@ -286,6 +300,70 @@ func (b *Backend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase
 	rc := C.gguf_cuda_rope_heads(&b.drv, b.ctx, b.fnRoPE, (*C.float)(unsafe.Pointer(&v[0])), (*C.float)(unsafe.Pointer(&cos[0])), (*C.float)(unsafe.Pointer(&sin[0])), C.int(nHeads), C.int(headDim), C.int(half))
 	if rc != 0 {
 		return fmt.Errorf("cuda: rope_heads: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) SwiGLUInPlace(gate, up []float32) error {
+	if !b.hasSwiGLU {
+		return fmt.Errorf("cuda: swiglu kernel недоступен")
+	}
+
+	if len(gate) != len(up) {
+		return fmt.Errorf("cuda: SwiGLUInPlace: len(gate)=%d len(up)=%d", len(gate), len(up))
+	}
+
+	if len(gate) == 0 {
+		return nil
+	}
+
+	rc := C.gguf_cuda_swiglu(&b.drv, b.ctx, b.fnSwiGLU, (*C.float)(unsafe.Pointer(&gate[0])), (*C.float)(unsafe.Pointer(&up[0])), C.int(len(gate)))
+	if rc != 0 {
+		return fmt.Errorf("cuda: swiglu: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
+	_ = scores
+	if !b.hasAttn {
+		return fmt.Errorf("cuda: attention kernels недоступны")
+	}
+
+	if len(dst) < nHeads*headDim {
+		return fmt.Errorf("cuda: AttentionScoresInto: dst слишком короткий")
+	}
+
+	if seqLen <= 0 || nHeads <= 0 || nKVHeads <= 0 || headDim <= 0 || nHeads%nKVHeads != 0 {
+		return fmt.Errorf("cuda: AttentionScoresInto: неверные размеры")
+	}
+
+	kvStride := nKVHeads * headDim
+	if len(q) < nHeads*headDim {
+		return fmt.Errorf("cuda: AttentionScoresInto: q слишком короткий")
+	}
+
+	if len(k) < seqLen*kvStride || len(v) < seqLen*kvStride {
+		return fmt.Errorf("cuda: AttentionScoresInto: k/v слишком короткие")
+	}
+
+	rc := C.gguf_cuda_attention(
+		&b.drv,
+		b.ctx,
+		b.fnAttnQK,
+		b.fnAttnV,
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		(*C.float)(unsafe.Pointer(&q[0])),
+		(*C.float)(unsafe.Pointer(&k[0])),
+		(*C.float)(unsafe.Pointer(&v[0])),
+		C.int(seqLen),
+		C.int(nHeads),
+		C.int(nKVHeads),
+		C.int(headDim))
+	if rc != 0 {
+		return fmt.Errorf("cuda: attention: код %d", int(rc))
 	}
 
 	return nil

@@ -104,7 +104,7 @@ EXIT:
     .reg .b16       %h<1>;
     .reg .s8        %s<1>;
     .reg .b32       %r<12>;
-    .reg .b64       %rd<16>;
+    .reg .b64       %rd<20>;
     .reg .f32       %f<5>;
 
     mov.u32         %r1, %tid.x;
@@ -256,7 +256,7 @@ RN_EXIT:
 {
     .reg .pred      %p<2>;
     .reg .b32       %r<16>;
-    .reg .b64       %rd<16>;
+    .reg .b64       %rd<20>;
     .reg .f32       %f<8>;
 
     mov.u32         %r1, %tid.x;
@@ -310,6 +310,189 @@ RN_EXIT:
     st.global.f32   [%rd7], %f6;
 
 RH_EXIT:
+    ret;
+}
+
+.visible .entry swiglu(
+    .param .u64 param_gate,
+    .param .u64 param_up,
+    .param .u32 param_n
+)
+{
+    .reg .pred      %p<1>;
+    .reg .b32       %r<8>;
+    .reg .b64       %rd<8>;
+    .reg .f32       %f<12>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_n];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra SG_EXIT;
+
+    ld.param.u64    %rd1, [param_gate];
+    ld.param.u64    %rd2, [param_up];
+
+    mul.wide.u32    %rd3, %r4, 4;
+    add.u64         %rd4, %rd1, %rd3;
+    ld.global.f32   %f1, [%rd4];
+
+    add.u64         %rd5, %rd2, %rd3;
+    ld.global.f32   %f2, [%rd5];
+
+    mov.f32         %f3, 0f00000000;
+    sub.f32         %f4, %f3, %f1;
+    mov.f32         %f5, 0f3fb8aa3b;
+    mul.f32         %f6, %f4, %f5;
+    ex2.approx.f32  %f7, %f6;
+    mov.f32         %f8, 0f3f800000;
+    add.f32         %f9, %f7, %f8;
+    div.rn.f32      %f10, %f1, %f9;
+    mul.f32         %f11, %f10, %f2;
+    st.global.f32   [%rd4], %f11;
+
+SG_EXIT:
+    ret;
+}
+
+.visible .entry attn_qk(
+    .param .u64 param_q,
+    .param .u64 param_k,
+    .param .u64 param_scores,
+    .param .u32 param_seq_len,
+    .param .u32 param_head_dim,
+    .param .u32 param_kv_stride,
+    .param .u32 param_kv_off,
+    .param .u32 param_q_off,
+    .param .f32 param_scale
+)
+{
+    .reg .pred      %p<2>;
+    .reg .b32       %r<16>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<6>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_seq_len];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra AQ_EXIT;
+
+    ld.param.u64    %rd1, [param_q];
+    ld.param.u64    %rd2, [param_k];
+    ld.param.u64    %rd3, [param_scores];
+    ld.param.u32    %r6, [param_head_dim];
+    ld.param.u32    %r7, [param_kv_stride];
+    ld.param.u32    %r8, [param_kv_off];
+    ld.param.u32    %r9, [param_q_off];
+    ld.param.f32    %f1, [param_scale];
+
+    mul.wide.u32    %rd4, %r4, %r7;
+    cvt.u64.u32     %rd5, %r8;
+    add.u64         %rd6, %rd4, %rd5;
+    shl.b64         %rd7, %rd6, 2;
+    add.u64         %rd8, %rd2, %rd7;
+
+    mov.f32         %f2, 0f00000000;
+    mov.u32         %r10, 0;
+
+AQ_LOOP:
+    setp.ge.u32     %p1, %r10, %r6;
+    @%p1            bra AQ_DONE;
+
+    cvt.u64.u32     %rd9, %r9;
+    cvt.u64.u32     %rd10, %r10;
+    add.u64         %rd11, %rd9, %rd10;
+    shl.b64         %rd12, %rd11, 2;
+    add.u64         %rd13, %rd1, %rd12;
+    ld.global.f32   %f3, [%rd13];
+
+    cvt.u64.u32     %rd14, %r10;
+    shl.b64         %rd15, %rd14, 2;
+    add.u64         %rd16, %rd8, %rd15;
+    ld.global.f32   %f4, [%rd16];
+
+    fma.rn.f32      %f2, %f3, %f4, %f2;
+    add.u32         %r10, %r10, 1;
+    bra AQ_LOOP;
+
+AQ_DONE:
+    mul.f32         %f5, %f2, %f1;
+    mul.wide.u32    %rd4, %r4, 4;
+    add.u64         %rd5, %rd3, %rd4;
+    st.global.f32   [%rd5], %f5;
+
+AQ_EXIT:
+    ret;
+}
+
+.visible .entry attn_v(
+    .param .u64 param_scores,
+    .param .u64 param_v,
+    .param .u64 param_out,
+    .param .u32 param_seq_len,
+    .param .u32 param_head_dim,
+    .param .u32 param_kv_stride,
+    .param .u32 param_kv_off
+)
+{
+    .reg .pred      %p<2>;
+    .reg .b32       %r<14>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<5>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_head_dim];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra AV_EXIT;
+
+    ld.param.u64    %rd1, [param_scores];
+    ld.param.u64    %rd2, [param_v];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_seq_len];
+    ld.param.u32    %r7, [param_kv_stride];
+    ld.param.u32    %r8, [param_kv_off];
+
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r9, 0;
+
+AV_LOOP:
+    setp.ge.u32     %p1, %r9, %r6;
+    @%p1            bra AV_DONE;
+
+    mul.wide.u32    %rd4, %r9, 4;
+    add.u64         %rd5, %rd1, %rd4;
+    ld.global.f32   %f2, [%rd5];
+
+    mul.wide.u32    %rd6, %r9, %r7;
+    cvt.u64.u32     %rd7, %r8;
+    add.u64         %rd8, %rd6, %rd7;
+    cvt.u64.u32     %rd9, %r4;
+    add.u64         %rd10, %rd8, %rd9;
+    shl.b64         %rd11, %rd10, 2;
+    add.u64         %rd12, %rd2, %rd11;
+    ld.global.f32   %f3, [%rd12];
+
+    fma.rn.f32      %f1, %f2, %f3, %f1;
+    add.u32         %r9, %r9, 1;
+    bra AV_LOOP;
+
+AV_DONE:
+    mul.wide.u32    %rd4, %r4, 4;
+    add.u64         %rd5, %rd3, %rd4;
+    st.global.f32   [%rd5], %f1;
+
+AV_EXIT:
     ret;
 }
 `

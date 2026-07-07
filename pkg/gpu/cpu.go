@@ -32,4 +32,13 @@ func (CPUBackend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase
 	return nil
 }
 
+func (CPUBackend) SwiGLUInPlace(gate, up []float32) error {
+	ops.SwiGLUInPlace(gate, up)
+	return nil
+}
+
+func (CPUBackend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
+	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim)
+}
+
 func (CPUBackend) Close() error { return nil }

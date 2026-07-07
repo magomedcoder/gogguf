@@ -3,7 +3,9 @@ package ops
 const maxRoPEPairs = 128
 
 // MaxRoPEPairs максимальный headDim/2 для batched RoPE на CPU/GPU
-func MaxRoPEPairs() int { return maxRoPEPairs }
+func MaxRoPEPairs() int {
+	return maxRoPEPairs
+}
 
 // ApplyRoPEHeads применяет RoPE к nHeads головам в v; sin/cos вычисляются один раз на позицию
 func ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {

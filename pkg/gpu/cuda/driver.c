@@ -1,8 +1,10 @@
 #include "driver.h"
 
 #include <dlfcn.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void *load_sym(void *lib, const char *name) {
@@ -179,7 +181,7 @@ enum {
 };
 
 int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
-	CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, CUfunction *fn_rope, char *errbuf, size_t errbuf_len) {
+	CUmodule *module, CUfunction *fn, CUfunction *fn_q8, CUfunction *fn_rmsnorm, CUfunction *fn_rope, CUfunction *fn_swiglu, char *errbuf, size_t errbuf_len) {
 	CUresult err;
 
 	if (drv->cuCtxSetCurrent) {
@@ -267,7 +269,185 @@ int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
 		}
 	}
 
+	if (fn_swiglu) {
+		err = drv->cuModuleGetFunction(fn_swiglu, *module, "swiglu");
+		if (err != CUDA_SUCCESS) {
+			if (errbuf && errbuf_len > 0) {
+				snprintf(errbuf, errbuf_len, "cuModuleGetFunction swiglu: %s", gguf_cuda_last_error(drv, err));
+			}
+			return -6;
+		}
+	}
+
 	return 0;
+}
+
+int gguf_cuda_module_function(cuda_driver_t *drv, CUmodule module, const char *name, CUfunction *fn_out) {
+	if (!drv || !module || !name || !fn_out) {
+		return -1;
+	}
+
+	CUresult err = drv->cuModuleGetFunction(fn_out, module, name);
+	return err == CUDA_SUCCESS ? 0 : -2;
+}
+
+static void softmax_host(float *x, int n) {
+	if (n <= 0) {
+		return;
+	}
+
+	float maxv = x[0];
+	for (int i = 1; i < n; i++) {
+		if (x[i] > maxv) {
+			maxv = x[i];
+		}
+	}
+
+	double sum = 0.0;
+	for (int i = 0; i < n; i++) {
+		double e = exp((double)x[i] - (double)maxv);
+		x[i] = (float)e;
+		sum += e;
+	}
+
+	float inv = (float)(1.0 / sum);
+	for (int i = 0; i < n; i++) {
+		x[i] *= inv;
+	}
+}
+
+int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, float *dst, const float *q, const float *k, const float *v,
+	int seq_len, int n_heads, int n_kv_heads, int head_dim) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (seq_len <= 0 || n_heads <= 0 || n_kv_heads <= 0 || head_dim <= 0 || n_heads % n_kv_heads != 0) {
+		return -11;
+	}
+
+	int group = n_heads / n_kv_heads;
+	int kv_stride = n_kv_heads * head_dim;
+	float scale = 1.0f / sqrtf((float)head_dim);
+
+	size_t q_bytes = (size_t)n_heads * (size_t)head_dim * sizeof(float);
+	size_t kv_bytes = (size_t)seq_len * (size_t)kv_stride * sizeof(float);
+	size_t dst_bytes = q_bytes;
+	size_t scores_bytes = (size_t)seq_len * sizeof(float);
+
+	CUdeviceptr d_q = 0;
+	CUdeviceptr d_k = 0;
+	CUdeviceptr d_v = 0;
+	CUdeviceptr d_dst = 0;
+	CUdeviceptr d_scores = 0;
+
+	float *h_scores = (float *)malloc(scores_bytes);
+	if (!h_scores) {
+		return -12;
+	}
+
+	if (drv->cuMemAlloc(&d_q, q_bytes) != CUDA_SUCCESS) {
+		free(h_scores);
+		return -1;
+	}
+
+	if (drv->cuMemAlloc(&d_k, kv_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemAlloc(&d_v, kv_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemAlloc(&d_dst, dst_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemAlloc(&d_scores, scores_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyHtoD(d_q, q, q_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyHtoD(d_k, k, kv_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyHtoD(d_v, v, kv_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	unsigned int block = 256;
+
+	for (int h = 0; h < n_heads; h++) {
+		int kv_head = h / group;
+		int q_off = h * head_dim;
+		int kv_off = kv_head * head_dim;
+		CUdeviceptr d_out_head = d_dst + (CUdeviceptr)((size_t)q_off * sizeof(float));
+
+		void *params_qk[9];
+		params_qk[0] = &d_q;
+		params_qk[1] = &d_k;
+		params_qk[2] = &d_scores;
+		params_qk[3] = &seq_len;
+		params_qk[4] = &head_dim;
+		params_qk[5] = &kv_stride;
+		params_qk[6] = &kv_off;
+		params_qk[7] = &q_off;
+		params_qk[8] = &scale;
+
+		unsigned int grid_qk = ((unsigned int)seq_len + block - 1) / block;
+		if (drv->cuLaunchKernel(fn_qk, grid_qk, 1, 1, block, 1, 1, 0, NULL, params_qk, NULL) != CUDA_SUCCESS) {
+			goto fail;
+		}
+
+		if (drv->cuMemcpyDtoH(h_scores, d_scores, scores_bytes) != CUDA_SUCCESS) {
+			goto fail;
+		}
+
+		softmax_host(h_scores, seq_len);
+
+		if (drv->cuMemcpyHtoD(d_scores, h_scores, scores_bytes) != CUDA_SUCCESS) {
+			goto fail;
+		}
+
+		void *params_v[7];
+		params_v[0] = &d_scores;
+		params_v[1] = &d_v;
+		params_v[2] = &d_out_head;
+		params_v[3] = &seq_len;
+		params_v[4] = &head_dim;
+		params_v[5] = &kv_stride;
+		params_v[6] = &kv_off;
+
+		unsigned int grid_v = ((unsigned int)head_dim + block - 1) / block;
+		if (drv->cuLaunchKernel(fn_v, grid_v, 1, 1, block, 1, 1, 0, NULL, params_v, NULL) != CUDA_SUCCESS) {
+			goto fail;
+		}
+	}
+
+	if (drv->cuMemcpyDtoH(dst, d_dst, dst_bytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	free(h_scores);
+	drv->cuMemFree(d_q);
+	drv->cuMemFree(d_k);
+	drv->cuMemFree(d_v);
+	drv->cuMemFree(d_dst);
+	drv->cuMemFree(d_scores);
+	return 0;
+
+fail:
+	free(h_scores);
+	drv->cuMemFree(d_q);
+	drv->cuMemFree(d_k);
+	drv->cuMemFree(d_v);
+	drv->cuMemFree(d_dst);
+	drv->cuMemFree(d_scores);
+	return -4;
 }
 
 void gguf_cuda_free(cuda_driver_t *drv, CUdeviceptr ptr) {
@@ -490,6 +670,63 @@ fail:
 	drv->cuMemFree(d_v);
 	drv->cuMemFree(d_cos);
 	drv->cuMemFree(d_sin);
+	return -4;
+}
+
+int gguf_cuda_swiglu(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, float *gate, const float *up, int n) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (n <= 0) {
+		return -11;
+	}
+
+	CUdeviceptr d_gate = 0;
+	CUdeviceptr d_up = 0;
+
+	size_t nbytes = (size_t)n * sizeof(float);
+
+	if (drv->cuMemAlloc(&d_gate, nbytes) != CUDA_SUCCESS) {
+		return -1;
+	}
+
+	if (drv->cuMemAlloc(&d_up, nbytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_gate);
+		return -2;
+	}
+
+	if (drv->cuMemcpyHtoD(d_gate, gate, nbytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyHtoD(d_up, up, nbytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	void *params[3];
+	params[0] = &d_gate;
+	params[1] = &d_up;
+	params[2] = &n;
+
+	unsigned int block = 256;
+	unsigned int grid = ((unsigned int)n + block - 1) / block;
+
+	if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	if (drv->cuMemcpyDtoH(gate, d_gate, nbytes) != CUDA_SUCCESS) {
+		goto fail;
+	}
+
+	drv->cuMemFree(d_gate);
+	drv->cuMemFree(d_up);
+	return 0;
+
+fail:
+	drv->cuMemFree(d_gate);
+	drv->cuMemFree(d_up);
 	return -4;
 }
 
