@@ -2,22 +2,61 @@
 
 package cuda
 
+// ptxTargets возвращает список SM-таргетов для попытки JIT
+func ptxTargets(cc int) []int {
+	switch {
+	case cc >= 120:
+		return []int{120, 90, 75, 60}
+	case cc >= 90:
+		return []int{90, 75, 60}
+	case cc >= 75:
+		return []int{75, 60}
+	default:
+		return []int{60}
+	}
+}
+
+func kernelsPTXForTarget(target int) string {
+	return ptxHeaderForTarget(target) + matmulKernelsBody
+}
+
+func opsPTXForTarget(target int) string {
+	return ptxHeaderForTarget(target) + opsKernelsBody
+}
+
 // kernelsPTX выбирает PTX matmul-ядер по compute capability GPU
 func kernelsPTX(cc int) string {
-	if cc >= 120 {
-		return ptxHeader120 + matmulKernelsBody
-	}
-
-	return ptxHeader60 + matmulKernelsBody
+	targets := ptxTargets(cc)
+	return kernelsPTXForTarget(targets[0])
 }
 
 // opsPTX выбирает PTX op-ядер (RMSNorm, ...)
 func opsPTX(cc int) string {
-	if cc >= 120 {
-		return ptxHeader120 + opsKernelsBody
-	}
+	targets := ptxTargets(cc)
+	return opsPTXForTarget(targets[0])
+}
 
-	return ptxHeader60 + opsKernelsBody
+func ptxHeaderForTarget(target int) string {
+	switch {
+	case target >= 120:
+		// Blackwell (sm_120) требует PTX >= 8.7
+		return `.version 8.7
+.target sm_120
+.address_size 64
+`
+	case target >= 90:
+		return `.version 8.0
+.target sm_90
+.address_size 64
+`
+	case target >= 75:
+		return `.version 7.4
+.target sm_75
+.address_size 64
+`
+	default:
+		return ptxHeader60
+	}
 }
 
 const ptxHeader60 = `.version 7.0
@@ -25,12 +64,7 @@ const ptxHeader60 = `.version 7.0
 .address_size 64
 `
 
-const ptxHeader120 = `.version 8.0
-.target sm_120
-.address_size 64
-`
-
-const matmulKernelsBody = `
+const matmulVecKernel = `
 .visible .entry matmul_vec(
     .param .u64 param_matrix,
     .param .u64 param_vec,
@@ -92,6 +126,9 @@ EXIT:
     ret;
 }
 
+`
+
+const matmulQ8Kernel = `
 .visible .entry matmul_vec_q8_0(
     .param .u64 param_matrix,
     .param .u64 param_vec,
@@ -101,11 +138,10 @@ EXIT:
 )
 {
     .reg .pred      %p<3>;
-    .reg .b16       %h<1>;
     .reg .s8        %s<1>;
-    .reg .b32       %r<12>;
+    .reg .b32       %r<13>;
     .reg .b64       %rd<20>;
-    .reg .f32       %f<5>;
+    .reg .f32       %f<6>;
 
     mov.u32         %r1, %tid.x;
     mov.u32         %r2, %ctaid.x;
@@ -131,11 +167,10 @@ Q8_BLOCK:
 
     mul.lo.u32      %r9, %r4, %r7;
     add.u32         %r9, %r9, %r8;
-    mul.wide.u32    %rd4, %r9, 34;
+    mul.wide.u32    %rd4, %r9, 36;
     add.u64         %rd5, %rd1, %rd4;
 
-    ld.global.b16   %h0, [%rd5];
-    cvt.rn.f32.f16  %f2, %h0;
+    ld.global.f32   %f2, [%rd5];
 
     mov.u32         %r11, 0;
 
@@ -143,7 +178,7 @@ Q8_INNER:
     setp.ge.u32     %p2, %r11, 32;
     @%p2            bra Q8_INNER_DONE;
 
-    add.u64         %rd6, %rd5, 2;
+    add.u64         %rd6, %rd5, 4;
     cvt.u64.u32     %rd7, %r11;
     add.u64         %rd8, %rd6, %rd7;
     ld.global.s8    %s0, [%rd8];
@@ -176,6 +211,8 @@ Q8_EXIT:
     ret;
 }
 `
+
+const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel
 
 const opsKernelsBody = `
 .visible .entry rmsnorm(

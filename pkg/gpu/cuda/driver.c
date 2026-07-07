@@ -743,21 +743,79 @@ int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const
 	return rc;
 }
 
+#define GGUF_GPU_Q8_BLOCK 36
+
+static float fp16_to_fp32(uint16_t h) {
+	uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
+	uint32_t exp = (h >> 10) & 0x1fu;
+	uint32_t mant = h & 0x3ffu;
+	uint32_t f;
+
+	if (exp == 0) {
+		if (mant == 0) {
+			f = sign;
+		} else {
+			exp = 127 - 15 + 1;
+			while ((mant & 0x400u) == 0) {
+				mant <<= 1;
+				exp--;
+			}
+			mant &= 0x3ffu;
+			f = sign | ((exp & 0xffu) << 23) | (mant << 13);
+		}
+	} else if (exp == 31) {
+		f = sign | 0x7f800000u | (mant << 13);
+	} else {
+		f = sign | (((exp - 15 + 127) & 0xffu) << 23) | (mant << 13);
+	}
+
+	float out;
+	memcpy(&out, &f, sizeof(out));
+
+	return out;
+}
+
 int gguf_cuda_upload_q8_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix,
 	const void *raw, size_t nbytes) {
 	if (gguf_cuda_set_context(drv, ctx) != 0) {
 		return -10;
 	}
 
-	if (drv->cuMemAlloc(d_matrix, nbytes) != CUDA_SUCCESS) {
+	if (nbytes == 0 || nbytes % 34 != 0) {
+		return -11;
+	}
+
+	size_t nblocks = nbytes / 34;
+	size_t gpu_bytes = nblocks * GGUF_GPU_Q8_BLOCK;
+	uint8_t *expanded = (uint8_t *)malloc(gpu_bytes);
+	if (!expanded) {
+		return -12;
+	}
+
+	const uint8_t *src = (const uint8_t *)raw;
+	uint8_t *dst = expanded;
+	for (size_t i = 0; i < nblocks; i++) {
+		uint16_t scale_fp16 = (uint16_t)src[0] | ((uint16_t)src[1] << 8);
+		float scale = fp16_to_fp32(scale_fp16);
+		memcpy(dst, &scale, sizeof(float));
+		memcpy(dst + 4, src + 2, 32);
+		src += 34;
+		dst += GGUF_GPU_Q8_BLOCK;
+	}
+
+	if (drv->cuMemAlloc(d_matrix, gpu_bytes) != CUDA_SUCCESS) {
+		free(expanded);
 		return -1;
 	}
 
-	if (drv->cuMemcpyHtoD(*d_matrix, raw, nbytes) != CUDA_SUCCESS) {
+	if (drv->cuMemcpyHtoD(*d_matrix, expanded, gpu_bytes) != CUDA_SUCCESS) {
 		drv->cuMemFree(*d_matrix);
 		*d_matrix = 0;
+		free(expanded);
 		return -2;
 	}
+
+	free(expanded);
 
 	return 0;
 }

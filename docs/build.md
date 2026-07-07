@@ -26,9 +26,11 @@ Verify GPU matmul:
 CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
 ```
 
-`-ngl N` - matmul for the first N transformer layers on GPU (max `block_count` from `gguf inspect`; Qwen3-0.6B - 28).
+`-ngl N` - offload the first N transformer layers to GPU (max `block_count`; Qwen3-0.6B - 28).
 
-Currently only matmul runs on GPU: Q8_0 without FP32 dequantization, other types via FP32. Attention, norm, and RoPE stay on CPU. Q8_0 kernel requires GPU sm_70+.
+On GPU: matmul (Q8_0 and FP32), RMSNorm, RoPE, attention, SwiGLU.
+
+Blackwell (sm_120, RTX 50xx): requires PTX 8.7+; Q8_0 scales are converted to FP32 on upload (no PTX f16).
 
 Without `-tags cuda`, `-ngl > 0` returns `gpu: CUDA unavailable`.
 

@@ -76,51 +76,66 @@ func Open() (*Backend, error) {
 	}
 
 	b.name = "CUDA:0 " + C.GoString(&nameBuf[0])
-
-	ptx := kernelsPTX(int(cc))
-	cptx := C.CString(ptx)
-	defer C.free(unsafe.Pointer(cptx))
+	gpuCC := int(cc)
 
 	var errBuf [4096]C.char
-	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
-	if rc != 0 && int(cc) >= 120 {
-		ptx = kernelsPTX(60)
-		cptx2 := C.CString(ptx)
-		defer C.free(unsafe.Pointer(cptx2))
-		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptx2, &b.module, &b.fn, &b.fnQ8, nil, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
-	}
-	if rc != 0 {
+	if err := b.loadMatmulModule(gpuCC, &errBuf); err != nil {
 		C.gguf_cuda_shutdown(&b.drv, b.ctx)
-		return nil, fmt.Errorf("cuda: load matmul module: код %d: %s", int(rc), C.GoString(&errBuf[0]))
+		return nil, err
 	}
 
-	ptxOps := opsPTX(int(cc))
-	cptxOps := C.CString(ptxOps)
-	defer C.free(unsafe.Pointer(cptxOps))
-
-	rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &b.fnSwiGLU, &errBuf[0], C.size_t(len(errBuf)))
-	if rc != 0 && int(cc) >= 120 {
-		ptxOps = opsPTX(60)
-		cptxOps2 := C.CString(ptxOps)
-		defer C.free(unsafe.Pointer(cptxOps2))
-		rc = C.gguf_cuda_load_module(&b.drv, b.ctx, cptxOps2, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &b.fnSwiGLU, &errBuf[0], C.size_t(len(errBuf)))
-	}
-
-	if rc == 0 {
-		b.hasRMS = true
-		b.hasRoPE = true
-		b.hasSwiGLU = true
-
-		cAttnQK := C.CString("attn_qk")
-		cAttnV := C.CString("attn_v")
-		defer C.free(unsafe.Pointer(cAttnQK))
-		defer C.free(unsafe.Pointer(cAttnV))
-		if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnQK, &b.fnAttnQK) == 0 && C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnV, &b.fnAttnV) == 0 {
-			b.hasAttn = true
-		}
+	if err := b.loadOpsModule(gpuCC, &errBuf); err != nil {
+		C.gguf_cuda_shutdown(&b.drv, b.ctx)
+		return nil, err
 	}
 
 	return b, nil
+}
+
+func (b *Backend) loadMatmulModule(gpuCC int, errBuf *[4096]C.char) error {
+	var lastErr string
+	for _, target := range ptxTargets(gpuCC) {
+		ptx := kernelsPTXForTarget(target)
+		cptx := C.CString(ptx)
+		rc := C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
+		C.free(unsafe.Pointer(cptx))
+		if rc == 0 {
+			return nil
+		}
+
+		lastErr = C.GoString(&errBuf[0])
+	}
+
+	return fmt.Errorf("cuda: load matmul module (cc=%d): %s", gpuCC, lastErr)
+}
+
+func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
+	var lastErr string
+	for _, target := range ptxTargets(gpuCC) {
+		ptx := opsPTXForTarget(target)
+		cptx := C.CString(ptx)
+		rc := C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.moduleOps, nil, nil, &b.fnRMS, &b.fnRoPE, &b.fnSwiGLU, &errBuf[0], C.size_t(len(errBuf)))
+		C.free(unsafe.Pointer(cptx))
+		if rc == 0 {
+			b.hasRMS = true
+			b.hasRoPE = true
+			b.hasSwiGLU = true
+
+			cAttnQK := C.CString("attn_qk")
+			cAttnV := C.CString("attn_v")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnQK, &b.fnAttnQK) == 0 && C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnV, &b.fnAttnV) == 0 {
+				b.hasAttn = true
+			}
+			C.free(unsafe.Pointer(cAttnQK))
+			C.free(unsafe.Pointer(cAttnV))
+
+			return nil
+		}
+
+		lastErr = C.GoString(&errBuf[0])
+	}
+
+	return fmt.Errorf("cuda: load ops module (cc=%d): %s", gpuCC, lastErr)
 }
 
 func (b *Backend) Name() string { return b.name }

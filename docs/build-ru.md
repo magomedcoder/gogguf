@@ -26,10 +26,11 @@ CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
 CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
 ```
 
-`-ngl N` - matmul первых N transformer-слоёв на GPU (макс. `block_count` из `gguf inspect`; Qwen3-0.6B - 28).
+`-ngl N` - offload первых N transformer-слоёв на GPU (макс. `block_count`; Qwen3-0.6B - 28).
 
-Сейчас на GPU только matmul: Q8_0 без деквантизации в FP32, остальные типы - через FP32. Attention, norm и RoPE - на
-CPU. Q8_0 kernel требует GPU sm_70+.
+На GPU: matmul (Q8_0 и FP32), RMSNorm, RoPE, attention, SwiGLU.
+
+Blackwell (sm_120, RTX 50xx): нужен PTX 8.7+; Q8_0 scale конвертируется в FP32 при загрузке на GPU (без PTX f16).
 
 Без `-tags cuda` при `-ngl > 0` будет ошибка `gpu: CUDA недоступна`.
 
