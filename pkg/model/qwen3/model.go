@@ -91,7 +91,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		}
 	}
 
-	if err = m.logits(); err != nil {
+	if err = m.logitsFinish(); err != nil {
 		return nil, err
 	}
 
@@ -114,8 +114,18 @@ func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 			return err
 		}
 
-		if debug && m.debug != nil && m.debug.OnLayer != nil {
-			m.debug.OnLayer(layer, m.scratch.x)
+		if debug && m.debug != nil {
+			if m.debug.OnLayer != nil {
+				m.debug.OnLayer(layer, m.scratch.x)
+			}
+
+			if m.debug.OnLayerLogits != nil {
+				if err := m.logitsFromHidden(m.scratch.x); err != nil {
+					return err
+				}
+
+				m.debug.OnLayerLogits(layer, m.scratch.logits)
+			}
 		}
 	}
 	m.cache.Advance()
@@ -310,7 +320,11 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logits() error {
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+	return m.logitsFromHidden(m.scratch.x)
+}
+
+func (m *Model) logitsFromHidden(x []float32) error {
+	if err := ops.RMSNormInto(m.scratch.h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -340,13 +354,20 @@ func (m *Model) logits() error {
 		err = ops.MatMulVecInto(f32, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	}
 
-	if err != nil {
-		return err
-	}
+	return err
+}
 
+func (m *Model) emitLogitsDebug() {
 	if m.debug != nil && m.debug.OnLogits != nil {
 		m.debug.OnLogits(m.scratch.logits)
 	}
+}
+
+func (m *Model) logitsFinish() error {
+	if err := m.logits(); err != nil {
+		return err
+	}
+	m.emitLogitsDebug()
 
 	return nil
 }
