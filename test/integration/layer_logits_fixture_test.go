@@ -4,11 +4,13 @@ package integration
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"testing"
 
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/chat"
+	"github.com/magomedcoder/gogguf/pkg/debug"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
@@ -18,10 +20,11 @@ type layerLogitsFile struct {
 }
 
 type layerLogitsCase struct {
-	Name        string `json:"name"`
-	Input       string `json:"input,omitempty"`
-	ChatUser    string `json:"chat_user,omitempty"`
-	LayerGreedy []int  `json:"layer_greedy"`
+	Name           string          `json:"name"`
+	Input          string          `json:"input,omitempty"`
+	ChatUser       string          `json:"chat_user,omitempty"`
+	LayerGreedy    []int           `json:"layer_greedy"`
+	LayerTopLogits [][]debug.Logit `json:"layer_top_logits,omitempty"`
 }
 
 func loadLayerLogitsFixture(t *testing.T) layerLogitsFile {
@@ -86,11 +89,15 @@ func TestLayerLogitsFixture(t *testing.T) {
 			}
 
 			got := make([]int, 0, len(tc.LayerGreedy))
+			gotTop := make([][]debug.Logit, 0, len(tc.LayerTopLogits))
 
 			setter.SetDebugHooks(&qwen3.DebugHooks{
 				OnLayerLogits: func(layer int, logits []float32) {
 					_ = layer
 					got = append(got, gogguf.Greedy(logits))
+					if len(tc.LayerTopLogits) > 0 {
+						gotTop = append(gotTop, debug.TopLogits(logits, len(tc.LayerTopLogits[0])))
+					}
 				},
 			})
 
@@ -106,6 +113,34 @@ func TestLayerLogitsFixture(t *testing.T) {
 			for i := range got {
 				if got[i] != tc.LayerGreedy[i] {
 					t.Fatalf("layer[%d] greedy = %d, ожидали %d", i, got[i], tc.LayerGreedy[i])
+				}
+			}
+
+			if len(tc.LayerTopLogits) == 0 {
+				return
+			}
+
+			if len(gotTop) != len(tc.LayerTopLogits) {
+				t.Fatalf("layer top logits count = %d, ожидали %d", len(gotTop), len(tc.LayerTopLogits))
+			}
+
+			const logitTol = 1e-4
+
+			for layer := range gotTop {
+				want := tc.LayerTopLogits[layer]
+				if len(gotTop[layer]) != len(want) {
+					t.Fatalf("layer[%d] top logits len = %d, ожидали %d", layer, len(gotTop[layer]), len(want))
+				}
+
+				for j := range want {
+					if gotTop[layer][j].ID != want[j].ID {
+						t.Fatalf("layer[%d] top[%d] id = %d, ожидали %d", layer, j, gotTop[layer][j].ID, want[j].ID)
+					}
+
+					diff := math.Abs(float64(gotTop[layer][j].Logit - want[j].Logit))
+					if diff > logitTol {
+						t.Fatalf("layer[%d] logit[%d] = %v, ожидали ~%v (diff %v)", layer, want[j].ID, gotTop[layer][j].Logit, want[j].Logit, diff)
+					}
 				}
 			}
 		})

@@ -7,14 +7,16 @@ import (
 	"os"
 
 	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/pkg/debug"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
 type caseOut struct {
-	Name        string `json:"name"`
-	Input       string `json:"input,omitempty"`
-	ChatUser    string `json:"chat_user,omitempty"`
-	LayerGreedy []int  `json:"layer_greedy"`
+	Name           string          `json:"name"`
+	Input          string          `json:"input,omitempty"`
+	ChatUser       string          `json:"chat_user,omitempty"`
+	LayerGreedy    []int           `json:"layer_greedy"`
+	LayerTopLogits [][]debug.Logit `json:"layer_top_logits,omitempty"`
 }
 
 type fileOut struct {
@@ -26,6 +28,7 @@ func main() {
 	modelPath := flag.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")
 	prompt := flag.String("p", "Hello", "промпт")
 	chatMode := flag.Bool("chat", false, "chat template")
+	topN := flag.Int("top", 5, "число top logits на слой (0 = только greedy)")
 	flag.Parse()
 
 	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{})
@@ -54,6 +57,7 @@ func main() {
 	}
 
 	layerGreedy := make([]int, 0, 32)
+	var layerTopLogits [][]debug.Logit
 
 	setter, ok := engine.Model.(interface {
 		SetDebugHooks(*qwen3.DebugHooks)
@@ -67,6 +71,9 @@ func main() {
 		OnLayerLogits: func(layer int, logits []float32) {
 			_ = layer
 			layerGreedy = append(layerGreedy, gogguf.Greedy(logits))
+			if *topN > 0 {
+				layerTopLogits = append(layerTopLogits, debug.TopLogits(logits, *topN))
+			}
 		},
 	})
 
@@ -83,6 +90,11 @@ func main() {
 			LayerGreedy: layerGreedy,
 		}},
 	}
+
+	if *topN > 0 {
+		out.Cases[0].LayerTopLogits = layerTopLogits
+	}
+
 	if *chatMode {
 		out.Cases[0].ChatUser = *prompt
 	} else {

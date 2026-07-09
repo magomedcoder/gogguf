@@ -24,6 +24,7 @@ func modelPath(t *testing.T) string {
 	for _, p := range []string{
 		"models/Qwen3-0.6B-Q8_0.gguf",
 		"../models/Qwen3-0.6B-Q8_0.gguf",
+		"../../models/Qwen3-0.6B-Q8_0.gguf",
 	} {
 		if _, err := os.Stat(p); err == nil {
 			abs, _ := filepath.Abs(p)
