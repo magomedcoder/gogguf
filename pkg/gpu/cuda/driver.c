@@ -316,7 +316,7 @@ static void softmax_host(float *x, int n) {
 	}
 }
 
-int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, float *dst, const float *q, const float *k, const float *v,
+static int gguf_cuda_attention_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, float *dst, const float *q, CUdeviceptr d_k, CUdeviceptr d_v,
 	int seq_len, int n_heads, int n_kv_heads, int head_dim) {
 	if (gguf_cuda_set_context(drv, ctx) != 0) {
 		return -10;
@@ -331,13 +331,10 @@ int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUf
 	float scale = 1.0f / sqrtf((float)head_dim);
 
 	size_t q_bytes = (size_t)n_heads * (size_t)head_dim * sizeof(float);
-	size_t kv_bytes = (size_t)seq_len * (size_t)kv_stride * sizeof(float);
 	size_t dst_bytes = q_bytes;
 	size_t scores_bytes = (size_t)seq_len * sizeof(float);
 
 	CUdeviceptr d_q = 0;
-	CUdeviceptr d_k = 0;
-	CUdeviceptr d_v = 0;
 	CUdeviceptr d_dst = 0;
 	CUdeviceptr d_scores = 0;
 
@@ -351,31 +348,20 @@ int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUf
 		return -1;
 	}
 
-	if (drv->cuMemAlloc(&d_k, kv_bytes) != CUDA_SUCCESS) {
-		goto fail;
-	}
-
-	if (drv->cuMemAlloc(&d_v, kv_bytes) != CUDA_SUCCESS) {
-		goto fail;
-	}
-
 	if (drv->cuMemAlloc(&d_dst, dst_bytes) != CUDA_SUCCESS) {
-		goto fail;
+		free(h_scores);
+		drv->cuMemFree(d_q);
+		return -1;
 	}
 
 	if (drv->cuMemAlloc(&d_scores, scores_bytes) != CUDA_SUCCESS) {
-		goto fail;
+		free(h_scores);
+		drv->cuMemFree(d_q);
+		drv->cuMemFree(d_dst);
+		return -1;
 	}
 
 	if (drv->cuMemcpyHtoD(d_q, q, q_bytes) != CUDA_SUCCESS) {
-		goto fail;
-	}
-
-	if (drv->cuMemcpyHtoD(d_k, k, kv_bytes) != CUDA_SUCCESS) {
-		goto fail;
-	}
-
-	if (drv->cuMemcpyHtoD(d_v, v, kv_bytes) != CUDA_SUCCESS) {
 		goto fail;
 	}
 
@@ -434,8 +420,6 @@ int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUf
 
 	free(h_scores);
 	drv->cuMemFree(d_q);
-	drv->cuMemFree(d_k);
-	drv->cuMemFree(d_v);
 	drv->cuMemFree(d_dst);
 	drv->cuMemFree(d_scores);
 	return 0;
@@ -443,11 +427,149 @@ int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUf
 fail:
 	free(h_scores);
 	drv->cuMemFree(d_q);
-	drv->cuMemFree(d_k);
-	drv->cuMemFree(d_v);
 	drv->cuMemFree(d_dst);
 	drv->cuMemFree(d_scores);
 	return -4;
+}
+
+int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, float *dst, const float *q, const float *k, const float *v,
+	int seq_len, int n_heads, int n_kv_heads, int head_dim) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (seq_len <= 0 || n_heads <= 0 || n_kv_heads <= 0 || head_dim <= 0 || n_heads % n_kv_heads != 0) {
+		return -11;
+	}
+
+	int kv_stride = n_kv_heads * head_dim;
+	size_t kv_bytes = (size_t)seq_len * (size_t)kv_stride * sizeof(float);
+
+	CUdeviceptr d_k = 0;
+	CUdeviceptr d_v = 0;
+
+	if (drv->cuMemAlloc(&d_k, kv_bytes) != CUDA_SUCCESS) {
+		return -1;
+	}
+
+	if (drv->cuMemAlloc(&d_v, kv_bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_k);
+		return -1;
+	}
+
+	if (drv->cuMemcpyHtoD(d_k, k, kv_bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_k);
+		drv->cuMemFree(d_v);
+		return -4;
+	}
+
+	if (drv->cuMemcpyHtoD(d_v, v, kv_bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_k);
+		drv->cuMemFree(d_v);
+		return -4;
+	}
+
+	int rc = gguf_cuda_attention_device(drv, ctx, fn_qk, fn_v, dst, q, d_k, d_v, seq_len, n_heads, n_kv_heads, head_dim);
+	drv->cuMemFree(d_k);
+	drv->cuMemFree(d_v);
+	return rc;
+}
+
+int gguf_cuda_kv_init(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int num_layers, int max_seq, int kv_dim) {
+	if (!cache || num_layers <= 0 || max_seq <= 0 || kv_dim <= 0) {
+		return -1;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	cache->num_layers = num_layers;
+	cache->layers = (gguf_kv_layer_t *)calloc((size_t)num_layers, sizeof(gguf_kv_layer_t));
+	if (!cache->layers) {
+		return -2;
+	}
+
+	size_t bytes = (size_t)max_seq * (size_t)kv_dim * sizeof(float);
+	for (int i = 0; i < num_layers; i++) {
+		cache->layers[i].max_seq = max_seq;
+		cache->layers[i].kv_dim = kv_dim;
+		if (drv->cuMemAlloc(&cache->layers[i].d_k, bytes) != CUDA_SUCCESS) {
+			gguf_cuda_kv_free(drv, cache);
+			return -3;
+		}
+
+		if (drv->cuMemAlloc(&cache->layers[i].d_v, bytes) != CUDA_SUCCESS) {
+			gguf_cuda_kv_free(drv, cache);
+			return -3;
+		}
+	}
+
+	return 0;
+}
+
+void gguf_cuda_kv_free(cuda_driver_t *drv, gguf_kv_cache_t *cache) {
+	if (!cache) {
+		return;
+	}
+
+	if (cache->layers) {
+		for (int i = 0; i < cache->num_layers; i++) {
+			if (cache->layers[i].d_k) {
+				drv->cuMemFree(cache->layers[i].d_k);
+			}
+
+			if (cache->layers[i].d_v) {
+				drv->cuMemFree(cache->layers[i].d_v);
+			}
+		}
+
+		free(cache->layers);
+	}
+
+	cache->layers = NULL;
+	cache->num_layers = 0;
+}
+
+int gguf_cuda_kv_append(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int pos, const float *k, const float *v) {
+	if (!cache || !cache->layers || layer < 0 || layer >= cache->num_layers || pos < 0) {
+		return -1;
+	}
+
+	gguf_kv_layer_t *ly = &cache->layers[layer];
+	if (pos >= ly->max_seq) {
+		return -2;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	size_t off = (size_t)pos * (size_t)ly->kv_dim * sizeof(float);
+	size_t bytes = (size_t)ly->kv_dim * sizeof(float);
+
+	if (drv->cuMemcpyHtoD(ly->d_k + (CUdeviceptr)off, k, bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	if (drv->cuMemcpyHtoD(ly->d_v + (CUdeviceptr)off, v, bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	return 0;
+}
+
+int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, gguf_kv_cache_t *cache, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim) {
+	if (!cache || !cache->layers || layer < 0 || layer >= cache->num_layers) {
+		return -1;
+	}
+
+	gguf_kv_layer_t *ly = &cache->layers[layer];
+	if (seq_len > ly->max_seq) {
+		return -2;
+	}
+
+	return gguf_cuda_attention_device(drv, ctx, fn_qk, fn_v, dst, q, ly->d_k, ly->d_v, seq_len, n_heads, n_kv_heads, head_dim);
 }
 
 void gguf_cuda_free(cuda_driver_t *drv, CUdeviceptr ptr) {

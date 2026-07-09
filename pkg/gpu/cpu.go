@@ -41,4 +41,20 @@ func (CPUBackend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nH
 	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim)
 }
 
-func (CPUBackend) Close() error { return nil }
+func (CPUBackend) KVCacheInit(int, int, int) error {
+	return nil
+}
+
+func (CPUBackend) KVCacheReset() {}
+
+func (CPUBackend) KVCacheAppend(int, int, []float32, []float32) error {
+	return nil
+}
+
+func (CPUBackend) AttentionScoresKV(int, []float32, []float32, int, int, int, int) error {
+	return ErrKVCacheUnavailable
+}
+
+func (CPUBackend) Close() error {
+	return nil
+}

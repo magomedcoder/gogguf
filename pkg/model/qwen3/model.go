@@ -45,7 +45,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
 		return nil, err
 	}
 
-	return &Model{
+	m := &Model{
 		cfg:          cfg,
 		weights:      w,
 		cache:        NewKVCache(cfg),
@@ -56,7 +56,22 @@ func Load(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
 		layerTensors: loadLayerTensors(cfg.NumLayers),
 		outNorm:      outNorm,
 		lmHeadName:   lmHeadName,
-	}, nil
+	}
+
+	if err := m.initGPUKVCache(); err != nil {
+		return nil, err
+	}
+
+	return m, nil
+}
+
+func (m *Model) initGPUKVCache() error {
+	if m.gpu == nil || m.ngl <= 0 {
+		return nil
+	}
+
+	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
+	return m.gpu.KVCacheInit(m.ngl, m.cfg.ContextLength, kvDim)
 }
 
 // Config возвращает конфигурацию модели
@@ -67,6 +82,9 @@ func (m *Model) Config() Config {
 // ResetCache сбрасывает KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
+	if m.gpu != nil {
+		m.gpu.KVCacheReset()
+	}
 }
 
 // SetDebugHooks включает колбэки для пошаговой отладки forward pass
@@ -193,7 +211,12 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	m.applyRoPEHeads(m.scratch.q, m.cfg.NumHeads, pos, layer)
 	m.applyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, pos, layer)
 
+	kvPos := m.cache.Len()
 	m.cache.Append(layer, m.scratch.k, m.scratch.v)
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		_ = m.gpu.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
+	}
+
 	seqLen := m.cache.Len() + 1
 
 	if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, seqLen, layer); err != nil {
@@ -404,6 +427,10 @@ func (m *Model) swigluInPlace(gate, up []float32, layer int) {
 
 func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, layer int) error {
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.gpu.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
+			return nil
+		}
+
 		if err := m.gpu.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil
 		}

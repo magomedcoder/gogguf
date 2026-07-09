@@ -53,6 +53,8 @@ type Backend struct {
 	mu         sync.Mutex
 	matrices   map[string]gpuMatrix
 	matricesQ8 map[string]gpuQ8Matrix
+	kvCache    C.gguf_kv_cache_t
+	kvReady    bool
 }
 
 // Open инициализирует GPU 0 и загружает kernels
@@ -143,6 +145,11 @@ func (b *Backend) Name() string { return b.name }
 func (b *Backend) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if b.kvReady {
+		C.gguf_cuda_kv_free(&b.drv, &b.kvCache)
+		b.kvReady = false
+	}
 
 	for _, m := range b.matrices {
 		C.gguf_cuda_free(&b.drv, m.ptr)
@@ -379,6 +386,101 @@ func (b *Backend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nH
 		C.int(headDim))
 	if rc != 0 {
 		return fmt.Errorf("cuda: attention: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) KVCacheInit(layers, maxSeq, kvDim int) error {
+	if !b.hasAttn {
+		return fmt.Errorf("cuda: attention kernels недоступны")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.kvReady {
+		C.gguf_cuda_kv_free(&b.drv, &b.kvCache)
+		b.kvReady = false
+	}
+
+	rc := C.gguf_cuda_kv_init(&b.drv, b.ctx, &b.kvCache, C.int(layers), C.int(maxSeq), C.int(kvDim))
+	if rc != 0 {
+		return fmt.Errorf("cuda: kv_init: код %d", int(rc))
+	}
+
+	b.kvReady = true
+	return nil
+}
+
+func (b *Backend) KVCacheReset() {
+	// Логический сброс: новые Append начнутся с pos=0, старые данные перезаписываются.
+}
+
+func (b *Backend) KVCacheAppend(layer, pos int, k, v []float32) error {
+	if len(k) == 0 || len(v) == 0 {
+		return fmt.Errorf("cuda: KVCacheAppend: пустой k/v")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache не инициализирован")
+	}
+
+	rc := C.gguf_cuda_kv_append(
+		&b.drv,
+		b.ctx,
+		&b.kvCache,
+		C.int(layer),
+		C.int(pos),
+		(*C.float)(unsafe.Pointer(&k[0])),
+		(*C.float)(unsafe.Pointer(&v[0])),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: kv_append layer=%d pos=%d: код %d", layer, pos, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error {
+	if !b.hasAttn {
+		return fmt.Errorf("cuda: attention kernels недоступны")
+	}
+
+	if len(dst) < nHeads*headDim {
+		return fmt.Errorf("cuda: AttentionScoresKV: dst слишком короткий")
+	}
+
+	if len(q) < nHeads*headDim {
+		return fmt.Errorf("cuda: AttentionScoresKV: q слишком короткий")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache не инициализирован")
+	}
+
+	rc := C.gguf_cuda_kv_attention(
+		&b.drv,
+		b.ctx,
+		b.fnAttnQK,
+		b.fnAttnV,
+		&b.kvCache,
+		C.int(layer),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		(*C.float)(unsafe.Pointer(&q[0])),
+		C.int(seqLen),
+		C.int(nHeads),
+		C.int(nKVHeads),
+		C.int(headDim),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: kv_attention layer=%d: код %d", layer, int(rc))
 	}
 
 	return nil

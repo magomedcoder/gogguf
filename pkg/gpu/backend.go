@@ -1,5 +1,10 @@
 package gpu
 
+import "errors"
+
+// ErrKVCacheUnavailable означает, что backend не поддерживает GPU KV-cache
+var ErrKVCacheUnavailable = errors.New("gpu: kv cache unavailable")
+
 // Backend выполняет вычисления на GPU (CUDA)
 type Backend interface {
 	// Name возвращает имя устройства, например "CUDA:0 NVIDIA ..."
@@ -25,6 +30,18 @@ type Backend interface {
 
 	// AttentionScoresInto записывает scaled dot-product attention в dst
 	AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error
+
+	// KVCacheInit выделяет GPU-буферы K/V для offloaded слоёв
+	KVCacheInit(layers, maxSeq, kvDim int) error
+
+	// KVCacheReset сбрасывает GPU KV-cache
+	KVCacheReset()
+
+	// KVCacheAppend добавляет K/V одного токена в позицию pos
+	KVCacheAppend(layer, pos int, k, v []float32) error
+
+	// AttentionScoresKV attention с K/V из GPU KV-cache
+	AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error
 
 	Close() error
 }
