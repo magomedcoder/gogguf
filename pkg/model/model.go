@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/model/llama"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
@@ -30,6 +31,8 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 	switch arch {
 	case "qwen3":
 		return qwen3.Load(store, opts.GPU, opts.NGL)
+	case "llama":
+		return llama.Load(store, opts.GPU, opts.NGL)
 	default:
 		return nil, fmt.Errorf("model: архитектура %q не поддерживается", arch)
 	}

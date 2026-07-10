@@ -18,12 +18,19 @@ Optional: **CUDA** via Driver API (`libcuda.so`, build with `-tags cuda`, CGO).
 - dequantization and matmul: Q8_0, Q4_0, Q4_K;
 - basic ops: RoPE, RMSNorm, GQA attention, SwiGLU;
 - **SIMD** FP32 matmul: AVX2 (amd64), NEON (arm64); Q8_0 dot: AVX2 (amd64);
-- **Qwen3** forward pass + KV-cache;
+- **Qwen3** and **Llama 3** forward pass + KV-cache;
 - BPE tokenizer from GGUF metadata;
 - ChatML/Qwen and Jinja chat templates (`--chat`, `--thinking`, `FormatChatUser`);
 - text generation: `gguf run` (greedy / temperature / top-k / top-p / min-p / repeat penalty);
 - HTTP server: `gguf serve` (`/generate`, `/models`, `/completions`, JSON + SSE);
 - **CUDA offload** (`-ngl N`): matmul for the first N transformer layers on GPU (build with `-tags cuda`).
+
+## Models
+
+**Works:** Qwen3, Llama 3
+**Soon:** Llama 2, Mistral, Phi, Gemma
+
+Details: [docs/models.md](docs/models.md).
 
 ## Test model
 
@@ -53,3 +60,4 @@ go build -o build/gogguf ./cmd/gogguf
 | [docs/library.md](docs/library.md)         | Inference from Go                      |
 | [docs/tools.md](docs/tools.md)             | `debugtok`, `vocab`, `bench`           |
 | [docs/GGUF-FORMAT.md](docs/GGUF-FORMAT.md) | GGUF format spec                       |
+| [docs/models.md](docs/models.md)           | Supported and planned models           |

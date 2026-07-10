@@ -8,7 +8,7 @@ func dotStride(weights []float32, v []float32, vOff, vStride, n int) float32 {
 
 	var sum float32
 	off := vOff
-	for t := 0; t < n; t++ {
+	for t := range n {
 		sum += weights[t] * v[off]
 		off += vStride
 	}

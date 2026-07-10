@@ -19,12 +19,19 @@
 - деквантизация и matmul: Q8_0, Q4_0, Q4_K;
 - базовые ops: RoPE, RMSNorm, GQA attention, SwiGLU;
 - **SIMD** matmul FP32: AVX2 (amd64), NEON (arm64); Q8_0 dot: AVX2 (amd64);
-- forward pass **Qwen3** + KV-cache;
+- forward pass **Qwen3** и **Llama 3** + KV-cache;
 - tokenizer BPE из метаданных GGUF;
 - chat template ChatML/Qwen и Jinja (`--chat`, `--thinking`, `FormatChatUser`);
 - генерация текста: `gguf run` (greedy / temperature / top-k / top-p / min-p / repeat penalty);
 - HTTP-сервер: `gguf serve` (`/generate`, `/models`, `/completions`, JSON + SSE);
 - **CUDA offload** (`-ngl N`): matmul первых N transformer-слоёв на GPU (сборка `-tags cuda`).
+
+## Модели
+
+**Работает:** Qwen3, Llama 3
+**Скоро:** Llama 2, Mistral, Phi, Gemma
+
+Подробнее: [docs/models-ru.md](docs/models-ru.md).
 
 ## Тестовая модель
 
@@ -33,7 +40,7 @@
 ```bash
 mkdir -p models
 
-curl -L -o models/Qwen3-0.6B-Q8_0.gogguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
+curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
 ```
 
 ## Быстрый старт
@@ -41,7 +48,7 @@ curl -L -o models/Qwen3-0.6B-Q8_0.gogguf https://huggingface.co/Qwen/Qwen3-0.6B-
 ```bash
 go build -o build/gogguf ./cmd/gogguf
 
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gogguf --chat -p "Привет" -n 64
+./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64
 ```
 
 ## Документация
@@ -54,3 +61,4 @@ go build -o build/gogguf ./cmd/gogguf
 | [docs/library-ru.md](docs/library-ru.md)         | Inference из Go-кода                   |
 | [docs/tools-ru.md](docs/tools-ru.md)             | `debugtok`, `vocab`, `bench`           |
 | [docs/GGUF-FORMAT-ru.md](docs/GGUF-FORMAT-ru.md) | Формат GGUF                            |
+| [docs/models-ru.md](docs/models-ru.md)           | Поддерживаемые и планируемые модели    |
