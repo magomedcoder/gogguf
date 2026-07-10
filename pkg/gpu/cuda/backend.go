@@ -55,6 +55,7 @@ type Backend struct {
 	matricesQ8 map[string]gpuQ8Matrix
 	kvCache    C.gguf_kv_cache_t
 	kvReady    bool
+	attnPool   C.gguf_attn_pool_t
 }
 
 // Open инициализирует GPU 0 и загружает kernels
@@ -150,6 +151,8 @@ func (b *Backend) Close() error {
 		C.gguf_cuda_kv_free(&b.drv, &b.kvCache)
 		b.kvReady = false
 	}
+
+	C.gguf_cuda_attn_pool_free(&b.drv, &b.attnPool)
 
 	for _, m := range b.matrices {
 		C.gguf_cuda_free(&b.drv, m.ptr)
@@ -391,7 +394,7 @@ func (b *Backend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nH
 	return nil
 }
 
-func (b *Backend) KVCacheInit(layers, maxSeq, kvDim int) error {
+func (b *Backend) KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error {
 	if !b.hasAttn {
 		return fmt.Errorf("cuda: attention kernels недоступны")
 	}
@@ -404,9 +407,18 @@ func (b *Backend) KVCacheInit(layers, maxSeq, kvDim int) error {
 		b.kvReady = false
 	}
 
+	C.gguf_cuda_attn_pool_free(&b.drv, &b.attnPool)
+
 	rc := C.gguf_cuda_kv_init(&b.drv, b.ctx, &b.kvCache, C.int(layers), C.int(maxSeq), C.int(kvDim))
 	if rc != 0 {
 		return fmt.Errorf("cuda: kv_init: код %d", int(rc))
+	}
+
+	qBytes := nHeads * headDim
+	rc = C.gguf_cuda_attn_pool_init(&b.drv, b.ctx, &b.attnPool, C.int(qBytes), C.int(maxSeq))
+	if rc != 0 {
+		C.gguf_cuda_kv_free(&b.drv, &b.kvCache)
+		return fmt.Errorf("cuda: attn_pool_init: код %d", int(rc))
 	}
 
 	b.kvReady = true
@@ -471,6 +483,7 @@ func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads,
 		b.fnAttnQK,
 		b.fnAttnV,
 		&b.kvCache,
+		&b.attnPool,
 		C.int(layer),
 		(*C.float)(unsafe.Pointer(&dst[0])),
 		(*C.float)(unsafe.Pointer(&q[0])),

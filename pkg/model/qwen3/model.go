@@ -71,7 +71,7 @@ func (m *Model) initGPUKVCache() error {
 	}
 
 	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
-	return m.gpu.KVCacheInit(m.ngl, m.cfg.ContextLength, kvDim)
+	return m.gpu.KVCacheInit(m.ngl, m.cfg.ContextLength, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
 // Config возвращает конфигурацию модели

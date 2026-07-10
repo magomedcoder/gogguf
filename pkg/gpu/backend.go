@@ -32,7 +32,7 @@ type Backend interface {
 	AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error
 
 	// KVCacheInit выделяет GPU-буферы K/V для offloaded слоёв
-	KVCacheInit(layers, maxSeq, kvDim int) error
+	KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error
 
 	// KVCacheReset сбрасывает GPU KV-cache
 	KVCacheReset()

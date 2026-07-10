@@ -135,6 +135,14 @@ typedef struct {
 	int num_layers;
 } gguf_kv_cache_t;
 
+typedef struct {
+	CUdeviceptr d_q;
+	CUdeviceptr d_dst;
+	CUdeviceptr d_scores;
+	int q_elems;
+	int max_seq;
+} gguf_attn_pool_t;
+
 // gguf_cuda_kv_init выделяет GPU-буферы K/V для num_layers слоёв
 int gguf_cuda_kv_init(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int num_layers, int max_seq, int kv_dim);
 
@@ -145,6 +153,12 @@ void gguf_cuda_kv_free(cuda_driver_t *drv, gguf_kv_cache_t *cache);
 int gguf_cuda_kv_append(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int pos, const float *k, const float *v);
 
 // gguf_cuda_kv_attention attention с K/V уже на GPU
-int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, gguf_kv_cache_t *cache, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim);
+int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, gguf_kv_cache_t *cache, gguf_attn_pool_t *pool, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim);
+
+// gguf_cuda_attn_pool_init выделяет переиспользуемые буферы attention
+int gguf_cuda_attn_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_attn_pool_t *pool, int q_elems, int max_seq);
+
+// gguf_cuda_attn_pool_free освобождает буферы attention
+void gguf_cuda_attn_pool_free(cuda_driver_t *drv, gguf_attn_pool_t *pool);
 
 #endif

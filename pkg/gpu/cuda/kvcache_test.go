@@ -27,7 +27,7 @@ func TestKVCacheAttention(t *testing.T) {
 	headDim := 4
 	kvDim := nKVHeads * headDim
 
-	if err := b.KVCacheInit(1, seqLen, kvDim); err != nil {
+	if err := b.KVCacheInit(1, seqLen, kvDim, nHeads, headDim); err != nil {
 		t.Fatal(err)
 	}
 
