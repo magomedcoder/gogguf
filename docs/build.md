@@ -36,46 +36,28 @@ Without `-tags cuda`, `-ngl > 0` returns `gpu: CUDA unavailable`.
 
 ## Docker
 
-Multi-stage `Dockerfile`: CPU cross-compilation by default, separate CUDA targets.
+Multi-stage `Dockerfile` runs `gogguf serve` in a minimal Alpine image.
 
-**CPU (default)** - all platforms, `CGO_ENABLED=0`:
-
-```bash
-docker build -t gogguf-build .
-docker run --rm -v "$(pwd)/build:/out" gogguf-build
-```
-
-**CUDA** - `linux-amd64/gguf-cuda` only:
+Download a model:
 
 ```bash
-docker build --target cuda -t gogguf-cuda .
-docker run --rm -v "$(pwd)/build:/out" gogguf-cuda
+mkdir -p models
+
+curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
 ```
 
-**CPU + CUDA**:
+**CPU (default)**:
 
 ```bash
-docker build --target release -t gogguf-release .
-docker run --rm -v "$(pwd)/build:/out" gogguf-release
+docker build -t gogguf .
+
+docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /models/Qwen3-0.6B-Q8_0.gguf --addr 0.0.0.0:8000
 ```
 
-| Target / mode | Output                         |
-|---------------|--------------------------------|
-| *(default)*   | CPU binaries for all platforms |
-| `cuda`        | `build/linux-amd64/gguf-cuda`  |
-| `release`     | CPU + `gguf-cuda`              |
+**CUDA** (NVIDIA GPU, `linux/amd64` only):
 
-| Platform      | CPU binary                     | CUDA binary (`cuda` / `release`) |
-|---------------|--------------------------------|----------------------------------|
-| Linux amd64   | `build/linux-amd64/gguf`       | `build/linux-amd64/gguf-cuda`    |
-| Linux arm64   | `build/linux-arm64/gguf`       | -                                |
-| Windows amd64 | `build/windows-amd64/gguf.exe` | -                                |
-| Windows arm64 | `build/windows-arm64/gguf.exe` | -                                |
-| macOS amd64   | `build/darwin-amd64/gguf`      | -                                |
-| macOS arm64   | `build/darwin-arm64/gguf`      | -                                |
+```bash
+docker build --target runtime-cuda -t gogguf-cuda .
 
-> **Note.** Binary path depends on the build method:
-> - local CPU: `./build/gguf`
-> - local CUDA: `./build/gguf` (with `-tags cuda`)
-> - Docker CPU: `./build/<os>-<arch>/gguf` (`.exe` on Windows)
-> - Docker CUDA: `./build/linux-amd64/gguf-cuda`
+docker run --rm --gpus all -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf-cuda serve -m /models/Qwen3-0.6B-Q8_0.gguf --addr 0.0.0.0:8000 -ngl 28
+```

@@ -36,46 +36,28 @@ Blackwell (sm_120, RTX 50xx): нужен PTX 8.7+; Q8_0 scale конвертир
 
 ## Через Docker
 
-Multi-stage `Dockerfile`: CPU-кросс-компиляция по умолчанию, отдельные target'ы для CUDA.
+Multi-stage `Dockerfile` запускает `gogguf serve` в минимальном Alpine-образе.
 
-**CPU (по умолчанию)** - все платформы, `CGO_ENABLED=0`:
-
-```bash
-docker build -t gogguf-build .
-docker run --rm -v "$(pwd)/build:/out" gogguf-build
-```
-
-**CUDA** - только `linux-amd64/gguf-cuda`:
+Скачать модель:
 
 ```bash
-docker build --target cuda -t gogguf-cuda .
-docker run --rm -v "$(pwd)/build:/out" gogguf-cuda
+mkdir -p models
+
+curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
 ```
 
-**CPU + CUDA**:
+**CPU (по умолчанию)**:
 
 ```bash
-docker build --target release -t gogguf-release .
-docker run --rm -v "$(pwd)/build:/out" gogguf-release
+docker build -t gogguf .
+
+docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /models/Qwen3-0.6B-Q8_0.gguf --addr 0.0.0.0:8000
 ```
 
-| Target / режим | Результат                     |
-|----------------|-------------------------------|
-| *(default)*    | CPU-бинарники всех платформ   |
-| `cuda`         | `build/linux-amd64/gguf-cuda` |
-| `release`      | CPU + `gguf-cuda`             |
+**CUDA** (NVIDIA GPU, только `linux/amd64`):
 
-| Платформа     | CPU-бинарник                   | CUDA-бинарник (target `cuda` / `release`) |
-|---------------|--------------------------------|-------------------------------------------|
-| Linux amd64   | `build/linux-amd64/gguf`       | `build/linux-amd64/gguf-cuda`             |
-| Linux arm64   | `build/linux-arm64/gguf`       | -                                         |
-| Windows amd64 | `build/windows-amd64/gguf.exe` | -                                         |
-| Windows arm64 | `build/windows-arm64/gguf.exe` | -                                         |
-| macOS amd64   | `build/darwin-amd64/gguf`      | -                                         |
-| macOS arm64   | `build/darwin-arm64/gguf`      | -                                         |
+```bash
+docker build --target runtime-cuda -t gogguf-cuda .
 
-> **Примечание.** Путь к бинарнику зависит от способа сборки:
-> - локально CPU: `./build/gguf`
-> - локально CUDA: `./build/gguf` (с `-tags cuda`)
-> - Docker CPU: `./build/<os>-<arch>/gguf` (на Windows: `gguf.exe`)
-> - Docker CUDA: `./build/linux-amd64/gguf-cuda`
+docker run --rm --gpus all -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf-cuda serve -m /models/Qwen3-0.6B-Q8_0.gguf --addr 0.0.0.0:8000 -ngl 28
+```

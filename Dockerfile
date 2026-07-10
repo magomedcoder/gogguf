@@ -1,9 +1,10 @@
+# syntax=docker/dockerfile:1
 
 FROM alpine:3.24.0 AS go-base
 
 ARG GOLANG_VERSION=1.26.0
 
-RUN apk update && apk add --no-cache ca-certificates curl git build-base
+RUN apk add --no-cache ca-certificates curl git build-base
 
 RUN curl -fsSL "https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz" | tar -C /usr/local -xzf -
 
@@ -14,51 +15,49 @@ WORKDIR /src
 COPY go.mod ./
 COPY . .
 
-FROM go-base AS cpu-build
+FROM go-base AS cpu-builder
 
-RUN set -e; \
-    mkdir -p build; \
-    for target in \
-        "linux amd64" \
-        "linux arm64" \
-        "windows amd64" \
-        "windows arm64" \
-        "darwin amd64" \
-        "darwin arm64"; \
-    do \
-        set -- $target; \
-        os=$1; arch=$2; \
-        ext=""; \
-        [ "$os" = "windows" ] && ext=".exe"; \
-        out="build/${os}-${arch}/gguf${ext}"; \
-        mkdir -p "$(dirname "$out")"; \
-        CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "$out" ./cmd/gogguf; \
-    done
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
-FROM go-base AS cuda-build
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /gogguf ./cmd/gogguf
 
-RUN mkdir -p build/linux-amd64
+FROM go-base AS cuda-builder
 
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags cuda -trimpath -ldflags="-s -w" -o build/linux-amd64/gogguf-cuda ./cmd/gogguf
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+    go build -tags cuda -trimpath -ldflags="-s -w" -o /gogguf ./cmd/gogguf
 
-FROM cpu-build AS release-build
+FROM alpine:3.24.0 AS runtime-cuda
 
-COPY --from=cuda-build /src/build/linux-amd64/gguf-cuda build/linux-amd64/gguf-cuda
+RUN apk add --no-cache ca-certificates libstdc++
 
-FROM release-build AS release
+COPY --from=cuda-builder /gogguf /usr/local/bin/gogguf
 
-VOLUME ["/out"]
+EXPOSE 8000
 
-CMD ["sh", "-c", "cp -a build/. /out/"]
+VOLUME ["/models"]
 
-FROM cuda-build AS cuda
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1 || exit 1
 
-VOLUME ["/out"]
+ENTRYPOINT ["gogguf"]
 
-CMD ["sh", "-c", "cp -a build/. /out/"]
+CMD ["serve", "-m", "/models/model.gguf", "--addr", "0.0.0.0:8000"]
 
-FROM cpu-build
+FROM alpine:3.24.0 AS runtime
 
-VOLUME ["/out"]
+RUN apk add --no-cache ca-certificates
 
-CMD ["sh", "-c", "cp -a build/. /out/"]
+COPY --from=cpu-builder /gogguf /usr/local/bin/gogguf
+
+EXPOSE 8000
+
+VOLUME ["/models"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1 || exit 1
+
+ENTRYPOINT ["gogguf"]
+
+CMD ["serve", "-m", "/models/model.gguf", "--addr", "0.0.0.0:8000"]

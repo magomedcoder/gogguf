@@ -4,7 +4,7 @@
 
 **GoGGUF** is a lightweight way to run GGUF models in Go without llama.cpp.
 
-> **Early stage of development.**
+> **Actively developed.** GPU offload (CUDA) is still early and evolving.
 
 Use it as a **library** (inference from Go code) or as an **HTTP server** (`gguf serve` or the `server` package).
 
