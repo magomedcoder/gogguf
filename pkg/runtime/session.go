@@ -18,7 +18,7 @@ type GenerationSession struct {
 func (c *Context) StartGeneration(prompt string) (*GenerationSession, error) {
 	c.engine.Model.ResetCache()
 
-	promptTokens, err := c.tok.Encode(prompt)
+	promptTokens, err := c.encodeForInference(prompt)
 	if err != nil {
 		return nil, err
 	}

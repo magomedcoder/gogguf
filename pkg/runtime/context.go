@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/sampler"
 	"github.com/magomedcoder/gogguf/pkg/tokenizer"
 )
@@ -35,9 +36,49 @@ func (e *Engine) NewContext() (*Context, error) {
 	}, nil
 }
 
-// Encode преобразует текст в token IDs
+// Encode преобразует текст в token IDs (без автоматического BOS)
 func (c *Context) Encode(text string) ([]int, error) {
 	return c.tok.Encode(text)
+}
+
+func (c *Context) encodeForInference(text string) ([]int, error) {
+	ids, err := c.tok.Encode(text)
+	if err != nil {
+		return nil, err
+	}
+
+	if !needsBOSPrefix(c.engine.meta, ids) {
+		return ids, nil
+	}
+
+	bos := c.tok.BOS()
+	if bos < 0 {
+		return ids, nil
+	}
+
+	return append([]int{bos}, ids...), nil
+}
+
+func needsBOSPrefix(meta format.Metadata, ids []int) bool {
+	if meta == nil {
+		return false
+	}
+
+	arch, err := meta.String("general.architecture")
+	if err != nil || arch != "llama" {
+		return false
+	}
+
+	bos := meta.IntOptional("tokenizer.ggml.bos_token_id", -1)
+	if bos < 0 {
+		return false
+	}
+
+	if len(ids) > 0 && ids[0] == bos {
+		return false
+	}
+
+	return true
 }
 
 // DecodeToken преобразует один token ID в текст

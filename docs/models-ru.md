@@ -20,13 +20,13 @@ curl -L -o models/Qwen3-8B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-8B-GGUF/r
 
 curl -L -o models/Qwen3-14B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q8_0.gguf
 
-curl -L -o models/Llama-3.2-1B-Q8_0.gguf https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
+curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
 ```
 
 ```bash
 ./build/gogguf run -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 64
 
-./build/gogguf run -m models/Llama-3.2-1B-Q8_0.gguf -p "Hello" -n 32
+./build/gogguf run -m models/Llama-3.2-1B-Instruct-Q8_0.gguf --chat -p "Hello" -n 32
 ```
 
 ## Скоро

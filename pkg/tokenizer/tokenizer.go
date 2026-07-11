@@ -71,6 +71,8 @@ func loadBPE(r *format.Reader) (*Tokenizer, error) {
 	switch preType {
 	case "qwen2", "qwen35":
 		pt = pretokenizeQwen2
+	case "llama-bpe", "llama3":
+		pt = pretokenizeLlamaBPE
 	}
 
 	return &Tokenizer{

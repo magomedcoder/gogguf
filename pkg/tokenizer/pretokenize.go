@@ -1,6 +1,13 @@
 package tokenizer
 
-import "unicode"
+import (
+	"regexp"
+	"unicode"
+)
+
+// llama-bpe (Llama 3): числа до 3 цифр, регистрозависимые сокращения
+// Go regexp не поддерживает (?!) - последний сегмент упрощён до \s+
+var pretokenizeLlamaBPEPattern = regexp.MustCompile(`(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+`)
 
 const outOfRange = -1
 
@@ -168,4 +175,8 @@ func pretokenizeQwen2(text string) []string {
 // pretokenizeGPT2 - упрощённый GPT-2 pretokenizer (RE2-safe)
 func pretokenizeGPT2(text string) []string {
 	return pretokenizePattern.FindAllString(text, -1)
+}
+
+func pretokenizeLlamaBPE(text string) []string {
+	return pretokenizeLlamaBPEPattern.FindAllString(text, -1)
 }

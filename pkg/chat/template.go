@@ -53,9 +53,13 @@ func FormatUser(user string, opts Options) (string, error) {
 
 	if opts.Metadata != nil && HasTemplateMeta(opts.Metadata) {
 		prompt, err := Render(opts.Metadata, msgs, true, opts)
-		if err == nil {
+		if err == nil && prompt != "" {
 			return prompt, nil
 		}
+	}
+
+	if isLlamaArchitecture(opts.Metadata) {
+		return formatLlama3(msgs, opts), nil
 	}
 
 	return formatUserFallback(user, opts), nil
