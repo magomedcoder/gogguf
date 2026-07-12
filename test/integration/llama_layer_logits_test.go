@@ -11,28 +11,15 @@ import (
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/debug"
-	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/model/llama"
 )
 
-type layerLogitsFile struct {
-	Model string            `json:"model"`
-	Cases []layerLogitsCase `json:"cases"`
-}
-
-type layerLogitsCase struct {
-	Name           string          `json:"name"`
-	Input          string          `json:"input,omitempty"`
-	ChatUser       string          `json:"chat_user,omitempty"`
-	LayerGreedy    []int           `json:"layer_greedy"`
-	LayerTopLogits [][]debug.Logit `json:"layer_top_logits,omitempty"`
-}
-
-func loadLayerLogitsFixture(t *testing.T) layerLogitsFile {
+func loadLlamaLayerLogitsFixture(t *testing.T) layerLogitsFile {
 	t.Helper()
 
 	paths := []string{
-		"../fixtures/qwen3_layer_logits.json",
-		"test/fixtures/qwen3_layer_logits.json",
+		"../fixtures/llama32_layer_logits.json",
+		"test/fixtures/llama32_layer_logits.json",
 	}
 
 	var data []byte
@@ -43,9 +30,8 @@ func loadLayerLogitsFixture(t *testing.T) layerLogitsFile {
 			break
 		}
 	}
-
 	if data == nil {
-		t.Skip("layer logits fixture не найден")
+		t.Fatal("llama32_layer_logits.json не найден")
 	}
 
 	var lf layerLogitsFile
@@ -56,9 +42,9 @@ func loadLayerLogitsFixture(t *testing.T) layerLogitsFile {
 	return lf
 }
 
-func TestLayerLogitsFixture(t *testing.T) {
-	lf := loadLayerLogitsFixture(t)
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+func TestLlama32LayerLogitsFixture(t *testing.T) {
+	lf := loadLlamaLayerLogitsFixture(t)
+	engine, err := gogguf.Load(llamaModelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("не удалось загрузить модель: %v", err)
 	}
@@ -69,7 +55,7 @@ func TestLayerLogitsFixture(t *testing.T) {
 	}
 
 	setter, ok := engine.Model.(interface {
-		SetDebugHooks(*qwen3.DebugHooks)
+		SetDebugHooks(*llama.DebugHooks)
 	})
 	if !ok {
 		t.Fatal("модель не поддерживает debug hooks")
@@ -96,7 +82,7 @@ func TestLayerLogitsFixture(t *testing.T) {
 			got := make([]int, 0, len(tc.LayerGreedy))
 			gotTop := make([][]debug.Logit, 0, len(tc.LayerTopLogits))
 
-			setter.SetDebugHooks(&qwen3.DebugHooks{
+			setter.SetDebugHooks(&llama.DebugHooks{
 				OnLayerLogits: func(layer int, logits []float32) {
 					_ = layer
 					got = append(got, gogguf.Greedy(logits))
@@ -130,7 +116,6 @@ func TestLayerLogitsFixture(t *testing.T) {
 			}
 
 			const logitTol = 1e-4
-
 			for layer := range gotTop {
 				want := tc.LayerTopLogits[layer]
 				if len(gotTop[layer]) != len(want) {
@@ -144,7 +129,7 @@ func TestLayerLogitsFixture(t *testing.T) {
 
 					diff := math.Abs(float64(gotTop[layer][j].Logit - want[j].Logit))
 					if diff > logitTol {
-						t.Fatalf("layer[%d] logit[%d] = %v, ожидали ~%v (diff %v)", layer, want[j].ID, gotTop[layer][j].Logit, want[j].Logit, diff)
+						t.Fatalf("layer[%d] logit[%d] = %v, ожидали ~%v", layer, want[j].ID, gotTop[layer][j].Logit, want[j].Logit)
 					}
 				}
 			}

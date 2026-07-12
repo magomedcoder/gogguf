@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"testing"
 
@@ -132,6 +133,22 @@ func TestLlama32GoldenFixture(t *testing.T) {
 					t.Fatal(err)
 				}
 
+				if len(tc.TopLogits) > 0 {
+					ids, err := ctx.EncodeForInference(prompt)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					engine.Model.ResetCache()
+					logits, err := engine.Model.Forward(ids, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					assertGreedyAndTopLogits(t, logits, tc.GreedyNext, tc.TopLogits)
+					return
+				}
+
 				sess, err := ctx.StartGeneration(prompt)
 				if err != nil {
 					t.Fatal(err)
@@ -147,6 +164,22 @@ func TestLlama32GoldenFixture(t *testing.T) {
 				}
 
 			case tc.Input != "" && tc.GreedyNext > 0:
+				if len(tc.TopLogits) > 0 {
+					ids, err := ctx.EncodeForInference(tc.Input)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					engine.Model.ResetCache()
+					logits, err := engine.Model.Forward(ids, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					assertGreedyAndTopLogits(t, logits, tc.GreedyNext, tc.TopLogits)
+					return
+				}
+
 				sess, err := ctx.StartGeneration(tc.Input)
 				if err != nil {
 					t.Fatal(err)
@@ -162,5 +195,22 @@ func TestLlama32GoldenFixture(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func assertGreedyAndTopLogits(t *testing.T, logits []float32, wantNext int, wantTop []goldenLogit) {
+	t.Helper()
+
+	next := gogguf.Greedy(logits)
+	if next != wantNext {
+		t.Fatalf("greedy next = %d, ожидали %d", next, wantNext)
+	}
+
+	const logitTol = 1e-4
+	for _, want := range wantTop {
+		got := logits[want.ID]
+		if math.Abs(float64(got-want.Logit)) > logitTol {
+			t.Fatalf("logit[%d] = %v, ожидали ~%v", want.ID, got, want.Logit)
+		}
 	}
 }

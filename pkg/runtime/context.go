@@ -41,6 +41,11 @@ func (c *Context) Encode(text string) ([]int, error) {
 	return c.tok.Encode(text)
 }
 
+// EncodeForInference кодирует текст с BOS для архитектур, которым он нужен (llama)
+func (c *Context) EncodeForInference(text string) ([]int, error) {
+	return c.encodeForInference(text)
+}
+
 func (c *Context) encodeForInference(text string) ([]int, error) {
 	ids, err := c.tok.Encode(text)
 	if err != nil {

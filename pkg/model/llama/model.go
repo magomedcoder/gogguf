@@ -21,6 +21,7 @@ type Model struct {
 	layerTensors []layerTensors
 	outNorm      []float32
 	lmHeadName   string
+	debug        *DebugHooks
 }
 
 // Load создаёт Llama из весов
@@ -86,6 +87,11 @@ func (m *Model) ResetCache() {
 	}
 }
 
+// SetDebugHooks включает колбэки для пошаговой отладки forward pass
+func (m *Model) SetDebugHooks(h *DebugHooks) {
+	m.debug = h
+}
+
 // Forward выполняет forward pass для последовательности tokenIDs начиная с startPos
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
@@ -94,7 +100,8 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 
 	for i, tok := range tokenIDs {
 		pos := startPos + i
-		if err := m.forwardToken(tok, pos); err != nil {
+		last := i == len(tokenIDs)-1
+		if err := m.forwardToken(tok, pos, last); err != nil {
 			return nil, err
 		}
 	}
@@ -103,19 +110,41 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, err
 	}
 
+	if m.debug != nil && m.debug.OnLogits != nil {
+		m.debug.OnLogits(m.scratch.logits)
+	}
+
 	out := make([]float32, m.cfg.VocabSize)
 	copy(out, m.scratch.logits)
 	return out, nil
 }
 
-func (m *Model) forwardToken(tokenID, pos int) error {
+func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 	if err := m.embedToken(tokenID); err != nil {
 		return err
+	}
+
+	if debug && m.debug != nil && m.debug.OnEmbed != nil {
+		m.debug.OnEmbed(m.scratch.x)
 	}
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
 		if err := m.forwardBlock(layer, pos); err != nil {
 			return err
+		}
+
+		if debug && m.debug != nil {
+			if m.debug.OnLayer != nil {
+				m.debug.OnLayer(layer, m.scratch.x)
+			}
+
+			if m.debug.OnLayerLogits != nil {
+				if err := m.logitsFromHidden(m.scratch.x); err != nil {
+					return err
+				}
+
+				m.debug.OnLayerLogits(layer, m.scratch.logits)
+			}
 		}
 	}
 	m.cache.Advance()

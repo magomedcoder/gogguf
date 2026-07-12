@@ -8,6 +8,7 @@ import (
 
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/debug"
+	"github.com/magomedcoder/gogguf/pkg/model/llama"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
@@ -37,6 +38,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx, err := engine.NewContext()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	text := *prompt
 	name := "raw_hello_layer_greedy"
 	if *chatMode {
@@ -50,7 +57,7 @@ func main() {
 		}
 	}
 
-	ids, err := engine.Tokenizer().Encode(text)
+	ids, err := ctx.EncodeForInference(text)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -59,23 +66,17 @@ func main() {
 	layerGreedy := make([]int, 0, 32)
 	var layerTopLogits [][]debug.Logit
 
-	setter, ok := engine.Model.(interface {
-		SetDebugHooks(*qwen3.DebugHooks)
-	})
-	if !ok {
+	onLayer := func(_ int, logits []float32) {
+		layerGreedy = append(layerGreedy, gogguf.Greedy(logits))
+		if *topN > 0 {
+			layerTopLogits = append(layerTopLogits, debug.TopLogits(logits, *topN))
+		}
+	}
+
+	if !setLayerLogitsHook(engine, onLayer) {
 		fmt.Fprintln(os.Stderr, "модель не поддерживает debug hooks")
 		os.Exit(1)
 	}
-
-	setter.SetDebugHooks(&qwen3.DebugHooks{
-		OnLayerLogits: func(layer int, logits []float32) {
-			_ = layer
-			layerGreedy = append(layerGreedy, gogguf.Greedy(logits))
-			if *topN > 0 {
-				layerTopLogits = append(layerTopLogits, debug.TopLogits(logits, *topN))
-			}
-		},
-	})
 
 	engine.Model.ResetCache()
 	if _, err := engine.Model.Forward(ids, 0); err != nil {
@@ -84,7 +85,7 @@ func main() {
 	}
 
 	out := fileOut{
-		Model: "Qwen3-0.6B-Q8_0",
+		Model: modelBasename(*modelPath),
 		Cases: []caseOut{{
 			Name:        name,
 			LayerGreedy: layerGreedy,
@@ -107,4 +108,35 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func setLayerLogitsHook(engine *gogguf.Engine, onLayer func(int, []float32)) bool {
+	switch m := engine.Model.(type) {
+	case interface {
+		SetDebugHooks(*qwen3.DebugHooks)
+	}:
+		m.SetDebugHooks(&qwen3.DebugHooks{
+			OnLayerLogits: onLayer,
+		})
+		return true
+	case interface {
+		SetDebugHooks(*llama.DebugHooks)
+	}:
+		m.SetDebugHooks(&llama.DebugHooks{
+			OnLayerLogits: onLayer,
+		})
+		return true
+	default:
+		return false
+	}
+}
+
+func modelBasename(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' {
+			return path[i+1:]
+		}
+	}
+
+	return path
 }
