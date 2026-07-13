@@ -2,7 +2,7 @@ package ops
 
 import "math"
 
-// ApplyRoPE применяет rotary positional embedding (Qwen/Llama стиль)
+// ApplyRoPE применяет rotary positional embedding в стиле GPT-NeoX / Qwen (пары dim i и i+headDim/2)
 func ApplyRoPE(v []float32, pos int, freqBase float32) {
 	n := len(v)
 	half := n / 2

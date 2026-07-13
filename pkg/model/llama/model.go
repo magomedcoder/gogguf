@@ -353,7 +353,7 @@ func (m *Model) applyRoPEHeads(v []float32, nHeads, pos, layer int) {
 			return
 		}
 	}
-	ops.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+	ops.ApplyRoPEHeadsNorm(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
 }
 
 func (m *Model) swigluInPlace(gate, up []float32, layer int) {

@@ -15,66 +15,50 @@
       "top_logits": [
         {
           "id": 11,
-          "logit": 18.9626
+          "logit": 19.066507
         },
         {
           "id": 0,
-          "logit": 18.9201
+          "logit": 18.988525
         },
         {
           "id": 323,
-          "logit": 18.3274
+          "logit": 18.416294
         },
         {
           "id": 2268,
-          "logit": 18.2598
+          "logit": 18.249893
         },
         {
           "id": 5127,
-          "logit": 18.0777
+          "logit": 18.16001
         }
       ]
     },
     {
       "name": "chat_hello_greedy",
       "chat_user": "Hello",
-      "greedy_next": 40,
+      "greedy_next": 4438,
       "top_logits": [
-        {
-          "id": 40,
-          "logit": 17.9753
-        },
-        {
-          "id": 567,
-          "logit": 16.2004
-        },
-        {
-          "id": 2181,
-          "logit": 14.4586
-        },
-        {
-          "id": 14711,
-          "logit": 14.1888
-        },
-        {
-          "id": 2028,
-          "logit": 13.3839
-        }
+        {"id": 4438, "logit": 24.109241},
+        {"id": 9906, "logit": 23.889952},
+        {"id": 2181, "logit": 21.107153},
+        {"id": 14262, "logit": 18.799839},
+        {"id": 13347, "logit": 18.1733}
       ]
     },
     {
       "name": "chat_greedy_8",
       "chat_user": "Hello",
-      "max_tokens": 8,
+      "max_tokens": 7,
       "greedy_tokens": [
-        40,
-        3987,
+        4438,
+        649,
+        358,
+        7945,
         499,
-        198,
-        4291,
-        271,
-        32559,
-        64
+        3432,
+        30
       ]
     }
   ]

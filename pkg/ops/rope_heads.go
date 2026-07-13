@@ -7,7 +7,7 @@ func MaxRoPEPairs() int {
 	return maxRoPEPairs
 }
 
-// ApplyRoPEHeads применяет RoPE к nHeads головам в v; sin/cos вычисляются один раз на позицию
+// ApplyRoPEHeads применяет NeoX RoPE к nHeads головам в v; sin/cos вычисляются один раз на позицию
 func ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
 	if nHeads <= 0 || headDim <= 0 {
 		return

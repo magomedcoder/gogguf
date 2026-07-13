@@ -27,7 +27,7 @@ func formatLlama3(messages []Message, opts Options) string {
 	b.WriteString("system")
 	b.WriteString(endHeader)
 	b.WriteString("\n\n")
-	b.WriteString("Cutting Knowledge Date: December 2026\n")
+	b.WriteString("Cutting Knowledge Date: December 2023\n")
 	b.WriteString("Today Date: ")
 	b.WriteString(llamaDefaultDate)
 	b.WriteString("\n\n")
