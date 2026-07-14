@@ -7,7 +7,7 @@
 | Architecture | Status   | Models                          |
 |--------------|----------|---------------------------------|
 | Qwen3        | verified | Qwen3-0.6B, Qwen3-8B, Qwen3-14B |
-| Llama 3      | basic    | Llama-3.2-1B                    |
+| Llama 3      | verified | Llama-3.2-1B (CUDA RoPE NORM)   |
 
 Weight formats: **Q8_0**, **Q4_0**, **Q4_K**.
 

@@ -32,23 +32,25 @@ type gpuQ8Matrix struct {
 
 // Backend - CUDA через Driver API (libcuda.so), без cublas/cudart
 type Backend struct {
-	name      string
-	drv       C.cuda_driver_t
-	lib       unsafe.Pointer
-	ctx       C.CUcontext
-	module    C.CUmodule
-	moduleOps C.CUmodule
-	fn        C.CUfunction
-	fnQ8      C.CUfunction
-	fnRMS     C.CUfunction
-	fnRoPE    C.CUfunction
-	fnSwiGLU  C.CUfunction
-	fnAttnQK  C.CUfunction
-	fnAttnV   C.CUfunction
-	hasRMS    bool
-	hasRoPE   bool
-	hasSwiGLU bool
-	hasAttn   bool
+	name        string
+	drv         C.cuda_driver_t
+	lib         unsafe.Pointer
+	ctx         C.CUcontext
+	module      C.CUmodule
+	moduleOps   C.CUmodule
+	fn          C.CUfunction
+	fnQ8        C.CUfunction
+	fnRMS       C.CUfunction
+	fnRoPE      C.CUfunction
+	fnRoPENorm  C.CUfunction
+	fnSwiGLU    C.CUfunction
+	fnAttnQK    C.CUfunction
+	fnAttnV     C.CUfunction
+	hasRMS      bool
+	hasRoPE     bool
+	hasRoPENorm bool
+	hasSwiGLU   bool
+	hasAttn     bool
 
 	mu         sync.Mutex
 	matrices   map[string]gpuMatrix
@@ -123,6 +125,12 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 			b.hasRMS = true
 			b.hasRoPE = true
 			b.hasSwiGLU = true
+
+			cRoPENorm := C.CString("rope_heads_norm")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cRoPENorm, &b.fnRoPENorm) == 0 {
+				b.hasRoPENorm = true
+			}
+			C.free(unsafe.Pointer(cRoPENorm))
 
 			cAttnQK := C.CString("attn_qk")
 			cAttnV := C.CString("attn_v")
@@ -325,6 +333,36 @@ func (b *Backend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase
 	rc := C.gguf_cuda_rope_heads(&b.drv, b.ctx, b.fnRoPE, (*C.float)(unsafe.Pointer(&v[0])), (*C.float)(unsafe.Pointer(&cos[0])), (*C.float)(unsafe.Pointer(&sin[0])), C.int(nHeads), C.int(headDim), C.int(half))
 	if rc != 0 {
 		return fmt.Errorf("cuda: rope_heads: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error {
+	if !b.hasRoPENorm {
+		return fmt.Errorf("cuda: rope_heads_norm kernel недоступен")
+	}
+
+	half := headDim / 2
+	if nHeads <= 0 || headDim <= 0 || half*2 != headDim {
+		return fmt.Errorf("cuda: ApplyRoPEHeadsNorm: неверные размеры")
+	}
+
+	if len(v) < nHeads*headDim {
+		return fmt.Errorf("cuda: ApplyRoPEHeadsNorm: v слишком короткий")
+	}
+
+	if half > ops.MaxRoPEPairs() {
+		return fmt.Errorf("cuda: head_dim=%d слишком велик для GPU RoPE Norm", headDim)
+	}
+
+	cos := make([]float32, half)
+	sin := make([]float32, half)
+	ops.RoPECosSin(cos, sin, headDim, pos, freqBase)
+
+	rc := C.gguf_cuda_rope_heads(&b.drv, b.ctx, b.fnRoPENorm, (*C.float)(unsafe.Pointer(&v[0])), (*C.float)(unsafe.Pointer(&cos[0])), (*C.float)(unsafe.Pointer(&sin[0])), C.int(nHeads), C.int(headDim), C.int(half))
+	if rc != 0 {
+		return fmt.Errorf("cuda: rope_heads_norm: код %d", int(rc))
 	}
 
 	return nil

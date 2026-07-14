@@ -350,6 +350,74 @@ RH_EXIT:
     ret;
 }
 
+.visible .entry rope_heads_norm(
+    .param .u64 param_v,
+    .param .u64 param_cos,
+    .param .u64 param_sin,
+    .param .u32 param_nheads,
+    .param .u32 param_headdim,
+    .param .u32 param_half
+)
+{
+    .reg .pred      %p<2>;
+    .reg .b32       %r<16>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<8>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_nheads];
+    ld.param.u32    %r6, [param_headdim];
+    ld.param.u32    %r7, [param_half];
+    mul.lo.u32      %r8, %r5, %r7;
+
+    setp.ge.u32     %p0, %r4, %r8;
+    @%p0            bra RHN_EXIT;
+
+    ld.param.u64    %rd1, [param_v];
+    ld.param.u64    %rd2, [param_cos];
+    ld.param.u64    %rd3, [param_sin];
+
+    div.u32         %r9, %r4, %r7;
+    rem.u32         %r10, %r4, %r7;
+
+    mul.lo.u32      %r11, %r9, %r6;
+    mul.lo.u32      %r12, %r10, 2;
+    add.u32         %r12, %r11, %r12;
+    mul.lo.u32      %r13, %r12, 4;
+    cvt.u64.u32     %rd4, %r13;
+    add.u64         %rd5, %rd1, %rd4;
+    ld.global.f32   %f1, [%rd5];
+
+    add.u32         %r14, %r12, 1;
+    mul.lo.u32      %r15, %r14, 4;
+    cvt.u64.u32     %rd6, %r15;
+    add.u64         %rd7, %rd1, %rd6;
+    ld.global.f32   %f2, [%rd7];
+
+    mul.wide.u32    %rd8, %r10, 4;
+    add.u64         %rd9, %rd2, %rd8;
+    ld.global.f32   %f3, [%rd9];
+    add.u64         %rd10, %rd3, %rd8;
+    ld.global.f32   %f4, [%rd10];
+
+    mul.f32         %f5, %f1, %f3;
+    mul.f32         %f6, %f2, %f4;
+    sub.f32         %f5, %f5, %f6;
+    st.global.f32   [%rd5], %f5;
+
+    mul.f32         %f6, %f1, %f4;
+    mul.f32         %f7, %f2, %f3;
+    add.f32         %f6, %f6, %f7;
+    st.global.f32   [%rd7], %f6;
+
+RHN_EXIT:
+    ret;
+}
+
 .visible .entry swiglu(
     .param .u64 param_gate,
     .param .u64 param_up,

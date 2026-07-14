@@ -349,7 +349,7 @@ func (m *Model) rmsNormInto(dst, x, weight []float32, layer int) error {
 
 func (m *Model) applyRoPEHeads(v []float32, nHeads, pos, layer int) {
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		if err := m.gpu.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase); err == nil {
+		if err := m.gpu.ApplyRoPEHeadsNorm(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase); err == nil {
 			return
 		}
 	}

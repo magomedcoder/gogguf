@@ -32,6 +32,11 @@ func (CPUBackend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase
 	return nil
 }
 
+func (CPUBackend) ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error {
+	ops.ApplyRoPEHeadsNorm(v, nHeads, headDim, pos, freqBase)
+	return nil
+}
+
 func (CPUBackend) SwiGLUInPlace(gate, up []float32) error {
 	ops.SwiGLUInPlace(gate, up)
 	return nil
