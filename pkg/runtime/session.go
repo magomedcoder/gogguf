@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/magomedcoder/gogguf/pkg/sampler"
 )
@@ -148,9 +149,24 @@ func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 		if params.OnToken != nil && !params.OnToken(id) {
 			return nil
 		}
+
+		if hitStopSequence(s.GeneratedText(), params.Stop) {
+			return nil
+		}
 	}
 
 	return nil
+}
+
+func hitStopSequence(text string, stops []string) bool {
+	for _, stop := range stops {
+		stop = strings.TrimSpace(stop)
+		if stop != "" && strings.HasSuffix(text, stop) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ErrNoSession возвращается, если сессия не инициализирована

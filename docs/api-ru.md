@@ -6,80 +6,60 @@
 
 ## Эндпоинты
 
-| Метод | Путь           | Описание                              |
-|-------|----------------|---------------------------------------|
-| GET   | `/health`      | проверка состояния сервера            |
-| GET   | `/models`      | метаданные загруженной модели         |
-| POST  | `/reset`       | сброс KV-cache на сервере (новый чат) |
-| POST  | `/generate`    | генерация текста (JSON или SSE)       |
-| POST  | `/completions` | chat API (messages + stream)          |
+| Метод | Путь                   | Описание                              |
+|-------|------------------------|---------------------------------------|
+| GET   | `/v1/health`           | проверка состояния сервера            |
+| GET   | `/v1/models`           | список моделей                        |
+| POST  | `/v1/reset`            | сброс KV-cache на сервере (новый чат) |
+| POST  | `/v1/chat/completions` | chat API (messages + stream)          |
+| POST  | `/v1/embeddings`       | embeddings (пока не поддерживается)   |
 
-## `POST /generate`
-
-`Content-Type: application/json`
-
-| Поле             | Тип    | По умолчанию | Описание                    |
-|------------------|--------|--------------|-----------------------------|
-| `prompt`         | string | -            | текст запроса (обязательно) |
-| `max_tokens`     | int    | `128`        | максимум новых токенов      |
-| `temperature`    | float  | `0`          | `0` = greedy                |
-| `top_k`          | int    | `0`          | top-k sampling              |
-| `top_p`          | float  | `1`          | nucleus sampling            |
-| `min_p`          | float  | `0`          | min-p sampling              |
-| `repeat_penalty` | float  | `1`          | штраф за повтор (`1` = off) |
-| `repeat_last_n`  | int    | `0`          | окно истории (0 = 64)       |
-| `seed`           | uint   | `0`          | seed PRNG                   |
-| `chat`           | bool   | `false`      | ChatML/Qwen template        |
-| `stream`         | bool   | `false`      | SSE streaming               |
-| `system`         | string | -            | system prompt (с `chat`)    |
-| `thinking`       | bool   | `false`      | режим размышления Qwen3     |
-
-Ответ без stream:
+## `GET /v1/models`
 
 ```json
 {
-  "text": "...",
-  "tokens": 32
+  "object": "list",
+  "data": [
+    {
+      "id": "Qwen3-0.6B",
+      "object": "model"
+    }
+  ]
 }
 ```
 
-Streaming (SSE) - события `data: {"token":"..."}` и в конце `data: {"done":true}`.
+## `POST /v1/reset`
 
-Примеры:
-
-```bash
-curl -s 127.0.0.1:8000/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Привет","chat":true,"max_tokens":32}'
-
-curl -N 127.0.0.1:8000/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Привет","chat":true,"stream":true,"max_tokens":32}'
-
-curl -s 127.0.0.1:8000/models
-```
-
-## `POST /reset`
-
-Сбрасывает KV-cache на сервере для multi-turn чата. 
+Сбрасывает KV-cache на сервере для multi-turn чата.
 
 ```bash
-curl -s -X POST 127.0.0.1:8000/reset
+curl -s -X POST 127.0.0.1:8000/v1/reset
 ```
 
 Ответ: `{"status":"ok"}`
 
-## `POST /completions`
+## `POST /v1/chat/completions`
 
-Chat API с массивом `messages`.
+`Content-Type: application/json`
 
-```bash
-curl -s 127.0.0.1:8000/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Привет"}],"max_tokens":32}'
-```
+| Поле                           | Тип      | По умолчанию | Описание                                 |
+|--------------------------------|----------|--------------|------------------------------------------|
+| `messages`                     | array    | -            | `{role, content}` (обязательно)          |
+| `model`                        | string   | имя из GGUF  | идентификатор модели                     |
+| `max_tokens`                   | int      | `128`        | максимум новых токенов                   |
+| `temperature`                  | float    | `0`          | `0` = greedy                             |
+| `top_k`                        | int      | `0`          | top-k sampling                           |
+| `top_p`                        | float    | `1`          | nucleus sampling                         |
+| `min_p`                        | float    | `0`          | min-p sampling                           |
+| `repeat_penalty`               | float    | `1`          | штраф за повтор (`1` = выключено)        |
+| `repeat_last_n`                | int      | `64`         | окно repeat-penalty                      |
+| `stop`                         | string[] | -            | стоп-последовательности                  |
+| `stream`                       | bool     | `false`      | SSE (`data: [DONE]` в конце)             |
+| `thinking` / `enable_thinking` | bool     | `false`      | режим размышления Qwen3                  |
 
-Пример ответа:
+`content` - строка или массив `{type:"text", text:"..."}`.
+
+Ответ без stream:
 
 ```json
 {
@@ -89,7 +69,8 @@ curl -s 127.0.0.1:8000/completions \
       "message": {
         "role": "assistant",
         "content": "..."
-      }
+      },
+      "finish_reason": "stop"
     }
   ],
   "usage": {
@@ -100,4 +81,22 @@ curl -s 127.0.0.1:8000/completions \
 }
 ```
 
-Поддерживаются `temperature`, `top_p`, `min_p`, `repeat_penalty`, `repeat_last_n`, `stream`, `thinking`.
+Streaming - SSE: `data: {"choices":[{"delta":{"content":"..."}}]}` и `data: [DONE]`.
+
+Примеры:
+
+```bash
+curl -s 127.0.0.1:8000/v1/models
+
+curl -s 127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Привет"}],"max_tokens":32}'
+
+curl -N 127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Привет"}],"max_tokens":32,"stream":true}'
+```
+
+## `POST /v1/embeddings`
+
+Возвращает HTTP `501` - generative GGUF модели пока не поддерживают embeddings.

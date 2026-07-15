@@ -23,7 +23,7 @@
 - tokenizer BPE из метаданных GGUF;
 - chat template ChatML/Qwen и Jinja (`--chat`, `--thinking`, `FormatChatUser`);
 - генерация текста: `gguf run` (greedy / temperature / top-k / top-p / min-p / repeat penalty);
-- HTTP-сервер: `gguf serve` (`/generate`, `/models`, `/completions`, JSON + SSE);
+- HTTP-сервер: `gguf serve` (`/v1/models`, `/v1/chat/completions`, JSON + SSE);
 - **CUDA offload** (`-ngl N`): matmul первых N transformer-слоёв на GPU (сборка `-tags cuda`).
 
 ## Модели

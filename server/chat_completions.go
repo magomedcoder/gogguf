@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/magomedcoder/gogguf/pkg/chat"
@@ -12,21 +13,25 @@ import (
 )
 
 type chatCompletionRequest struct {
-	Model         string        `json:"model"`
-	Messages      []chatMessage `json:"messages"`
-	MaxTokens     int           `json:"max_tokens"`
-	Temperature   float32       `json:"temperature"`
-	TopP          float32       `json:"top_p"`
-	MinP          float32       `json:"min_p"`
-	RepeatPenalty float32       `json:"repeat_penalty"`
-	RepeatLastN   int           `json:"repeat_last_n"`
-	Stream        bool          `json:"stream"`
-	Thinking      *bool         `json:"thinking"`
+	Model          string        `json:"model"`
+	Messages       []chatMessage `json:"messages"`
+	MaxTokens      int           `json:"max_tokens"`
+	Temperature    *float64      `json:"temperature,omitempty"`
+	TopK           int           `json:"top_k"`
+	TopP           *float64      `json:"top_p,omitempty"`
+	MinP           float32       `json:"min_p"`
+	RepeatPenalty  float32       `json:"repeat_penalty"`
+	RepeatLastN    int           `json:"repeat_last_n"`
+	Stop           []string      `json:"stop,omitempty"`
+	Stream         bool          `json:"stream"`
+	Thinking       *bool         `json:"thinking"`
+	EnableThinking *bool         `json:"enable_thinking,omitempty"`
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
 }
 
 type chatCompletionResponse struct {
@@ -39,9 +44,14 @@ type chatCompletionResponse struct {
 }
 
 type chatCompletionChoice struct {
-	Index        int         `json:"index"`
-	Message      chatMessage `json:"message"`
-	FinishReason string      `json:"finish_reason"`
+	Index        int              `json:"index"`
+	Message      chatMessagePlain `json:"message"`
+	FinishReason string           `json:"finish_reason"`
+}
+
+type chatMessagePlain struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type chatCompletionUsage struct {
@@ -51,11 +61,12 @@ type chatCompletionUsage struct {
 }
 
 type chatStreamChunk struct {
-	ID      string             `json:"id"`
-	Object  string             `json:"object"`
-	Created int64              `json:"created"`
-	Model   string             `json:"model"`
-	Choices []chatStreamChoice `json:"choices"`
+	ID      string               `json:"id"`
+	Object  string               `json:"object"`
+	Created int64                `json:"created"`
+	Model   string               `json:"model"`
+	Choices []chatStreamChoice   `json:"choices"`
+	Usage   *chatCompletionUsage `json:"usage,omitempty"`
 }
 
 type chatStreamChoice struct {
@@ -66,6 +77,65 @@ type chatStreamChoice struct {
 type chatStreamDelta struct {
 	Role    string `json:"role,omitempty"`
 	Content string `json:"content,omitempty"`
+}
+
+func parseChatMessageContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+
+		return ""
+	}
+
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, p := range parts {
+		if p.Type == "text" && p.Text != "" {
+			b.WriteString(p.Text)
+		}
+	}
+
+	return b.String()
+}
+
+func (req *chatCompletionRequest) thinkingEnabled() *bool {
+	if req.EnableThinking != nil {
+		return req.EnableThinking
+	}
+
+	return req.Thinking
+}
+
+func (req *chatCompletionRequest) samplerConfig() sampler.Config {
+	cfg := sampler.Config{
+		TopK: req.TopK,
+		MinP: req.MinP,
+	}
+
+	if req.TopP != nil {
+		cfg.TopP = float32(*req.TopP)
+	} else {
+		cfg.TopP = 1
+	}
+
+	if req.Temperature != nil {
+		cfg.Temp = float32(*req.Temperature)
+	}
+
+	return cfg
 }
 
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -89,20 +159,21 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		req.MaxTokens = 128
 	}
 
-	if req.TopP <= 0 {
-		req.TopP = 1
-	}
-
-	msgs := make([]chat.Message, len(req.Messages))
-	for i, m := range req.Messages {
-		msgs[i] = chat.Message{
-			Role:    m.Role,
-			Content: m.Content,
+	msgs := make([]chat.Message, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		content := parseChatMessageContent(m.Content)
+		if m.Role == "tool" && content == "" && m.ToolCallID != "" {
+			content = m.ToolCallID
 		}
+
+		msgs = append(msgs, chat.Message{
+			Role:    m.Role,
+			Content: content,
+		})
 	}
 
 	prompt, err := chat.FormatMessages(msgs, chat.Options{
-		Thinking: req.Thinking,
+		Thinking: req.thinkingEnabled(),
 		Metadata: s.engine.Metadata(),
 	})
 	if err != nil {
@@ -128,17 +199,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	samp := sampler.New(sampler.Config{
-		Temp: req.Temperature,
-		TopP: req.TopP,
-		MinP: req.MinP,
-	})
-
 	genParams := runtime.GenerateParams{
 		MaxTokens:     req.MaxTokens,
-		Sampler:       samp,
+		Sampler:       sampler.New(req.samplerConfig()),
 		RepeatPenalty: req.RepeatPenalty,
 		RepeatLastN:   req.RepeatLastN,
+		Stop:          req.Stop,
 	}
 
 	if req.Stream {
@@ -161,7 +227,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	conv.Commit(sess)
 
-	text := sess.GeneratedText()
+	text := trimStopSuffix(sess.GeneratedText(), req.Stop)
 	writeJSON(w, chatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
 		Object:  "chat.completion",
@@ -169,7 +235,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Model:   modelName,
 		Choices: []chatCompletionChoice{{
 			Index: 0,
-			Message: chatMessage{
+			Message: chatMessagePlain{
 				Role:    "assistant",
 				Content: text,
 			},
@@ -181,6 +247,17 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			TotalTokens:      sess.PromptTokenCount() + sess.GeneratedCount(),
 		},
 	})
+}
+
+func trimStopSuffix(text string, stops []string) string {
+	for _, stop := range stops {
+		stop = strings.TrimSpace(stop)
+		if stop != "" && strings.HasSuffix(text, stop) {
+			return strings.TrimSuffix(text, stop)
+		}
+	}
+
+	return text
 }
 
 func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams) {
@@ -197,7 +274,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	created := time.Now().Unix()
 
-	writeChunk := func(delta chatStreamDelta) {
+	writeChunk := func(delta chatStreamDelta, usage *chatCompletionUsage) {
 		chunk := chatStreamChunk{
 			ID:      id,
 			Object:  "chat.completion.chunk",
@@ -207,6 +284,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 				Index: 0,
 				Delta: delta,
 			}},
+			Usage: usage,
 		}
 		data, _ := json.Marshal(chunk)
 		fmt.Fprintf(w, "data: %s\n\n", data)
@@ -222,13 +300,16 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	}
 
 	writeChunk(chatStreamDelta{
-		Role: "assistant",
-	})
+		Role: "assistant"},
+		nil,
+	)
 
 	params.OnToken = func(tokenID int) bool {
 		writeChunk(chatStreamDelta{
-			Content: sess.DecodeToken(tokenID),
-		})
+			Content: sess.DecodeToken(tokenID)},
+			nil,
+		)
+
 		return true
 	}
 
@@ -241,6 +322,12 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	}
 
 	conv.Commit(sess)
+
+	writeChunk(chatStreamDelta{}, &chatCompletionUsage{
+		PromptTokens:     sess.PromptTokenCount(),
+		CompletionTokens: sess.GeneratedCount(),
+		TotalTokens:      sess.PromptTokenCount() + sess.GeneratedCount(),
+	})
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()

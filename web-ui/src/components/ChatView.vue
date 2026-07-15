@@ -30,10 +30,12 @@ const modelMeta = computed(() => {
   }
 
   if (model.value?.context_length) {
-    parts.push(t('meta.contextLength', { n: model.value.context_length }))
+    parts.push(t('meta.contextLength', {
+      n: model.value.context_length
+    }))
   }
 
-  return parts.join(' · ')
+  return parts
 })
 const canSend = computed(() => input.value.trim().length > 0 && !loading.value)
 const streamingIndex = computed(() => loading.value && messages.value.length > 0 ? messages.value.length - 1 : -1)

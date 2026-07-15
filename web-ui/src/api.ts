@@ -1,7 +1,7 @@
 import { i18n } from '@/i18n'
 import type { ChatSettings, ChatStreamChunk, Message, ModelInfo } from './types'
 
-const API_BASE = '/api'
+const API_BASE = '/api/v1'
 
 export async function fetchModels(): Promise<ModelInfo[]> {
   const res = await fetch(`${API_BASE}/models`)
@@ -10,10 +10,16 @@ export async function fetchModels(): Promise<ModelInfo[]> {
   }
 
   const data = (await res.json()) as {
-    models: ModelInfo[]
+    data: Array<{
+      id: string
+      object?: string
+    }>
   }
 
-  return data.models
+  return (data.data ?? []).map((item) => ({
+    id: item.id,
+    name: item.id,
+  }))
 }
 
 export async function resetConversation(): Promise<void> {
@@ -30,7 +36,7 @@ export async function* streamChat(
   settings: ChatSettings,
   signal?: AbortSignal,
 ): AsyncGenerator<string, void, unknown> {
-  const res = await fetch(`${API_BASE}/completions`, {
+  const res = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

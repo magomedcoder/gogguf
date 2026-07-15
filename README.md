@@ -22,7 +22,7 @@ Optional: **CUDA** via Driver API (`libcuda.so`, build with `-tags cuda`, CGO).
 - BPE tokenizer from GGUF metadata;
 - ChatML/Qwen and Jinja chat templates (`--chat`, `--thinking`, `FormatChatUser`);
 - text generation: `gguf run` (greedy / temperature / top-k / top-p / min-p / repeat penalty);
-- HTTP server: `gguf serve` (`/generate`, `/models`, `/completions`, JSON + SSE);
+- HTTP server: `gguf serve` (`/v1/models`, `/v1/chat/completions`, JSON + SSE);
 - **CUDA offload** (`-ngl N`): matmul for the first N transformer layers on GPU (build with `-tags cuda`).
 
 ## Models

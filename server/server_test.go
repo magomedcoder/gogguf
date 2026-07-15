@@ -13,7 +13,7 @@ import (
 func TestHealth(t *testing.T) {
 	srv := New(&runtime.Engine{}, "")
 	rec := httptest.NewRecorder()
-	srv.handleHealth(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	srv.handleHealth(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("статус = %d, ожидали 200", rec.Code)
@@ -29,10 +29,10 @@ func TestHealth(t *testing.T) {
 	}
 }
 
-func TestModelsEmptyEngine(t *testing.T) {
+func TestModelsFormat(t *testing.T) {
 	srv := New(&runtime.Engine{}, "/models/test.gguf")
 	rec := httptest.NewRecorder()
-	srv.handleModels(rec, httptest.NewRequest(http.MethodGet, "/models", nil))
+	srv.handleModels(rec, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("статус = %d, ожидали 200", rec.Code)
@@ -43,12 +43,8 @@ func TestModelsEmptyEngine(t *testing.T) {
 		t.Fatalf("не удалось разобрать ответ: %v", err)
 	}
 
-	if len(resp.Models) != 1 {
-		t.Fatalf("моделей = %d, ожидали 1", len(resp.Models))
-	}
-
-	if resp.Models[0].Path != "/models/test.gguf" {
-		t.Fatalf("path = %q, ожидали /models/test.gguf", resp.Models[0].Path)
+	if len(resp.Data) != 1 || resp.Data[0].ID == "" {
+		t.Fatalf("ожидали одну модель с id, получили %+v", resp)
 	}
 }
 
@@ -56,7 +52,7 @@ func TestHandlerRoutes(t *testing.T) {
 	srv := New(&runtime.Engine{}, "")
 	h := srv.Handler()
 
-	for _, path := range []string{"/health", "/models"} {
+	for _, path := range []string{"/v1/health", "/v1/models"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
@@ -65,10 +61,20 @@ func TestHandlerRoutes(t *testing.T) {
 	}
 }
 
+func TestEmbeddingsNotSupported(t *testing.T) {
+	srv := New(&runtime.Engine{}, "")
+	rec := httptest.NewRecorder()
+	srv.handleEmbeddings(rec, httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil))
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("статус = %d, ожидали 501", rec.Code)
+	}
+}
+
 func TestReset(t *testing.T) {
 	srv := New(&runtime.Engine{}, "")
 	rec := httptest.NewRecorder()
-	srv.handleReset(rec, httptest.NewRequest(http.MethodPost, "/reset", nil))
+	srv.handleReset(rec, httptest.NewRequest(http.MethodPost, "/v1/reset", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("статус = %d, ожидали 200", rec.Code)
@@ -88,7 +94,7 @@ func TestChatCompletionsBadRequest(t *testing.T) {
 	srv := New(&runtime.Engine{}, "")
 	body := bytes.NewBufferString(`{"messages":[]}`)
 	rec := httptest.NewRecorder()
-	srv.handleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/completions", body))
+	srv.handleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("статус = %d, ожидали 400", rec.Code)

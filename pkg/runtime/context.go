@@ -15,6 +15,7 @@ type GenerateParams struct {
 	Sampler       sampler.Func
 	RepeatPenalty float32 // 1.0 = выключено
 	RepeatLastN   int     // окно истории для penalty (0 = 64)
+	Stop          []string
 	OnToken       func(tokenID int) bool
 }
 

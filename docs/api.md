@@ -6,80 +6,60 @@ Start the server with `gguf serve` (see [CLI](cli.md)).
 
 ## Endpoints
 
-| Method | Path           | Description                              |
-|--------|----------------|------------------------------------------|
-| GET    | `/health`      | server health check                      |
-| GET    | `/models`      | loaded model metadata                    |
-| POST   | `/reset`       | reset server-side KV-cache (new chat)    |
-| POST   | `/generate`    | text generation (JSON or SSE)            |
-| POST   | `/completions` | chat API (messages + stream)             |
+| Method | Path                   | Description                           |
+|--------|------------------------|---------------------------------------|
+| GET    | `/v1/health`           | server health check                   |
+| GET    | `/v1/models`           | list loaded models                    |
+| POST   | `/v1/reset`            | reset server-side KV-cache (new chat) |
+| POST   | `/v1/chat/completions` | chat API (messages + stream)          |
+| POST   | `/v1/embeddings`       | embeddings (not supported yet, 501)   |
 
-## `POST /generate`
-
-`Content-Type: application/json`
-
-| Field            | Type   | Default | Description                    |
-|------------------|--------|---------|--------------------------------|
-| `prompt`         | string | -       | request text (required)        |
-| `max_tokens`     | int    | `128`   | max new tokens                 |
-| `temperature`    | float  | `0`     | `0` = greedy                   |
-| `top_k`          | int    | `0`     | top-k sampling                 |
-| `top_p`          | float  | `1`     | nucleus sampling               |
-| `min_p`          | float  | `0`     | min-p sampling                 |
-| `repeat_penalty` | float  | `1`     | repetition penalty (`1` = off) |
-| `repeat_last_n`  | int    | `0`     | history window (`0` = 64)      |
-| `seed`           | uint   | `0`     | PRNG seed                      |
-| `chat`           | bool   | `false` | ChatML/Qwen template           |
-| `stream`         | bool   | `false` | SSE streaming                  |
-| `system`         | string | -       | system prompt (with `chat`)    |
-| `thinking`       | bool   | `false` | Qwen3 thinking mode            |
-
-Non-streaming response:
+## `GET /v1/models`
 
 ```json
 {
-  "text": "...",
-  "tokens": 32
+  "object": "list",
+  "data": [
+    {
+      "id": "Qwen3-0.6B",
+      "object": "model"
+    }
+  ]
 }
 ```
 
-Streaming (SSE) - events `data: {"token":"..."}` and finally `data: {"done":true}`.
+## `POST /v1/reset`
 
-Examples:
-
-```bash
-curl -s 127.0.0.1:8000/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Hello","chat":true,"max_tokens":32}'
-
-curl -N 127.0.0.1:8000/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Hello","chat":true,"stream":true,"max_tokens":32}'
-
-curl -s 127.0.0.1:8000/models
-```
-
-## `POST /reset`
-
-Clears the server-side KV-cache for multi-turn chat. 
+Clears the server-side KV-cache for multi-turn chat.
 
 ```bash
-curl -s -X POST 127.0.0.1:8000/reset
+curl -s -X POST 127.0.0.1:8000/v1/reset
 ```
 
 Response: `{"status":"ok"}`
 
-## `POST /completions`
+## `POST /v1/chat/completions`
 
-Chat API with a `messages` array.
+`Content-Type: application/json`
 
-```bash
-curl -s 127.0.0.1:8000/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":32}'
-```
+| Field                          | Type     | Default   | Description                           |
+|--------------------------------|----------|-----------|---------------------------------------|
+| `messages`                     | array    | -         | `{role, content}` (required)          |
+| `model`                        | string   | GGUF name | model id                              |
+| `max_tokens`                   | int      | `128`     | max new tokens                        |
+| `temperature`                  | float    | `0`       | `0` = greedy                          |
+| `top_k`                        | int      | `0`       | top-k sampling                        |
+| `top_p`                        | float    | `1`       | nucleus sampling                      |
+| `min_p`                        | float    | `0`       | min-p sampling                        |
+| `repeat_penalty`               | float    | `1`       | repetition penalty (`1` = off)        |
+| `repeat_last_n`                | int      | `64`      | history window for repeat penalty     |
+| `stop`                         | string[] | -         | stop sequences                        |
+| `stream`                       | bool     | `false`   | SSE streaming (`data: [DONE]` at end) |
+| `thinking` / `enable_thinking` | bool     | `false`   | Qwen3 thinking mode                   |
 
-Example response:
+`content` may be a string or an array of `{type:"text", text:"..."}` parts.
+
+Non-streaming response:
 
 ```json
 {
@@ -89,7 +69,8 @@ Example response:
       "message": {
         "role": "assistant",
         "content": "..."
-      }
+      },
+      "finish_reason": "stop"
     }
   ],
   "usage": {
@@ -100,4 +81,22 @@ Example response:
 }
 ```
 
-Supports `temperature`, `top_p`, `min_p`, `repeat_penalty`, `repeat_last_n`, `stream`, `thinking`.
+Streaming uses SSE chunks: `data: {"choices":[{"delta":{"content":"..."}}]}` and `data: [DONE]`.
+
+Examples:
+
+```bash
+curl -s 127.0.0.1:8000/v1/models
+
+curl -s 127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":32}'
+
+curl -N 127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":true}'
+```
+
+## `POST /v1/embeddings`
+
+Returns HTTP `501` - generative GGUF models do not provide embeddings yet.
