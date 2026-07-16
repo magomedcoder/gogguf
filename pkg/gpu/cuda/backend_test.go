@@ -37,6 +37,108 @@ func TestMatMulVecGPU(t *testing.T) {
 	}
 }
 
+func TestMatMulVecCachedGraphReplay(t *testing.T) {
+	b, err := Open()
+	if err != nil {
+		t.Skip("CUDA недоступна:", err)
+	}
+	defer b.Close()
+
+	rows, cols := 4, 8
+	matrix := make([]float32, rows*cols)
+	for i := range matrix {
+		matrix[i] = float32(i%7) + 0.5
+	}
+
+	vec := make([]float32, cols)
+	for i := range vec {
+		vec[i] = float32(i+1) * 0.1
+	}
+
+	want, err := ops.MatMulVec(matrix, rows, cols, vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Первый вызов: upload + capture graph (если API доступен)
+	got1, err := b.MatMulVecCached("graph-fp32", matrix, rows, cols, vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Второй: replay того же graph
+	got2, err := b.MatMulVecCached("graph-fp32", matrix, rows, cols, vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(got1[i]-want[i])) > 1e-4 {
+			t.Fatalf("pass1 строка %d: получили %v, ожидали %v", i, got1[i], want[i])
+		}
+
+		if math.Abs(float64(got2[i]-want[i])) > 1e-4 {
+			t.Fatalf("pass2 строка %d: получили %v, ожидали %v", i, got2[i], want[i])
+		}
+	}
+
+	// Другой vec - staging + тот же graph
+	vec2 := make([]float32, cols)
+	for i := range vec2 {
+		vec2[i] = float32(cols - i)
+	}
+
+	want2, err := ops.MatMulVec(matrix, rows, cols, vec2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got3, err := b.MatMulVecCached("graph-fp32", matrix, rows, cols, vec2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range want2 {
+		if math.Abs(float64(got3[i]-want2[i])) > 1e-4 {
+			t.Fatalf("vec2 строка %d: получили %v, ожидали %v", i, got3[i], want2[i])
+		}
+	}
+
+	if !b.hasGraphs {
+		t.Log("CUDA Graphs API недоступен - используется pool + обычный launch")
+	}
+}
+
+func BenchmarkMatMulVecCachedGPU(b *testing.B) {
+	be, err := Open()
+	if err != nil {
+		b.Skip("CUDA недоступна:", err)
+	}
+	defer be.Close()
+
+	rows, cols := 1024, 1024
+	matrix := make([]float32, rows*cols)
+	vec := make([]float32, cols)
+	for i := range matrix {
+		matrix[i] = 0.001
+	}
+	for i := range vec {
+		vec[i] = 1
+	}
+
+	// прогрев: upload + graph capture
+	if _, err := be.MatMulVecCached("bench", matrix, rows, cols, vec); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if _, err := be.MatMulVecCached("bench", matrix, rows, cols, vec); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestMatMulVecQ8_0GPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -77,6 +179,18 @@ func TestMatMulVecQ8_0GPU(t *testing.T) {
 	for i := range want {
 		if math.Abs(float64(got[i]-want[i])) > 1e-3 {
 			t.Fatalf("строка %d: получили %v, ожидали %v", i, got[i], want[i])
+		}
+	}
+
+	// путь к графу воспроизведения
+	got2, err := b.MatMulVecQ8_0Cached("test", raw, rows, cols, vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(got2[i]-want[i])) > 1e-3 {
+			t.Fatalf("replay строка %d: получили %v, ожидали %v", i, got2[i], want[i])
 		}
 	}
 }

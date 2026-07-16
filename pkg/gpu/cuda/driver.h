@@ -16,6 +16,12 @@ typedef struct CUmod_st *CUmodule;
 
 typedef struct CUfunc_st *CUfunction;
 
+typedef struct CUstream_st *CUstream;
+
+typedef struct CUgraph_st *CUgraph;
+
+typedef struct CUgraphExec_st *CUgraphExec;
+
 typedef unsigned long long CUdeviceptr;
 
 typedef CUresult (*PFN_cuInit)(unsigned int flags);
@@ -38,6 +44,10 @@ typedef CUresult (*PFN_cuMemcpyHtoD_v2)(CUdeviceptr dst, const void *src, size_t
 
 typedef CUresult (*PFN_cuMemcpyDtoH_v2)(void *dst, CUdeviceptr src, size_t bytes);
 
+typedef CUresult (*PFN_cuMemcpyHtoDAsync_v2)(CUdeviceptr dst, const void *src, size_t bytes, CUstream stream);
+
+typedef CUresult (*PFN_cuMemcpyDtoHAsync_v2)(void *dst, CUdeviceptr src, size_t bytes, CUstream stream);
+
 typedef CUresult (*PFN_cuGetErrorName)(CUresult error, const char **pStr);
 
 typedef CUresult (*PFN_cuGetErrorString)(CUresult error, const char **pStr);
@@ -52,7 +62,27 @@ typedef CUresult (*PFN_cuModuleLoadDataEx)(CUmodule *module, const void *image, 
 
 typedef CUresult (*PFN_cuModuleGetFunction)(CUfunction *hfunc, CUmodule hmod, const char *name);
 
-typedef CUresult (*PFN_cuLaunchKernel)(CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, void *hStream, void **kernelParams, void **extra);
+typedef CUresult (*PFN_cuLaunchKernel)(CUfunction f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream, void **kernelParams, void **extra);
+
+typedef CUresult (*PFN_cuStreamCreate)(CUstream *phStream, unsigned int flags);
+
+typedef CUresult (*PFN_cuStreamDestroy_v2)(CUstream hStream);
+
+typedef CUresult (*PFN_cuStreamSynchronize)(CUstream hStream);
+
+typedef CUresult (*PFN_cuStreamBeginCapture_v2)(CUstream hStream, int mode);
+
+typedef CUresult (*PFN_cuStreamEndCapture)(CUstream hStream, CUgraph *phGraph);
+
+typedef CUresult (*PFN_cuGraphDestroy)(CUgraph graph);
+
+typedef CUresult (*PFN_cuGraphInstantiateWithFlags)(CUgraphExec *phGraphExec, CUgraph graph, unsigned long long flags);
+
+typedef CUresult (*PFN_cuGraphInstantiate_v2)(CUgraphExec *phGraphExec, CUgraph graph, void *phErrorNode, char *logBuffer, size_t bufferSize);
+
+typedef CUresult (*PFN_cuGraphLaunch)(CUgraphExec hGraphExec, CUstream hStream);
+
+typedef CUresult (*PFN_cuGraphExecDestroy)(CUgraphExec hGraphExec);
 
 typedef struct {
 	PFN_cuInit cuInit;
@@ -66,6 +96,8 @@ typedef struct {
 	PFN_cuMemFree_v2 cuMemFree;
 	PFN_cuMemcpyHtoD_v2 cuMemcpyHtoD;
 	PFN_cuMemcpyDtoH_v2 cuMemcpyDtoH;
+	PFN_cuMemcpyHtoDAsync_v2 cuMemcpyHtoDAsync;
+	PFN_cuMemcpyDtoHAsync_v2 cuMemcpyDtoHAsync;
 	PFN_cuGetErrorName cuGetErrorName;
 	PFN_cuGetErrorString cuGetErrorString;
 	PFN_cuCtxSetCurrent cuCtxSetCurrent;
@@ -73,9 +105,41 @@ typedef struct {
 	PFN_cuModuleLoadDataEx cuModuleLoadDataEx;
 	PFN_cuModuleGetFunction cuModuleGetFunction;
 	PFN_cuLaunchKernel cuLaunchKernel;
+	PFN_cuStreamCreate cuStreamCreate;
+	PFN_cuStreamDestroy_v2 cuStreamDestroy;
+	PFN_cuStreamSynchronize cuStreamSynchronize;
+	PFN_cuStreamBeginCapture_v2 cuStreamBeginCapture;
+	PFN_cuStreamEndCapture cuStreamEndCapture;
+	PFN_cuGraphDestroy cuGraphDestroy;
+	PFN_cuGraphInstantiateWithFlags cuGraphInstantiateWithFlags;
+	PFN_cuGraphInstantiate_v2 cuGraphInstantiate;
+	PFN_cuGraphLaunch cuGraphLaunch;
+	PFN_cuGraphExecDestroy cuGraphExecDestroy;
+	int has_graphs;
 } cuda_driver_t;
 
 #define GGUF_CUDA_MIN_CC 60
+
+typedef struct gguf_matmul_graph_entry {
+	CUdeviceptr d_matrix;
+	int rows;
+	int cols;
+	int is_q8;
+	CUgraphExec exec;
+	struct gguf_matmul_graph_entry *next;
+} gguf_matmul_graph_entry_t;
+
+// gguf_matmul_pool_t - переиспользуемые d_vec/d_out + host staging + CUDA Graph cache
+typedef struct {
+	CUdeviceptr d_vec;
+	CUdeviceptr d_out;
+	float *h_vec;
+	float *h_out;
+	int vec_cap;
+	int out_cap;
+	CUstream stream;
+	gguf_matmul_graph_entry_t *graphs;
+} gguf_matmul_pool_t;
 
 // gguf_cuda_init загружает libcuda.so и создаёт контекст на GPU 0
 // cc_out: compute capability (major*10+minor), например 120 для sm_120
@@ -93,20 +157,29 @@ int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx, CU
 // gguf_cuda_upload_matrix загружает matrix на GPU
 int gguf_cuda_upload_matrix(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const float *matrix, int rows, int cols);
 
-// gguf_cuda_matmul_vec_device matmul с matrix уже на GPU
-int gguf_cuda_matmul_vec_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+// gguf_cuda_matmul_pool_init создаёт stream и пустой pool
+int gguf_cuda_matmul_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool);
+
+// gguf_cuda_matmul_pool_free освобождает pool, graphs и stream
+void gguf_cuda_matmul_pool_free(cuda_driver_t *drv, gguf_matmul_pool_t *pool);
+
+// gguf_cuda_matmul_pool_clear_graphs сбрасывает graph cache (после free/replace весов)
+void gguf_cuda_matmul_pool_clear_graphs(cuda_driver_t *drv, gguf_matmul_pool_t *pool);
+
+// gguf_cuda_matmul_vec_device matmul с matrix уже на GPU (pool обязателен)
+int gguf_cuda_matmul_vec_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
 // gguf_cuda_free освобождает GPU-буфер
 void gguf_cuda_free(cuda_driver_t *drv, CUdeviceptr ptr);
 
-// gguf_cuda_matmul_vec загружает matrix и запускает kernel (без кеша)
-int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *matrix, const float *vec, float *out, int rows, int cols);
+// gguf_cuda_matmul_vec загружает matrix и запускает kernel (без кеша весов)
+int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, const float *matrix, const float *vec, float *out, int rows, int cols);
 
 // gguf_cuda_upload_q8_0 загружает Q8_0-матрицу на GPU
 int gguf_cuda_upload_q8_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
 
 // gguf_cuda_matmul_vec_q8_0_device matmul Q8_0 с весами уже на GPU
-int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
 // gguf_cuda_rmsnorm RMSNorm на GPU
 int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *x, const float *weight, float *out, int n, float eps);

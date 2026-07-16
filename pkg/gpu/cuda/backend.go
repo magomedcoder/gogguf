@@ -51,6 +51,7 @@ type Backend struct {
 	hasRoPENorm bool
 	hasSwiGLU   bool
 	hasAttn     bool
+	hasGraphs   bool
 
 	mu         sync.Mutex
 	matrices   map[string]gpuMatrix
@@ -58,6 +59,7 @@ type Backend struct {
 	kvCache    C.gguf_kv_cache_t
 	kvReady    bool
 	attnPool   C.gguf_attn_pool_t
+	matmulPool C.gguf_matmul_pool_t
 }
 
 // Open инициализирует GPU 0 и загружает kernels
@@ -81,6 +83,7 @@ func Open() (*Backend, error) {
 	}
 
 	b.name = "CUDA:0 " + C.GoString(&nameBuf[0])
+	b.hasGraphs = b.drv.has_graphs != 0
 	gpuCC := int(cc)
 
 	var errBuf [4096]C.char
@@ -92,6 +95,11 @@ func Open() (*Backend, error) {
 	if err := b.loadOpsModule(gpuCC, &errBuf); err != nil {
 		C.gguf_cuda_shutdown(&b.drv, b.ctx)
 		return nil, err
+	}
+
+	if rc := C.gguf_cuda_matmul_pool_init(&b.drv, b.ctx, &b.matmulPool); rc != 0 {
+		C.gguf_cuda_shutdown(&b.drv, b.ctx)
+		return nil, fmt.Errorf("cuda: matmul pool init: код %d", int(rc))
 	}
 
 	return b, nil
@@ -161,6 +169,7 @@ func (b *Backend) Close() error {
 	}
 
 	C.gguf_cuda_attn_pool_free(&b.drv, &b.attnPool)
+	C.gguf_cuda_matmul_pool_free(&b.drv, &b.matmulPool)
 
 	for _, m := range b.matrices {
 		C.gguf_cuda_free(&b.drv, m.ptr)
@@ -181,13 +190,20 @@ func (b *Backend) MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]
 		return nil, err
 	}
 
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	out := make([]float32, rows)
 	rc := C.gguf_cuda_matmul_vec(
-		&b.drv, b.ctx, b.fn,
+		&b.drv,
+		b.ctx,
+		b.fn,
+		&b.matmulPool,
 		(*C.float)(unsafe.Pointer(&matrix[0])),
 		(*C.float)(unsafe.Pointer(&vec[0])),
 		(*C.float)(unsafe.Pointer(&out[0])),
-		C.int(rows), C.int(cols),
+		C.int(rows),
+		C.int(cols),
 	)
 	if rc != 0 {
 		return nil, fmt.Errorf("cuda: matmul_vec: код %d", int(rc))
@@ -202,9 +218,12 @@ func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int,
 	}
 
 	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	gm, ok := b.matrices[name]
 	if !ok || gm.rows != rows || gm.cols != cols {
 		if ok {
+			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
 			C.gguf_cuda_free(&b.drv, gm.ptr)
 		}
 
@@ -215,21 +234,24 @@ func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int,
 			C.int(rows), C.int(cols),
 		)
 		if rc != 0 {
-			b.mu.Unlock()
 			return nil, fmt.Errorf("cuda: upload matrix %q: код %d", name, int(rc))
 		}
 
 		gm = gpuMatrix{ptr: ptr, rows: rows, cols: cols}
 		b.matrices[name] = gm
 	}
-	b.mu.Unlock()
 
 	out := make([]float32, rows)
 	rc := C.gguf_cuda_matmul_vec_device(
-		&b.drv, b.ctx, b.fn, gm.ptr,
+		&b.drv,
+		b.ctx,
+		b.fn,
+		&b.matmulPool,
+		gm.ptr,
 		(*C.float)(unsafe.Pointer(&vec[0])),
 		(*C.float)(unsafe.Pointer(&out[0])),
-		C.int(rows), C.int(cols),
+		C.int(rows),
+		C.int(cols),
 	)
 	if rc != 0 {
 		return nil, fmt.Errorf("cuda: matmul_vec_device %q: код %d", name, int(rc))
@@ -244,9 +266,12 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 	}
 
 	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	gm, ok := b.matricesQ8[name]
 	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
 		if ok {
+			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
 			C.gguf_cuda_free(&b.drv, gm.ptr)
 		}
 
@@ -257,7 +282,6 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			b.mu.Unlock()
 			return nil, fmt.Errorf("cuda: upload q8_0 %q: код %d", name, int(rc))
 		}
 
@@ -269,14 +293,18 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 		}
 		b.matricesQ8[name] = gm
 	}
-	b.mu.Unlock()
 
 	out := make([]float32, rows)
 	rc := C.gguf_cuda_matmul_vec_q8_0_device(
-		&b.drv, b.ctx, b.fnQ8, gm.ptr,
+		&b.drv,
+		b.ctx,
+		b.fnQ8,
+		&b.matmulPool,
+		gm.ptr,
 		(*C.float)(unsafe.Pointer(&vec[0])),
 		(*C.float)(unsafe.Pointer(&out[0])),
-		C.int(rows), C.int(cols),
+		C.int(rows),
+		C.int(cols),
 	)
 	if rc != 0 {
 		return nil, fmt.Errorf("cuda: matmul_vec_q8_0 %q: код %d", name, int(rc))
@@ -295,11 +323,14 @@ func (b *Backend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 	}
 
 	rc := C.gguf_cuda_rmsnorm(
-		&b.drv, b.ctx, b.fnRMS,
+		&b.drv,
+		b.ctx,
+		b.fnRMS,
 		(*C.float)(unsafe.Pointer(&x[0])),
 		(*C.float)(unsafe.Pointer(&weight[0])),
 		(*C.float)(unsafe.Pointer(&dst[0])),
-		C.int(len(x)), C.float(eps),
+		C.int(len(x)),
+		C.float(eps),
 	)
 	if rc != 0 {
 		return fmt.Errorf("cuda: rmsnorm: код %d", int(rc))

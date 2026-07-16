@@ -39,11 +39,31 @@ static int load_driver(cuda_driver_t *drv, void **lib_out) {
 	drv->cuModuleLoadDataEx = (PFN_cuModuleLoadDataEx)load_sym(lib, "cuModuleLoadDataEx");
 	drv->cuModuleGetFunction = (PFN_cuModuleGetFunction)load_sym(lib, "cuModuleGetFunction");
 	drv->cuLaunchKernel = (PFN_cuLaunchKernel)load_sym(lib, "cuLaunchKernel");
+	drv->cuMemcpyHtoDAsync = (PFN_cuMemcpyHtoDAsync_v2)load_sym(lib, "cuMemcpyHtoDAsync_v2");
+	drv->cuMemcpyDtoHAsync = (PFN_cuMemcpyDtoHAsync_v2)load_sym(lib, "cuMemcpyDtoHAsync_v2");
+	drv->cuStreamCreate = (PFN_cuStreamCreate)load_sym(lib, "cuStreamCreate");
+	drv->cuStreamDestroy = (PFN_cuStreamDestroy_v2)load_sym(lib, "cuStreamDestroy_v2");
+	drv->cuStreamSynchronize = (PFN_cuStreamSynchronize)load_sym(lib, "cuStreamSynchronize");
+	drv->cuStreamBeginCapture = (PFN_cuStreamBeginCapture_v2)load_sym(lib, "cuStreamBeginCapture_v2");
+	if (!drv->cuStreamBeginCapture) {
+		drv->cuStreamBeginCapture = (PFN_cuStreamBeginCapture_v2)load_sym(lib, "cuStreamBeginCapture");
+	}
+	drv->cuStreamEndCapture = (PFN_cuStreamEndCapture)load_sym(lib, "cuStreamEndCapture");
+	drv->cuGraphDestroy = (PFN_cuGraphDestroy)load_sym(lib, "cuGraphDestroy");
+	drv->cuGraphInstantiateWithFlags = (PFN_cuGraphInstantiateWithFlags)load_sym(lib, "cuGraphInstantiateWithFlags");
+	drv->cuGraphInstantiate = (PFN_cuGraphInstantiate_v2)load_sym(lib, "cuGraphInstantiate_v2");
+	if (!drv->cuGraphInstantiate) {
+		drv->cuGraphInstantiate = (PFN_cuGraphInstantiate_v2)load_sym(lib, "cuGraphInstantiate");
+	}
+	drv->cuGraphLaunch = (PFN_cuGraphLaunch)load_sym(lib, "cuGraphLaunch");
+	drv->cuGraphExecDestroy = (PFN_cuGraphExecDestroy)load_sym(lib, "cuGraphExecDestroy");
 
 	if (!drv->cuInit || !drv->cuDeviceGetCount || !drv->cuDeviceGet || !drv->cuDeviceGetName || !drv->cuCtxCreate || !drv->cuCtxDestroy || !drv->cuMemAlloc || !drv->cuMemFree || !drv->cuMemcpyHtoD || !drv->cuMemcpyDtoH || !drv->cuModuleLoadData || !drv->cuModuleGetFunction || !drv->cuLaunchKernel) {
 		dlclose(lib);
 		return -2;
 	}
+
+	drv->has_graphs = drv->cuMemcpyHtoDAsync && drv->cuMemcpyDtoHAsync && drv->cuStreamCreate && drv->cuStreamDestroy && drv->cuStreamSynchronize && drv->cuStreamBeginCapture && drv->cuStreamEndCapture && drv->cuGraphDestroy && (drv->cuGraphInstantiateWithFlags || drv->cuGraphInstantiate) && drv->cuGraphLaunch && drv->cuGraphExecDestroy;
 
 	*lib_out = lib;
 	return 0;
@@ -667,30 +687,160 @@ int gguf_cuda_upload_matrix(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_ma
 	return 0;
 }
 
-int gguf_cuda_matmul_vec_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn,
-	CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols) {
+static void gguf_cuda_matmul_clear_graphs(cuda_driver_t *drv, gguf_matmul_pool_t *pool) {
+	gguf_matmul_graph_entry_t *e = pool->graphs;
+	while (e) {
+		gguf_matmul_graph_entry_t *next = e->next;
+		if (drv->cuGraphExecDestroy && e->exec) {
+			drv->cuGraphExecDestroy(e->exec);
+		}
+
+		free(e);
+		e = next;
+	}
+
+	pool->graphs = NULL;
+}
+
+void gguf_cuda_matmul_pool_clear_graphs(cuda_driver_t *drv, gguf_matmul_pool_t *pool) {
+	if (!drv || !pool) {
+		return;
+	}
+
+	gguf_cuda_matmul_clear_graphs(drv, pool);
+}
+
+int gguf_cuda_matmul_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool) {
+	if (!drv || !pool) {
+		return -1;
+	}
+
+	memset(pool, 0, sizeof(*pool));
+
 	if (gguf_cuda_set_context(drv, ctx) != 0) {
 		return -10;
 	}
 
-	CUdeviceptr d_vec = 0;
-	CUdeviceptr d_out = 0;
+	if (drv->cuStreamCreate) {
+		if (drv->cuStreamCreate(&pool->stream, 0) != CUDA_SUCCESS) {
+			return -2;
+		}
+	}
 
+	return 0;
+}
+
+void gguf_cuda_matmul_pool_free(cuda_driver_t *drv, gguf_matmul_pool_t *pool) {
+	if (!drv || !pool) {
+		return;
+	}
+
+	gguf_cuda_matmul_clear_graphs(drv, pool);
+
+	if (pool->d_vec) {
+		drv->cuMemFree(pool->d_vec);
+	}
+
+	if (pool->d_out) {
+		drv->cuMemFree(pool->d_out);
+	}
+
+	free(pool->h_vec);
+	free(pool->h_out);
+
+	if (pool->stream && drv->cuStreamDestroy) {
+		drv->cuStreamDestroy(pool->stream);
+	}
+
+	memset(pool, 0, sizeof(*pool));
+}
+
+static int gguf_cuda_matmul_pool_ensure(cuda_driver_t *drv, gguf_matmul_pool_t *pool, int rows, int cols) {
+	if (rows <= 0 || cols <= 0) {
+		return -11;
+	}
+
+	int need_grow = (cols > pool->vec_cap) || (rows > pool->out_cap);
+	if (!need_grow) {
+		return 0;
+	}
+
+	gguf_cuda_matmul_clear_graphs(drv, pool);
+
+	if (cols > pool->vec_cap) {
+		CUdeviceptr d_vec = 0;
+		size_t bytes = (size_t)cols * sizeof(float);
+		if (drv->cuMemAlloc(&d_vec, bytes) != CUDA_SUCCESS) {
+			return -1;
+		}
+
+		float *h_vec = (float *)realloc(pool->h_vec, bytes);
+		if (!h_vec) {
+			drv->cuMemFree(d_vec);
+			return -12;
+		}
+
+		if (pool->d_vec) {
+			drv->cuMemFree(pool->d_vec);
+		}
+
+		pool->d_vec = d_vec;
+		pool->h_vec = h_vec;
+		pool->vec_cap = cols;
+	}
+
+	if (rows > pool->out_cap) {
+		CUdeviceptr d_out = 0;
+		size_t bytes = (size_t)rows * sizeof(float);
+		if (drv->cuMemAlloc(&d_out, bytes) != CUDA_SUCCESS) {
+			return -2;
+		}
+
+		float *h_out = (float *)realloc(pool->h_out, bytes);
+		if (!h_out) {
+			drv->cuMemFree(d_out);
+			return -12;
+		}
+
+		if (pool->d_out) {
+			drv->cuMemFree(pool->d_out);
+		}
+
+		pool->d_out = d_out;
+		pool->h_out = h_out;
+		pool->out_cap = rows;
+	}
+
+	return 0;
+}
+
+static int gguf_cuda_graph_instantiate(cuda_driver_t *drv, CUgraph graph, CUgraphExec *exec_out) {
+	if (drv->cuGraphInstantiateWithFlags) {
+		return drv->cuGraphInstantiateWithFlags(exec_out, graph, 0) == CUDA_SUCCESS ? 0 : -1;
+	}
+
+	if (drv->cuGraphInstantiate) {
+		return drv->cuGraphInstantiate(exec_out, graph, NULL, NULL, 0) == CUDA_SUCCESS ? 0 : -1;
+	}
+
+	return -1;
+}
+
+static gguf_matmul_graph_entry_t *gguf_cuda_matmul_find_graph(gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, int rows, int cols, int is_q8) {
+	for (gguf_matmul_graph_entry_t *e = pool->graphs; e; e = e->next) {
+		if (e->d_matrix == d_matrix && e->rows == rows && e->cols == cols && e->is_q8 == is_q8) {
+			return e;
+		}
+	}
+
+	return NULL;
+}
+
+static int gguf_cuda_matmul_capture(cuda_driver_t *drv, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, int rows, int cols, int is_q8, CUgraphExec *exec_out) {
+	CUdeviceptr d_vec = pool->d_vec;
+	CUdeviceptr d_out = pool->d_out;
 	size_t vec_bytes = (size_t)cols * sizeof(float);
 	size_t out_bytes = (size_t)rows * sizeof(float);
-
-	if (drv->cuMemAlloc(&d_vec, vec_bytes) != CUDA_SUCCESS) {
-		return -1;
-	}
-
-	if (drv->cuMemAlloc(&d_out, out_bytes) != CUDA_SUCCESS) {
-		drv->cuMemFree(d_vec);
-		return -2;
-	}
-
-	if (drv->cuMemcpyHtoD(d_vec, vec, vec_bytes) != CUDA_SUCCESS) {
-		goto fail;
-	}
 
 	void *params[5];
 	params[0] = &d_matrix;
@@ -702,22 +852,143 @@ int gguf_cuda_matmul_vec_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn
 	unsigned int block = 256;
 	unsigned int grid = ((unsigned int)rows + block - 1) / block;
 
-	if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
-		goto fail;
+	if (drv->cuStreamBeginCapture(pool->stream, 0) != CUDA_SUCCESS) {
+		return -1;
 	}
 
-	if (drv->cuMemcpyDtoH(out, d_out, out_bytes) != CUDA_SUCCESS) {
-		goto fail;
+	if (drv->cuMemcpyHtoDAsync(d_vec, pool->h_vec, vec_bytes, pool->stream) != CUDA_SUCCESS) {
+		goto capture_fail;
 	}
 
-	drv->cuMemFree(d_vec);
-	drv->cuMemFree(d_out);
+	if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, pool->stream, params, NULL) != CUDA_SUCCESS) {
+		goto capture_fail;
+	}
+
+	if (drv->cuMemcpyDtoHAsync(pool->h_out, d_out, out_bytes, pool->stream) != CUDA_SUCCESS) {
+		goto capture_fail;
+	}
+
+	CUgraph graph = NULL;
+	if (drv->cuStreamEndCapture(pool->stream, &graph) != CUDA_SUCCESS || !graph) {
+		return -2;
+	}
+
+	CUgraphExec exec = NULL;
+	if (gguf_cuda_graph_instantiate(drv, graph, &exec) != 0 || !exec) {
+		drv->cuGraphDestroy(graph);
+		return -3;
+	}
+
+	drv->cuGraphDestroy(graph);
+	*exec_out = exec;
+	(void)is_q8;
 	return 0;
 
-fail:
-	drv->cuMemFree(d_vec);
-	drv->cuMemFree(d_out);
-	return -3;
+capture_fail:
+	{
+		CUgraph dummy = NULL;
+		drv->cuStreamEndCapture(pool->stream, &dummy);
+		if (dummy) {
+			drv->cuGraphDestroy(dummy);
+		}
+	}
+
+	return -4;
+}
+
+static int gguf_cuda_matmul_run_pooled(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols, int is_q8, int use_graph) {
+	if (!pool) {
+		return -20;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	int rc = gguf_cuda_matmul_pool_ensure(drv, pool, rows, cols);
+	if (rc != 0) {
+		return rc;
+	}
+
+	size_t vec_bytes = (size_t)cols * sizeof(float);
+	size_t out_bytes = (size_t)rows * sizeof(float);
+	memcpy(pool->h_vec, vec, vec_bytes);
+
+	if (use_graph && drv->has_graphs && pool->stream) {
+		gguf_matmul_graph_entry_t *entry = gguf_cuda_matmul_find_graph(pool, d_matrix, rows, cols, is_q8);
+		if (!entry) {
+			CUgraphExec exec = NULL;
+			if (gguf_cuda_matmul_capture(drv, fn, pool, d_matrix, rows, cols, is_q8, &exec) != 0) {
+				goto fallback;
+			}
+
+			entry = (gguf_matmul_graph_entry_t *)calloc(1, sizeof(*entry));
+			if (!entry) {
+				drv->cuGraphExecDestroy(exec);
+				goto fallback;
+			}
+
+			entry->d_matrix = d_matrix;
+			entry->rows = rows;
+			entry->cols = cols;
+			entry->is_q8 = is_q8;
+			entry->exec = exec;
+			entry->next = pool->graphs;
+			pool->graphs = entry;
+		}
+
+		if (drv->cuGraphLaunch(entry->exec, pool->stream) != CUDA_SUCCESS) {
+			goto fallback;
+		}
+
+		if (drv->cuStreamSynchronize(pool->stream) != CUDA_SUCCESS) {
+			return -5;
+		}
+
+		memcpy(out, pool->h_out, out_bytes);
+		return 0;
+	}
+
+fallback:
+	{
+		CUdeviceptr d_vec = pool->d_vec;
+		CUdeviceptr d_out = pool->d_out;
+
+		if (drv->cuMemcpyHtoD(d_vec, pool->h_vec, vec_bytes) != CUDA_SUCCESS) {
+			return -3;
+		}
+
+		void *params[5];
+		params[0] = &d_matrix;
+		params[1] = &d_vec;
+		params[2] = &d_out;
+		params[3] = &rows;
+		params[4] = &cols;
+
+		unsigned int block = 256;
+		unsigned int grid = ((unsigned int)rows + block - 1) / block;
+		CUstream stream = pool->stream;
+
+		if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
+			return -3;
+		}
+
+		if (stream && drv->cuStreamSynchronize) {
+			if (drv->cuStreamSynchronize(stream) != CUDA_SUCCESS) {
+				return -5;
+			}
+		}
+
+		if (drv->cuMemcpyDtoH(out, d_out, out_bytes) != CUDA_SUCCESS) {
+			return -3;
+		}
+
+		return 0;
+	}
+}
+
+int gguf_cuda_matmul_vec_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols) {
+	return gguf_cuda_matmul_run_pooled(drv, ctx, fn, pool, d_matrix, vec, out, rows, cols, 0, 1);
 }
 
 int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn,
@@ -921,7 +1192,7 @@ fail:
 	return -4;
 }
 
-int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *matrix, const float *vec, float *out, int rows, int cols) {
+int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, const float *matrix, const float *vec, float *out, int rows, int cols) {
 	CUdeviceptr d_matrix = 0;
 
 	int rc = gguf_cuda_upload_matrix(drv, ctx, &d_matrix, matrix, rows, cols);
@@ -929,7 +1200,8 @@ int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const
 		return rc - 10;
 	}
 
-	rc = gguf_cuda_matmul_vec_device(drv, ctx, fn, d_matrix, vec, out, rows, cols);
+	// одноразовая матрица: пул без capture CUDA Graph
+	rc = gguf_cuda_matmul_run_pooled(drv, ctx, fn, pool, d_matrix, vec, out, rows, cols, 0, 0);
 	gguf_cuda_free(drv, d_matrix);
 	return rc;
 }
@@ -1011,55 +1283,7 @@ int gguf_cuda_upload_q8_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matr
 	return 0;
 }
 
-int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn,
+int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool,
 	CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols) {
-	if (gguf_cuda_set_context(drv, ctx) != 0) {
-		return -10;
-	}
-
-	CUdeviceptr d_vec = 0;
-	CUdeviceptr d_out = 0;
-
-	size_t vec_bytes = (size_t)cols * sizeof(float);
-	size_t out_bytes = (size_t)rows * sizeof(float);
-
-	if (drv->cuMemAlloc(&d_vec, vec_bytes) != CUDA_SUCCESS) {
-		return -1;
-	}
-
-	if (drv->cuMemAlloc(&d_out, out_bytes) != CUDA_SUCCESS) {
-		drv->cuMemFree(d_vec);
-		return -2;
-	}
-
-	if (drv->cuMemcpyHtoD(d_vec, vec, vec_bytes) != CUDA_SUCCESS) {
-		goto fail;
-	}
-
-	void *params[5];
-	params[0] = &d_matrix;
-	params[1] = &d_vec;
-	params[2] = &d_out;
-	params[3] = &rows;
-	params[4] = &cols;
-
-	unsigned int block = 256;
-	unsigned int grid = ((unsigned int)rows + block - 1) / block;
-
-	if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
-		goto fail;
-	}
-
-	if (drv->cuMemcpyDtoH(out, d_out, out_bytes) != CUDA_SUCCESS) {
-		goto fail;
-	}
-
-	drv->cuMemFree(d_vec);
-	drv->cuMemFree(d_out);
-	return 0;
-
-fail:
-	drv->cuMemFree(d_vec);
-	drv->cuMemFree(d_out);
-	return -3;
+	return gguf_cuda_matmul_run_pooled(drv, ctx, fn, pool, d_matrix, vec, out, rows, cols, 1, 1);
 }
