@@ -51,10 +51,3 @@ func llamaTestTokens() []string {
 	tokens[128009] = "<|eot_id|>"
 	return tokens
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

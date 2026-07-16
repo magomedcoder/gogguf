@@ -42,22 +42,27 @@ curl -s -X POST 127.0.0.1:8000/v1/reset
 
 `Content-Type: application/json`
 
-| Поле                           | Тип      | По умолчанию | Описание                                 |
-|--------------------------------|----------|--------------|------------------------------------------|
-| `messages`                     | array    | -            | `{role, content}` (обязательно)          |
-| `model`                        | string   | имя из GGUF  | идентификатор модели                     |
-| `max_tokens`                   | int      | `128`        | максимум новых токенов                   |
-| `temperature`                  | float    | `0`          | `0` = greedy                             |
-| `top_k`                        | int      | `0`          | top-k sampling                           |
-| `top_p`                        | float    | `1`          | nucleus sampling                         |
-| `min_p`                        | float    | `0`          | min-p sampling                           |
-| `repeat_penalty`               | float    | `1`          | штраф за повтор (`1` = выключено)        |
-| `repeat_last_n`                | int      | `64`         | окно repeat-penalty                      |
-| `stop`                         | string[] | -            | стоп-последовательности                  |
-| `stream`                       | bool     | `false`      | SSE (`data: [DONE]` в конце)             |
-| `thinking` / `enable_thinking` | bool     | `false`      | режим размышления Qwen3                  |
+| Поле                           | Тип           | По умолчанию | Описание                                |
+|--------------------------------|---------------|--------------|-----------------------------------------|
+| `messages`                     | array         | -            | `{role, content}` (обязательно)         |
+| `model`                        | string        | имя из GGUF  | идентификатор модели                    |
+| `max_tokens`                   | int           | `128`        | максимум новых токенов                  |
+| `temperature`                  | float         | `0`          | `0` = greedy                            |
+| `top_k`                        | int           | `0`          | top-k sampling                          |
+| `top_p`                        | float         | `1`          | nucleus sampling                        |
+| `min_p`                        | float         | `0`          | min-p sampling                          |
+| `repeat_penalty`               | float         | `1`          | штраф за повтор (`1` = выключено)       |
+| `repeat_last_n`                | int           | `64`         | окно repeat-penalty                     |
+| `stop`                         | string[]      | -            | стоп-последовательности                 |
+| `stream`                       | bool          | `false`      | SSE (`data: [DONE]` в конце)            |
+| `thinking` / `enable_thinking` | bool          | `false`      | режим размышления Qwen3                 |
+| `tools`                        | array         | -            | описания инструментов (OpenAI-стиль)    |
+| `tool_choice`                  | string/object | `auto`       | `auto` / `none` / `required` / по имени |
+| `parallel_tool_calls`          | bool          | `false`      | несколько tool_calls за один ход        |
 
 `content` - строка или массив `{type:"text", text:"..."}`.
+
+В messages поддерживаются `tool_calls` (assistant) и `tool_call_id` / `name` (role `tool`).
 
 Ответ без stream:
 
@@ -68,9 +73,19 @@ curl -s -X POST 127.0.0.1:8000/v1/reset
     {
       "message": {
         "role": "assistant",
-        "content": "..."
+        "content": "...",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\":\"Moscow\"}"
+            }
+          }
+        ]
       },
-      "finish_reason": "stop"
+      "finish_reason": "tool_calls"
     }
   ],
   "usage": {
@@ -81,6 +96,7 @@ curl -s -X POST 127.0.0.1:8000/v1/reset
 }
 ```
 
+Если модель не вызывает инструмент, `finish_reason` = `"stop"`, поле `tool_calls` отсутствует.
 Streaming - SSE: `data: {"choices":[{"delta":{"content":"..."}}]}` и `data: [DONE]`.
 
 Примеры:

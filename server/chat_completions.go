@@ -13,25 +13,30 @@ import (
 )
 
 type chatCompletionRequest struct {
-	Model          string        `json:"model"`
-	Messages       []chatMessage `json:"messages"`
-	MaxTokens      int           `json:"max_tokens"`
-	Temperature    *float64      `json:"temperature,omitempty"`
-	TopK           int           `json:"top_k"`
-	TopP           *float64      `json:"top_p,omitempty"`
-	MinP           float32       `json:"min_p"`
-	RepeatPenalty  float32       `json:"repeat_penalty"`
-	RepeatLastN    int           `json:"repeat_last_n"`
-	Stop           []string      `json:"stop,omitempty"`
-	Stream         bool          `json:"stream"`
-	Thinking       *bool         `json:"thinking"`
-	EnableThinking *bool         `json:"enable_thinking,omitempty"`
+	Model             string          `json:"model"`
+	Messages          []chatMessage   `json:"messages"`
+	MaxTokens         int             `json:"max_tokens"`
+	Temperature       *float64        `json:"temperature,omitempty"`
+	TopK              int             `json:"top_k"`
+	TopP              *float64        `json:"top_p,omitempty"`
+	MinP              float32         `json:"min_p"`
+	RepeatPenalty     float32         `json:"repeat_penalty"`
+	RepeatLastN       int             `json:"repeat_last_n"`
+	Stop              []string        `json:"stop,omitempty"`
+	Stream            bool            `json:"stream"`
+	Thinking          *bool           `json:"thinking"`
+	EnableThinking    *bool           `json:"enable_thinking,omitempty"`
+	Tools             []chat.Tool     `json:"tools,omitempty"`
+	ToolChoice        json.RawMessage `json:"tool_choice,omitempty"`
+	ParallelToolCalls bool            `json:"parallel_tool_calls,omitempty"`
 }
 
 type chatMessage struct {
 	Role       string          `json:"role"`
 	Content    json.RawMessage `json:"content"`
+	Name       string          `json:"name,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
+	ToolCalls  []chat.ToolCall `json:"tool_calls,omitempty"`
 }
 
 type chatCompletionResponse struct {
@@ -50,8 +55,9 @@ type chatCompletionChoice struct {
 }
 
 type chatMessagePlain struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string          `json:"role"`
+	Content   string          `json:"content"`
+	ToolCalls []chat.ToolCall `json:"tool_calls,omitempty"`
 }
 
 type chatCompletionUsage struct {
@@ -111,6 +117,24 @@ func parseChatMessageContent(raw json.RawMessage) string {
 	return b.String()
 }
 
+func parseToolChoice(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return asString
+	}
+
+	var asObj any
+	if err := json.Unmarshal(raw, &asObj); err == nil {
+		return asObj
+	}
+
+	return nil
+}
+
 func (req *chatCompletionRequest) thinkingEnabled() *bool {
 	if req.EnableThinking != nil {
 		return req.EnableThinking
@@ -162,19 +186,21 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	msgs := make([]chat.Message, 0, len(req.Messages))
 	for _, m := range req.Messages {
 		content := parseChatMessageContent(m.Content)
-		if m.Role == "tool" && content == "" && m.ToolCallID != "" {
-			content = m.ToolCallID
-		}
-
 		msgs = append(msgs, chat.Message{
-			Role:    m.Role,
-			Content: content,
+			Role:       m.Role,
+			Content:    content,
+			Name:       m.Name,
+			ToolCallID: m.ToolCallID,
+			ToolCalls:  m.ToolCalls,
 		})
 	}
 
 	prompt, err := chat.FormatMessages(msgs, chat.Options{
-		Thinking: req.thinkingEnabled(),
-		Metadata: s.engine.Metadata(),
+		Thinking:          req.thinkingEnabled(),
+		Metadata:          s.engine.Metadata(),
+		Tools:             req.Tools,
+		ToolChoice:        parseToolChoice(req.ToolChoice),
+		ParallelToolCalls: req.ParallelToolCalls,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -228,6 +254,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	conv.Commit(sess)
 
 	text := trimStopSuffix(sess.GeneratedText(), req.Stop)
+	parsed := chat.ParseAssistantOutput(text)
 	writeJSON(w, chatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
 		Object:  "chat.completion",
@@ -236,10 +263,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Choices: []chatCompletionChoice{{
 			Index: 0,
 			Message: chatMessagePlain{
-				Role:    "assistant",
-				Content: text,
+				Role:      "assistant",
+				Content:   parsed.Content,
+				ToolCalls: parsed.ToolCalls,
 			},
-			FinishReason: "stop",
+			FinishReason: parsed.FinishReason(),
 		}},
 		Usage: chatCompletionUsage{
 			PromptTokens:     sess.PromptTokenCount(),
@@ -300,7 +328,8 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	}
 
 	writeChunk(chatStreamDelta{
-		Role: "assistant"},
+		Role: "assistant",
+	},
 		nil,
 	)
 

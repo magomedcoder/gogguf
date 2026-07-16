@@ -8,9 +8,12 @@ import (
 
 // Options задаёт параметры chat template
 type Options struct {
-	System   string
-	Thinking *bool // nil - выключено; true включает размышление
-	Metadata format.Metadata
+	System            string
+	Thinking          *bool // nil - выключено; true включает размышление
+	Metadata          format.Metadata
+	Tools             []Tool
+	ToolChoice        any  // "auto"|"none"|"required" или {"type":"function",...}
+	ParallelToolCalls bool // передать parallel_tool_calls в Jinja
 }
 
 // ThinkingEnabled возвращает true, если режим размышления включён
@@ -31,6 +34,23 @@ func HasTemplate(r *format.Reader) bool {
 func HasTemplateMeta(m format.Metadata) bool {
 	_, err := m.String("tokenizer.chat_template")
 	return err == nil
+}
+
+// HasToolUseTemplateMeta проверяет наличие tool_use chat template
+func HasToolUseTemplateMeta(m format.Metadata) bool {
+	_, err := m.String("tokenizer.chat_template.tool_use")
+	return err == nil
+}
+
+// SelectChatTemplate выбирает Jinja-шаблон: tool_use при наличии tools, иначе обычный
+func SelectChatTemplate(m format.Metadata, opts Options) (string, error) {
+	if HasTools(opts) {
+		if tmpl, err := m.String("tokenizer.chat_template.tool_use"); err == nil && tmpl != "" {
+			return tmpl, nil
+		}
+	}
+
+	return m.String("tokenizer.chat_template")
 }
 
 // FormatUser оборачивает пользовательский промпт в chat template (ChatML/Qwen)

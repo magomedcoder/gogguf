@@ -1,7 +1,5 @@
 package chat
 
-import "strings"
-
 // FormatMessages форматирует диалог в chat template
 func FormatMessages(messages []Message, opts Options) (string, error) {
 	if len(messages) == 0 {
@@ -23,18 +21,5 @@ func FormatMessages(messages []Message, opts Options) (string, error) {
 }
 
 func formatMessagesFallback(messages []Message, opts Options) string {
-	var b strings.Builder
-
-	for _, msg := range messages {
-		switch msg.Role {
-		case "system",
-			"user",
-			"assistant",
-			"tool":
-			writeBlock(&b, msg.Role, msg.Content)
-		}
-	}
-
-	writeAssistantPrompt(&b, ThinkingEnabled(opts), opts.Metadata)
-	return b.String()
+	return renderChatML(messages, true, opts)
 }

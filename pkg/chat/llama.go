@@ -12,7 +12,7 @@ const (
 	llamaDefaultDate   = "26 Jul 2024"
 )
 
-// formatLlama3 форматирует диалог в стиле Llama 3 Instruct (без tools)
+// formatLlama3 форматирует диалог в стиле Llama 3 Instruct
 func formatLlama3(messages []Message, opts Options) string {
 	meta := opts.Metadata
 	startHeader := tokenFromVocab(meta, llamaStartHeaderID)
@@ -41,6 +41,17 @@ func formatLlama3(messages []Message, opts Options) string {
 			system += msg.Content
 		}
 	}
+	if HasTools(opts) {
+		if system != "" {
+			system += "\n\n"
+		}
+
+		system += toolsSystemPreamble(Options{
+			Tools:      opts.Tools,
+			ToolChoice: opts.ToolChoice,
+		})
+	}
+
 	b.WriteString(system)
 	b.WriteString(eot)
 
@@ -49,11 +60,16 @@ func formatLlama3(messages []Message, opts Options) string {
 		case "system":
 			continue
 		case "user", "assistant", "tool":
+			content := msg.Content
+			if msg.Role == "assistant" {
+				content = formatAssistantBody(msg)
+			}
+
 			b.WriteString(startHeader)
 			b.WriteString(msg.Role)
 			b.WriteString(endHeader)
 			b.WriteString("\n\n")
-			b.WriteString(msg.Content)
+			b.WriteString(content)
 			b.WriteString(eot)
 		}
 	}

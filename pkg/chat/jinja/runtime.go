@@ -507,6 +507,17 @@ func evalCall(e callExpr, ctx *execCtx) (value, error) {
 	switch name {
 	case "namespace":
 		return evalNamespaceCall(e.args, ctx)
+	case "raise_exception":
+		msg := "template error"
+		if len(e.args) > 0 {
+			v, err := evalExpr(e.args[0], ctx)
+			if err != nil {
+				return value{}, err
+			}
+			msg = v.toString()
+		}
+
+		return value{}, errf("%s", msg)
 	case "range":
 		args := make([]value, len(e.args))
 		for i, a := range e.args {

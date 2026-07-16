@@ -42,22 +42,27 @@ Response: `{"status":"ok"}`
 
 `Content-Type: application/json`
 
-| Field                          | Type     | Default   | Description                           |
-|--------------------------------|----------|-----------|---------------------------------------|
-| `messages`                     | array    | -         | `{role, content}` (required)          |
-| `model`                        | string   | GGUF name | model id                              |
-| `max_tokens`                   | int      | `128`     | max new tokens                        |
-| `temperature`                  | float    | `0`       | `0` = greedy                          |
-| `top_k`                        | int      | `0`       | top-k sampling                        |
-| `top_p`                        | float    | `1`       | nucleus sampling                      |
-| `min_p`                        | float    | `0`       | min-p sampling                        |
-| `repeat_penalty`               | float    | `1`       | repetition penalty (`1` = off)        |
-| `repeat_last_n`                | int      | `64`      | history window for repeat penalty     |
-| `stop`                         | string[] | -         | stop sequences                        |
-| `stream`                       | bool     | `false`   | SSE streaming (`data: [DONE]` at end) |
-| `thinking` / `enable_thinking` | bool     | `false`   | Qwen3 thinking mode                   |
+| Field                          | Type          | Default   | Description                           |
+|--------------------------------|---------------|-----------|---------------------------------------|
+| `messages`                     | array         | -         | `{role, content}` (required)          |
+| `model`                        | string        | GGUF name | model id                              |
+| `max_tokens`                   | int           | `128`     | max new tokens                        |
+| `temperature`                  | float         | `0`       | `0` = greedy                          |
+| `top_k`                        | int           | `0`       | top-k sampling                        |
+| `top_p`                        | float         | `1`       | nucleus sampling                      |
+| `min_p`                        | float         | `0`       | min-p sampling                        |
+| `repeat_penalty`               | float         | `1`       | repetition penalty (`1` = off)        |
+| `repeat_last_n`                | int           | `64`      | history window for repeat penalty     |
+| `stop`                         | string[]      | -         | stop sequences                        |
+| `stream`                       | bool          | `false`   | SSE streaming (`data: [DONE]` at end) |
+| `thinking` / `enable_thinking` | bool          | `false`   | Qwen3 thinking mode                   |
+| `tools`                        | array         | -         | OpenAI-style tool definitions         |
+| `tool_choice`                  | string/object | `auto`    | `auto` / `none` / `required` / named  |
+| `parallel_tool_calls`          | bool          | `false`   | allow multiple tool calls in one turn |
 
 `content` may be a string or an array of `{type:"text", text:"..."}` parts.
+
+Messages may include `tool_calls` (assistant) and `tool_call_id` / `name` (tool role).
 
 Non-streaming response:
 
@@ -68,9 +73,19 @@ Non-streaming response:
     {
       "message": {
         "role": "assistant",
-        "content": "..."
+        "content": "...",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\":\"Moscow\"}"
+            }
+          }
+        ]
       },
-      "finish_reason": "stop"
+      "finish_reason": "tool_calls"
     }
   ],
   "usage": {
@@ -81,6 +96,7 @@ Non-streaming response:
 }
 ```
 
+If the model does not call a tool, `finish_reason` is `"stop"` and `tool_calls` is omitted.
 Streaming uses SSE chunks: `data: {"choices":[{"delta":{"content":"..."}}]}` and `data: [DONE]`.
 
 Examples:
