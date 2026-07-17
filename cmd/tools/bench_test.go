@@ -5,21 +5,21 @@ import (
 	"testing"
 )
 
-func TestAverageEmpty(t *testing.T) {
-	if got := Average(nil); got.PrefillMS != 0 {
+func TestAverageBenchEmpty(t *testing.T) {
+	if got := averageBench(nil); got.PrefillMS != 0 {
 		t.Fatalf("ожидали нулевой результат, получили prefill_ms=%v", got.PrefillMS)
 	}
 }
 
-func TestAverageSingle(t *testing.T) {
-	in := Result{PromptTokens: 10, PrefillMS: 100, DecodeTPS: 5}
-	if got := Average([]Result{in}); got != in {
+func TestAverageBenchSingle(t *testing.T) {
+	in := benchResult{PromptTokens: 10, PrefillMS: 100, DecodeTPS: 5}
+	if got := averageBench([]benchResult{in}); got != in {
 		t.Fatalf("один прогон должен возвращаться без изменений: %+v", got)
 	}
 }
 
-func TestAverageMultiple(t *testing.T) {
-	results := []Result{
+func TestAverageBenchMultiple(t *testing.T) {
+	results := []benchResult{
 		{
 			PromptTokens: 10,
 			DecodeTokens: 4,
@@ -37,7 +37,7 @@ func TestAverageMultiple(t *testing.T) {
 			DecodeTPS:    20,
 		},
 	}
-	got := Average(results)
+	got := averageBench(results)
 
 	if got.PromptTokens != 10 {
 		t.Fatalf("prompt_tokens = %d, ожидали 10", got.PromptTokens)

@@ -9,30 +9,34 @@ import (
 	"github.com/magomedcoder/gogguf"
 )
 
-type output struct {
+type greedyOutput struct {
 	Prompt string `json:"prompt,omitempty"`
 	Tokens []int  `json:"tokens"`
 }
 
-func main() {
-	model := flag.String("m", "", "путь к GGUF")
-	chatUser := flag.String("chat", "", "user-сообщение (chat template)")
-	prompt := flag.String("p", "", "сырой промпт (без chat template)")
-	maxTokens := flag.Int("n", 50, "число decode-токенов")
-	flag.Parse()
+// runGreedy генерирует N токенов greedy и печатает JSON
+func runGreedy(args []string) error {
+	fs := flag.NewFlagSet("greedy", flag.ContinueOnError)
+	model := fs.String("m", "", "путь к GGUF")
+	chatUser := fs.String("chat", "", "user-сообщение (chat template)")
+	prompt := fs.String("p", "", "сырой промпт (без chat template)")
+	maxTokens := fs.Int("n", 50, "число decode-токенов")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *model == "" {
-		if len(flag.Args()) > 0 {
-			*model = flag.Args()[0]
+		if len(fs.Args()) > 0 {
+			*model = fs.Args()[0]
 		} else {
-			fmt.Fprintln(os.Stderr, "usage: greedy -m model.gguf [--chat USER | -p PROMPT] [-n N]")
-			os.Exit(2)
+			return fmt.Errorf("usage: tools greedy -m model.gguf [--chat USER | -p PROMPT] [-n N]")
 		}
 	}
 
 	engine, err := gogguf.Load(*model, gogguf.LoadOptions{})
 	if err != nil {
-		fatal(err)
+		return err
 	}
 
 	text := *prompt
@@ -41,45 +45,37 @@ func main() {
 			Metadata: engine.Metadata(),
 		})
 		if err != nil {
-			fatal(err)
+			return err
 		}
 	}
 
 	if text == "" {
-		fmt.Fprintln(os.Stderr, "укажите --chat или -p")
-		os.Exit(2)
+		return fmt.Errorf("укажите --chat или -p")
 	}
 
 	ctx, err := engine.NewContext()
 	if err != nil {
-		fatal(err)
+		return err
 	}
 
 	sess, err := ctx.StartGeneration(text)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 
 	if err := sess.GenerateSteps(gogguf.GenerateParams{
 		MaxTokens: *maxTokens,
 		Sampler:   gogguf.Greedy,
 	}); err != nil {
-		fatal(err)
+		return err
 	}
 
-	out := output{
+	out := greedyOutput{
 		Prompt: text,
 		Tokens: sess.GeneratedTokens(),
 	}
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(out); err != nil {
-		fatal(err)
-	}
-}
-
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
+	return enc.Encode(out)
 }

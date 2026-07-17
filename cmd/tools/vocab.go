@@ -2,27 +2,40 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
-func main() {
+// runVocab показывает конфиг модели и ID special tokens
+func runVocab(args []string) error {
 	path := "./models/Qwen3-0.6B-Q8_0.gguf"
-	if len(os.Args) > 1 {
-		path = os.Args[1]
+	if len(args) > 0 {
+		path = args[0]
 	}
 
-	r, _ := gogguf.OpenFile(path)
-	cfg, _ := qwen3.ParseConfig(r)
+	r, err := gogguf.OpenFile(path)
+	if err != nil {
+		return err
+	}
+
+	cfg, err := qwen3.ParseConfig(r)
+	if err != nil {
+		return err
+	}
+
 	fmt.Printf("config: head_dim=%d heads=%d kv=%d\n", cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads)
 
-	tokens, _ := r.Metadata.StringArray("tokenizer.ggml.tokens")
+	tokens, err := r.Metadata.StringArray("tokenizer.ggml.tokens")
+	if err != nil {
+		return err
+	}
+
 	for i, s := range tokens {
 		if strings.Contains(s, "im_start") || strings.Contains(s, "im_end") || s == "<|endoftext|>" {
 			fmt.Printf("%d: %q\n", i, s)
 		}
 	}
+	return nil
 }

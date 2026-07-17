@@ -31,17 +31,21 @@ type logitMetric struct {
 	Logit float32 `json:"logit"`
 }
 
-func main() {
-	modelPath := flag.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")
-	prompt := flag.String("p", "Hello", "промпт")
-	chat := flag.Bool("chat", false, "chat template")
-	topN := flag.Int("top", 5, "число top logits в отчёте")
-	flag.Parse()
+// runDebugLayers печатает послойный RMS и итоговые logits
+func runDebugLayers(args []string) error {
+	fs := flag.NewFlagSet("debuglayers", flag.ContinueOnError)
+	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")
+	prompt := fs.String("p", "Hello", "промпт")
+	chat := fs.Bool("chat", false, "chat template")
+	topN := fs.Int("top", 5, "число top logits в отчёте")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	text := *prompt
@@ -50,15 +54,13 @@ func main() {
 			Metadata: engine.Metadata(),
 		})
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
 	}
 
 	ids, err := engine.Tokenizer().Encode(text)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	report := layerReport{
@@ -72,8 +74,7 @@ func main() {
 		SetDebugHooks(*qwen3.DebugHooks)
 	})
 	if !ok {
-		fmt.Fprintln(os.Stderr, "модель не поддерживает debug hooks")
-		os.Exit(1)
+		return fmt.Errorf("модель не поддерживает debug hooks")
 	}
 
 	setter.SetDebugHooks(&qwen3.DebugHooks{
@@ -91,22 +92,18 @@ func main() {
 	engine.Model.ResetCache()
 	logits, err := engine.Model.Forward(ids, 0)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	report.GreedyNext = gogguf.Greedy(logits)
-	report.TopLogits = topLogits(logits, *topN)
+	report.TopLogits = layerTopLogits(logits, *topN)
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(report); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return enc.Encode(report)
 }
 
-func topLogits(logits []float32, n int) []logitMetric {
+func layerTopLogits(logits []float32, n int) []logitMetric {
 	items := make([]logitMetric, len(logits))
 	for i, v := range logits {
 		items[i] = logitMetric{

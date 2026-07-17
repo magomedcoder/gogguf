@@ -12,7 +12,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
-type caseOut struct {
+type layerLogitsCase struct {
 	Name           string          `json:"name"`
 	Input          string          `json:"input,omitempty"`
 	ChatUser       string          `json:"chat_user,omitempty"`
@@ -20,28 +20,31 @@ type caseOut struct {
 	LayerTopLogits [][]debug.Logit `json:"layer_top_logits,omitempty"`
 }
 
-type fileOut struct {
-	Model string    `json:"model"`
-	Cases []caseOut `json:"cases"`
+type layerLogitsFile struct {
+	Model string            `json:"model"`
+	Cases []layerLogitsCase `json:"cases"`
 }
 
-func main() {
-	modelPath := flag.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")
-	prompt := flag.String("p", "Hello", "промпт")
-	chatMode := flag.Bool("chat", false, "chat template")
-	topN := flag.Int("top", 5, "число top logits на слой (0 = только greedy)")
-	flag.Parse()
+// runLayerLogits печатает greedy next и top logits после каждого слоя
+func runLayerLogits(args []string) error {
+	fs := flag.NewFlagSet("layerlogits", flag.ContinueOnError)
+	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")
+	prompt := fs.String("p", "Hello", "промпт")
+	chatMode := fs.Bool("chat", false, "chat template")
+	topN := fs.Int("top", 5, "число top logits на слой (0 = только greedy)")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	ctx, err := engine.NewContext()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	text := *prompt
@@ -52,48 +55,44 @@ func main() {
 			Metadata: engine.Metadata(),
 		})
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
 	}
 
 	ids, err := ctx.EncodeForInference(text)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	layerGreedy := make([]int, 0, 32)
-	var layerTopLogits [][]debug.Logit
+	var layerTop [][]debug.Logit
 
 	onLayer := func(_ int, logits []float32) {
 		layerGreedy = append(layerGreedy, gogguf.Greedy(logits))
 		if *topN > 0 {
-			layerTopLogits = append(layerTopLogits, debug.TopLogits(logits, *topN))
+			layerTop = append(layerTop, debug.TopLogits(logits, *topN))
 		}
 	}
 
 	if !setLayerLogitsHook(engine, onLayer) {
-		fmt.Fprintln(os.Stderr, "модель не поддерживает debug hooks")
-		os.Exit(1)
+		return fmt.Errorf("модель не поддерживает debug hooks")
 	}
 
 	engine.Model.ResetCache()
 	if _, err := engine.Model.Forward(ids, 0); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
-	out := fileOut{
+	out := layerLogitsFile{
 		Model: modelBasename(*modelPath),
-		Cases: []caseOut{{
+		Cases: []layerLogitsCase{{
 			Name:        name,
 			LayerGreedy: layerGreedy,
 		}},
 	}
 
 	if *topN > 0 {
-		out.Cases[0].LayerTopLogits = layerTopLogits
+		out.Cases[0].LayerTopLogits = layerTop
 	}
 
 	if *chatMode {
@@ -104,10 +103,7 @@ func main() {
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(out); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return enc.Encode(out)
 }
 
 func setLayerLogitsHook(engine *gogguf.Engine, onLayer func(int, []float32)) bool {

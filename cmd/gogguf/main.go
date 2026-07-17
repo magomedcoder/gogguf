@@ -24,34 +24,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	var err error
 	switch os.Args[1] {
 	case "inspect":
 		if len(os.Args) != 3 {
 			fmt.Fprintf(os.Stderr, "использование: gogguf inspect файл.gguf\n")
 			os.Exit(1)
 		}
-		if err := runInspect(os.Args[2]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+		err = runInspect(os.Args[2])
 	case "info":
-		if err := runInfo(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+		err = runInfo(os.Args[2:])
 	case "run":
-		if err := runRun(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+		err = runRun(os.Args[2:])
 	case "serve":
-		if err := runServe(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+		err = runServe(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "неизвестная команда: %q\n\n", os.Args[1])
 		fmt.Print(usage)
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
