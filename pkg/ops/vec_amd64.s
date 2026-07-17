@@ -5,7 +5,7 @@
 #include "textflag.h"
 
 // func vecMulInPlaceAVX2Asm(a, b []float32, n int)
-TEXT ·vecMulInPlaceAVX2Asm(SB), NOSPLIT, $0-52
+TEXT ·vecMulInPlaceAVX2Asm(SB), NOSPLIT, $0-56
 	MOVQ  a_base+0(FP), SI
 	MOVQ  b_base+24(FP), DI
 	MOVQ  n+48(FP), CX
@@ -26,7 +26,7 @@ done_mul:
 	RET
 
 // func addInPlaceAVX2Asm(a, b []float32, n int)
-TEXT ·addInPlaceAVX2Asm(SB), NOSPLIT, $0-52
+TEXT ·addInPlaceAVX2Asm(SB), NOSPLIT, $0-56
 	MOVQ  a_base+0(FP), SI
 	MOVQ  b_base+24(FP), DI
 	MOVQ  n+48(FP), CX
@@ -75,7 +75,7 @@ reduce_max:
 	RET
 
 // func vecScaleInPlaceAVX2Asm(x []float32, scale float32, n int)
-TEXT ·vecScaleInPlaceAVX2Asm(SB), NOSPLIT, $0-36
+TEXT ·vecScaleInPlaceAVX2Asm(SB), NOSPLIT, $0-40
 	MOVQ  x_base+0(FP), SI
 	VBROADCASTSS scale+24(FP), Y0
 	MOVQ  n+32(FP), CX

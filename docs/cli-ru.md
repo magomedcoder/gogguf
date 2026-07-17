@@ -32,22 +32,31 @@
 ./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64
 ```
 
-| Флаг               | По умолчанию | Описание                                        |
-|--------------------|--------------|-------------------------------------------------|
-| `-m`               | -            | путь к файлу `.gguf`                            |
-| `-p`               | -            | текст промпта                                   |
-| `-n`               | `128`        | максимум новых токенов                          |
-| `--temp`           | `0`          | температура sampling (`0` = greedy)             |
-| `--top-k`          | `0`          | top-k (`0` = выключено)                         |
-| `--top-p`          | `1`          | nucleus sampling (`1` = выключено)              |
-| `--min-p`          | `0`          | min-p sampling (`0` = выключено)                |
-| `--repeat-penalty` | `1`          | штраф за повтор токенов (`1` = выключено)       |
-| `--repeat-last-n`  | `64`         | окно истории для repeat penalty                 |
-| `--seed`           | `0`          | seed PRNG                                       |
-| `--chat`           | `false`      | обернуть промпт в ChatML/Qwen template          |
-| `--thinking`       | `false`      | режим размышления Qwen3 (с `--chat`)            |
-| `-i`               | `false`      | интерактивный режим (REPL)                      |
-| `-ngl`             | `0`          | matmul N transformer-слоёв на GPU (CUDA-сборка) |
+Скачать с Hugging Face (кэш `~/.cache/huggingface/hub`):
+
+```bash
+./build/gogguf run -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --chat -p "Привет" -n 64
+```
+
+| Флаг                | По умолчанию | Описание                                          |
+|---------------------|--------------|---------------------------------------------------|
+| `-m`                | -            | путь к файлу `.gguf` (взаимоисключающе с `-hf`)   |
+| `-hf` / `--hf-repo` | -            | Hugging Face `owner/repo[:quant]` (скачать + кэш) |
+| `-p`                | -            | текст промпта                                     |
+| `-n`                | `128`        | максимум новых токенов                            |
+| `--temp`            | `0`          | температура sampling (`0` = greedy)               |
+| `--top-k`           | `0`          | top-k (`0` = выключено)                           |
+| `--top-p`           | `1`          | nucleus sampling (`1` = выключено)                |
+| `--min-p`           | `0`          | min-p sampling (`0` = выключено)                  |
+| `--repeat-penalty`  | `1`          | штраф за повтор токенов (`1` = выключено)         |
+| `--repeat-last-n`   | `64`         | окно истории для repeat penalty                   |
+| `--seed`            | `0`          | seed PRNG                                         |
+| `--chat`            | `false`      | обернуть промпт в ChatML/Qwen template            |
+| `--thinking`        | `false`      | режим размышления Qwen3 (с `--chat`)              |
+| `-i`                | `false`      | интерактивный режим (REPL)                        |
+| `-ngl`              | `0`          | matmul N transformer-слоёв на GPU (CUDA-сборка)   |
+
+Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`. Для gated/private: `HF_TOKEN`. Зеркало Hub: `MODEL_ENDPOINT`.
 
 Для **Qwen3 Instruct** используйте `--chat`, иначе модель ответит некорректно.
 
@@ -85,10 +94,17 @@ Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 ./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --addr 127.0.0.1:8000
 ```
 
-| Флаг     | По умолчанию     | Описание                                        |
-|----------|------------------|-------------------------------------------------|
-| `-m`     | -                | путь к файлу `.gguf`                            |
-| `--addr` | `127.0.0.1:8000` | адрес HTTP-сервера                              |
-| `-ngl`   | `0`              | matmul N transformer-слоёв на GPU (CUDA-сборка) |
+Или с Hugging Face:
+
+```bash
+./build/gogguf serve -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --addr 127.0.0.1:8000
+```
+
+| Флаг                | По умолчанию     | Описание                                        |
+|---------------------|------------------|-------------------------------------------------|
+| `-m`                | -                | путь к файлу `.gguf` (взаимоисключающе с `-hf`) |
+| `-hf` / `--hf-repo` | -                | Hugging Face `owner/repo[:quant]`               |
+| `--addr`            | `127.0.0.1:8000` | адрес HTTP-сервера                              |
+| `-ngl`              | `0`              | matmul N transformer-слоёв на GPU (CUDA-сборка) |
 
 Подробнее об эндпоинтах: [HTTP API](api-ru.md).

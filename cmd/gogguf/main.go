@@ -8,11 +8,13 @@ import (
 const usage = `GoGGUF - система запуска GGUF-моделей на Go
 
 Использование:
-  gogguf inspect файл.gguf          просмотр метаданных и тензоров
-  gogguf info -m файл.gguf          краткая информация о модели
-  gogguf run -m файл.gguf -p "..."  генерация текста
-  gogguf run -m файл.gguf -i        интерактивный режим (REPL)
-  gogguf serve -m файл.gguf         HTTP API (SSE streaming)
+  gogguf inspect файл.gguf                    просмотр метаданных и тензоров
+  gogguf info -m файл.gguf                    краткая информация о модели
+  gogguf run -m файл.gguf -p "..."            генерация текста
+  gogguf run -hf owner/repo[:quant] -p "..."  скачать с Hugging Face и запустить
+  gogguf run -m файл.gguf -i                  интерактивный режим (REPL)
+  gogguf serve -m файл.gguf                   HTTP API (SSE streaming)
+  gogguf serve -hf owner/repo[:quant]         HTTP API с моделью с Hugging Face
 `
 
 // main - точка входа CLI gogguf

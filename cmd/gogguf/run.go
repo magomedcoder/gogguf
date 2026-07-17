@@ -15,7 +15,10 @@ import (
 // runRun выполняет генерацию текста
 func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	modelPath := fs.String("m", "", "путь к файлу GGUF")
+	var modelPath, hfRepo string
+	fs.StringVar(&modelPath, "m", "", "путь к файлу GGUF")
+	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], например Qwen/Qwen3-0.6B-GGUF:Q8_0")
+	fs.StringVar(&hfRepo, "hf-repo", "", "алиас -hf")
 	prompt := fs.String("p", "", "текст промпта")
 	maxTokens := fs.Int("n", 128, "максимум новых токенов")
 	temp := fs.Float64("temp", 0, "температура (0 = greedy)")
@@ -34,14 +37,15 @@ func runRun(args []string) error {
 		return err
 	}
 
-	if *modelPath == "" {
-		return fmt.Errorf("использование: gogguf run -m файл.gguf -p \"промпт\" [-n 128] [-i]")
+	path, err := resolveModelPath(modelPath, hfRepo)
+	if err != nil {
+		return fmt.Errorf("%w\nиспользование: gogguf run -m файл.gguf|-hf owner/repo[:quant] -p \"промпт\" [-n 128] [-i]", err)
 	}
 	if !*interactive && *prompt == "" {
 		return fmt.Errorf("укажите промпт через -p или используйте -i")
 	}
 
-	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{
+	engine, err := gogguf.Load(path, gogguf.LoadOptions{
 		NGL: *ngl,
 	})
 	if err != nil {
