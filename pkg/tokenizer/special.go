@@ -19,6 +19,14 @@ func (t *Tokenizer) buildSpecialTokens() {
 		}
 	}
 
+	if len(t.merges) == 0 {
+		for _, tok := range []string{"[INST]", "[/INST]"} {
+			if _, ok := t.id[tok]; ok {
+				special = append(special, tok)
+			}
+		}
+	}
+
 	sort.Slice(special, func(i, j int) bool {
 		return len(special[i]) > len(special[j])
 	})

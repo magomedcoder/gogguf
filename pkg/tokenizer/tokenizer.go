@@ -75,18 +75,27 @@ func loadBPE(r *format.Reader) (*Tokenizer, error) {
 		pt = pretokenizeLlamaBPE
 	}
 
+	byteEnc := len(merges) > 0
+	if preType == "llama-bpe" || preType == "llama3" {
+		byteEnc = true
+	}
+
 	return &Tokenizer{
 		tokens:      tokens,
 		id:          id,
 		merges:      merges,
 		bosID:       r.Metadata.IntOptional("tokenizer.ggml.bos_token_id", -1),
 		eosID:       r.Metadata.IntOptional("tokenizer.ggml.eos_token_id", -1),
-		byteEncode:  true,
+		byteEncode:  byteEnc,
 		pretokenize: pt,
 	}, nil
 }
 
 func (t *Tokenizer) encodeSegment(text string) ([]int, error) {
+	if len(t.merges) == 0 && !t.byteEncode {
+		return t.encodeGreedyVocab(text)
+	}
+
 	var out []int
 	for _, piece := range t.pretokenize(text) {
 		word := piece

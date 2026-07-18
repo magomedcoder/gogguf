@@ -59,6 +59,20 @@ func EmbeddingQ4_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	return quant.DequantQ4_KInto(dst, raw[off:off+rowBytes], dim)
 }
 
+// EmbeddingQ6_KInto деквантизирует embedding-строку в dst
+func EmbeddingQ6_KInto(dst []float32, raw []byte, dim, tokenID int) error {
+	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ6_KSize, quant.QK_K)
+	if err != nil {
+		return err
+	}
+
+	if off+rowBytes > len(raw) {
+		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+	}
+
+	return quant.DequantQ6_KInto(dst, raw[off:off+rowBytes], dim)
+}
+
 // EmbeddingQ8_0 извлекает строку embedding из Q8_0-матрицы [vocab*dim]
 func EmbeddingQ8_0(raw []byte, dim, tokenID int) ([]float32, error) {
 	out := make([]float32, dim)

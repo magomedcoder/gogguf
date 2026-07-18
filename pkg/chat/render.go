@@ -28,6 +28,10 @@ func Render(meta format.Metadata, messages []Message, addGenerationPrompt bool, 
 	ctx := jinjaContext(messages, addGenerationPrompt, opts)
 	out, err := jinja.Render(tmpl, ctx)
 	if err != nil {
+		if isMistralArchitecture(meta) {
+			return formatMistralInstruct(messages, opts), nil
+		}
+
 		if isLlamaArchitecture(meta) {
 			return formatLlama3(messages, opts), nil
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/debug"
 	"github.com/magomedcoder/gogguf/pkg/model/llama"
+	"github.com/magomedcoder/gogguf/pkg/model/mistral"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
@@ -119,6 +120,13 @@ func setLayerLogitsHook(engine *gogguf.Engine, onLayer func(int, []float32)) boo
 		SetDebugHooks(*llama.DebugHooks)
 	}:
 		m.SetDebugHooks(&llama.DebugHooks{
+			OnLayerLogits: onLayer,
+		})
+		return true
+	case interface {
+		SetDebugHooks(*mistral.DebugHooks)
+	}:
+		m.SetDebugHooks(&mistral.DebugHooks{
 			OnLayerLogits: onLayer,
 		})
 		return true

@@ -71,7 +71,11 @@ func needsBOSPrefix(meta format.Metadata, ids []int) bool {
 	}
 
 	arch, err := meta.String("general.architecture")
-	if err != nil || arch != "llama" {
+	if err != nil {
+		return false
+	}
+
+	if arch != "llama" && arch != "mistral" {
 		return false
 	}
 

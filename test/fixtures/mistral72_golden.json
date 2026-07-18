@@ -1,0 +1,80 @@
+{
+  "model": "Mistral-7B-Instruct-v0.2-Q4_K_M",
+  "cases": [
+    {
+      "name": "encode_hello",
+      "input": "Hello",
+      "encode": [
+        16230
+      ]
+    },
+    {
+      "name": "raw_hello_greedy",
+      "input": "Hello",
+      "greedy_next": 8817,
+      "top_logits": [
+        {
+          "id": 8817,
+          "logit": 161.13416
+        },
+        {
+          "id": 6588,
+          "logit": 160.36752
+        },
+        {
+          "id": 1987,
+          "logit": 144.7228
+        },
+        {
+          "id": 4595,
+          "logit": 142.11826
+        },
+        {
+          "id": 5104,
+          "logit": 141.75104
+        }
+      ]
+    },
+    {
+      "name": "chat_hello_greedy",
+      "chat_user": "Hello",
+      "greedy_next": 6588,
+      "top_logits": [
+        {
+          "id": 6588,
+          "logit": 160.77608
+        },
+        {
+          "id": 8817,
+          "logit": 160.34186
+        },
+        {
+          "id": 1987,
+          "logit": 148.14601
+        },
+        {
+          "id": 4623,
+          "logit": 137.89551
+        },
+        {
+          "id": 3814,
+          "logit": 137.73872
+        }
+      ]
+    },
+    {
+      "name": "chat_greedy_8",
+      "chat_user": "Hello",
+      "greedy_tokens": [
+        6588,
+        6588,
+        6588,
+        6588,
+        6588,
+        6588,
+        6588
+      ],
+      "max_tokens": 7
+    }
+  ]
+}

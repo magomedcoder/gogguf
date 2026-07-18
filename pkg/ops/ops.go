@@ -247,6 +247,47 @@ func matMulVecQ4_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
+// MatMulVecQ6_KInto записывает Q6_K matmul в out [rows]
+func MatMulVecQ6_KInto(raw []byte, rows, cols int, vec, out []float32) error {
+	if len(vec) != cols {
+		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	if cols%quant.QK_K != 0 {
+		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK_K)
+	}
+
+	blocksPerRow := cols / quant.QK_K
+	want := rows * blocksPerRow * quant.BlockQ6_KSize
+	if len(raw) < want {
+		return fmt.Errorf("ops: Q6_K matrix слишком короткая")
+	}
+
+	if len(out) < rows {
+		return fmt.Errorf("ops: out слишком короткий")
+	}
+
+	parallelForRows(rows, func(rowStart, rowEnd int) {
+		matMulVecQ6_KRows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	})
+
+	return nil
+}
+
+func matMulVecQ6_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) {
+	for r := rowStart; r < rowEnd; r++ {
+		var sum float32
+		rowOff := r * blocksPerRow * quant.BlockQ6_KSize
+		for b := range blocksPerRow {
+			block := raw[rowOff+b*quant.BlockQ6_KSize:]
+			vecOff := b * quant.QK_K
+			dot, _ := quant.DotBlockQ6_K(block, vec[vecOff:vecOff+quant.QK_K])
+			sum += dot
+		}
+		out[r] = sum
+	}
+}
+
 // RMSNorm применяет RMS-нормализацию: x * weight / RMS(x)
 func RMSNorm(x, weight []float32, eps float32) ([]float32, error) {
 	return rmsnorm(x, weight, eps)

@@ -15,10 +15,10 @@ Optional: **CUDA** via Driver API (`libcuda.so`, build with `-tags cuda`, CGO).
 ## What works today
 
 - GGUF v2/v3 parsing (`info`, `inspect`), memory-map (`LoadMapped`, zero-copy `RawView`);
-- dequantization and matmul: Q8_0, Q4_0, Q4_K;
+- dequantization and matmul: Q8_0, Q4_0, Q4_K, Q6_K;
 - basic ops: RoPE, RMSNorm, GQA attention, SwiGLU;
 - **SIMD** FP32 matmul: AVX2 (amd64), NEON (arm64); Q8_0 dot: AVX2 (amd64);
-- **Qwen3** and **Llama 3** forward pass + KV-cache;
+- **Qwen3**, **Llama 3**, and **Mistral** forward pass + KV-cache;
 - BPE tokenizer from GGUF metadata;
 - ChatML/Qwen and Jinja chat templates (`--chat`, `--thinking`, `FormatChatUser`);
 - text generation: `gguf run` (greedy / temperature / top-k / top-p / min-p / repeat penalty);
@@ -27,8 +27,8 @@ Optional: **CUDA** via Driver API (`libcuda.so`, build with `-tags cuda`, CGO).
 
 ## Models
 
-**Works:** Qwen3, Llama 3
-**Soon:** Llama 2, Mistral, Phi, Gemma
+**Works:** Qwen3, Llama 3, Mistral
+**Soon:** Llama 2, Phi, Gemma
 
 Details: [docs/models.md](docs/models.md).
 

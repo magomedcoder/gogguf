@@ -78,6 +78,10 @@ func FormatUser(user string, opts Options) (string, error) {
 		}
 	}
 
+	if isMistralArchitecture(opts.Metadata) {
+		return formatMistralInstruct(msgs, opts), nil
+	}
+
 	if isLlamaArchitecture(opts.Metadata) {
 		return formatLlama3(msgs, opts), nil
 	}
