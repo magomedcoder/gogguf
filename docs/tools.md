@@ -20,26 +20,33 @@ go run ./cmd/tools vocab ./models/Qwen3-0.6B-Q8_0.gguf
 
 ## `bench`
 
-Measures inference speed: TTFT, prefill/decode tok/s.
+Measures inference speed: TTFT, prefill/decode tok/s. Use `--compare` for CPU vs GPU.
 
 ```bash
-go build -o build/tools ./cmd/tools
+# build with CUDA
+CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 
 ./build/tools bench -m ./models/Qwen3-0.6B-Q8_0.gguf -p "Hello" -n 128 --chat
 
 ./build/tools bench -m model.gguf -p "Hello" -n 64 -ngl 28 --runs 3 --json
+
+./build/tools bench -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 32 --compare -c 2048 --runs 2 --warmup 1
 ```
 
-| Flag       | Default | Description        |
-|------------|---------|--------------------|
-| `-m`       | -       | path to `.gguf`    |
-| `-p`       | `Hello` | prompt             |
-| `-n`       | `128`   | decode token count |
-| `-ngl`     | `0`     | GPU offload (CUDA) |
-| `--chat`   | `false` | chat template      |
-| `--runs`   | `1`     | runs to average    |
-| `--warmup` | `1`     | warmup runs        |
-| `--json`   | `false` | JSON output        |
+| Flag        | Default | Description                                          |
+|-------------|---------|------------------------------------------------------|
+| `-m`        | -       | path to `.gguf`                                      |
+| `-p`        | `Hello` | prompt                                               |
+| `-n`        | `128`   | decode token count                                   |
+| `-ngl`      | `0`     | GPU offload (CUDA); with `--compare`, 0 = all layers |
+| `-c`        | `0`     | max GPU KV length (0 = auto, up to 4096)             |
+| `--chat`    | `false` | chat template                                        |
+| `--runs`    | `1`     | runs to average                                      |
+| `--warmup`  | `1`     | warmup runs                                          |
+| `--json`    | `false` | JSON output                                          |
+| `--compare` | `false` | CPU (`ngl=0`) vs GPU (`-ngl`)                        |
+
+`--compare` prints a prefill/decode tok/s table and whether GPU decode is faster than CPU.
 
 ## `greedy`
 

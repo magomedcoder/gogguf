@@ -139,6 +139,7 @@ typedef struct {
 	int out_cap;
 	CUstream stream;
 	gguf_matmul_graph_entry_t *graphs;
+	int skip_vec_htod; // 1 = vec уже на GPU (задаётся из Go)
 } gguf_matmul_pool_t;
 
 // gguf_cuda_init загружает libcuda.so и создаёт контекст на GPU 0

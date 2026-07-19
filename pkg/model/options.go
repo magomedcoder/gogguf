@@ -4,8 +4,9 @@ import "github.com/magomedcoder/gogguf/pkg/gpu"
 
 // Options задаёт параметры загрузки модели
 type Options struct {
-	NGL int         // число transformer-слоёв для offload на GPU (-ngl)
-	GPU gpu.Backend // backend; если nil и NGL > 0, будет попытка OpenCUDA()
+	NGL       int         // число transformer-слоёв для offload на GPU (-ngl)
+	GPUMaxSeq int         // макс. длина KV на GPU (0 = min(context, 4096))
+	GPU       gpu.Backend // backend; если nil и NGL > 0, будет попытка OpenCUDA()
 }
 
 // Normalize проверяет опции и при необходимости открывает CUDA

@@ -31,14 +31,14 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 
 	switch arch {
 	case "qwen3":
-		return qwen3.Load(store, opts.GPU, opts.NGL)
+		return qwen3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "mistral":
-		return mistral.Load(store, opts.GPU, opts.NGL)
+		return mistral.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "llama":
 		if isMistralModel(r) {
-			return mistral.LoadLlamaMeta(store, opts.GPU, opts.NGL)
+			return mistral.LoadLlamaMeta(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 		}
-		return llama.Load(store, opts.GPU, opts.NGL)
+		return llama.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	default:
 		return nil, fmt.Errorf("model: архитектура %q не поддерживается", arch)
 	}

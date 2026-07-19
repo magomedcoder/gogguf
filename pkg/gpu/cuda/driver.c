@@ -766,6 +766,7 @@ static int gguf_cuda_matmul_pool_ensure(cuda_driver_t *drv, gguf_matmul_pool_t *
 	}
 
 	gguf_cuda_matmul_clear_graphs(drv, pool);
+	pool->skip_vec_htod = 0;
 
 	if (cols > pool->vec_cap) {
 		CUdeviceptr d_vec = 0;
@@ -912,9 +913,15 @@ static int gguf_cuda_matmul_run_pooled(cuda_driver_t *drv, CUcontext ctx, CUfunc
 
 	size_t vec_bytes = (size_t)cols * sizeof(float);
 	size_t out_bytes = (size_t)rows * sizeof(float);
-	memcpy(pool->h_vec, vec, vec_bytes);
 
-	if (use_graph && drv->has_graphs && pool->stream) {
+	int same_vec = pool->skip_vec_htod;
+	pool->skip_vec_htod = 0;
+	if (!same_vec) {
+		memcpy(pool->h_vec, vec, vec_bytes);
+	}
+
+	// CUDA Graph включает HtoD - при повторном том же vec идём в kernel-only путь
+	if (use_graph && drv->has_graphs && pool->stream && !same_vec) {
 		gguf_matmul_graph_entry_t *entry = gguf_cuda_matmul_find_graph(pool, d_matrix, rows, cols, is_q8);
 		if (!entry) {
 			CUgraphExec exec = NULL;
@@ -954,8 +961,10 @@ fallback:
 		CUdeviceptr d_vec = pool->d_vec;
 		CUdeviceptr d_out = pool->d_out;
 
-		if (drv->cuMemcpyHtoD(d_vec, pool->h_vec, vec_bytes) != CUDA_SUCCESS) {
-			return -3;
+		if (!same_vec) {
+			if (drv->cuMemcpyHtoD(d_vec, pool->h_vec, vec_bytes) != CUDA_SUCCESS) {
+				return -3;
+			}
 		}
 
 		void *params[5];

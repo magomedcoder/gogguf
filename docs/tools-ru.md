@@ -20,33 +20,40 @@ go run ./cmd/tools vocab ./models/Qwen3-0.6B-Q8_0.gguf
 
 ## `bench`
 
-Замер скорости inference: TTFT, prefill/decode tok/s.
+Замер скорости inference: TTFT, prefill/decode tok/s. Режим `--compare` - CPU vs GPU.
 
 ```bash
-go build -o build/tools ./cmd/tools
+# сборка с CUDA
+CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 
 ./build/tools bench -m ./models/Qwen3-0.6B-Q8_0.gguf -p "Привет" -n 128 --chat
 
 ./build/tools bench -m model.gguf -p "Привет" -n 64 -ngl 28 --runs 3 --json
+
+./build/tools bench -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 32 --compare -c 2048 --runs 2 --warmup 1
 ```
 
-| Флаг       | По умолчанию | Описание                |
-|------------|--------------|-------------------------|
-| `-m`       | -            | путь к `.gguf`          |
-| `-p`       | `Привет`     | промпт                  |
-| `-n`       | `128`        | число decode-токенов    |
-| `-ngl`     | `0`          | GPU offload (CUDA)      |
-| `--chat`   | `false`      | chat template           |
-| `--runs`   | `1`          | прогонов для усреднения |
-| `--warmup` | `1`          | прогревочных прогонов   |
-| `--json`   | `false`      | вывод в JSON            |
+| Флаг        | По умолчанию | Описание                                         |
+|-------------|--------------|--------------------------------------------------|
+| `-m`        | -            | путь к `.gguf`                                   |
+| `-p`        | `Привет`     | промпт                                           |
+| `-n`        | `128`        | число decode-токенов                             |
+| `-ngl`      | `0`          | GPU offload (CUDA); при `--compare` 0 = все слои |
+| `-c`        | `0`          | макс. длина GPU KV (0 = авто, до 4096)           |
+| `--chat`    | `false`      | chat template                                    |
+| `--runs`    | `1`          | прогонов для усреднения                          |
+| `--warmup`  | `1`          | прогревочных прогонов                            |
+| `--json`    | `false`      | вывод в JSON                                     |
+| `--compare` | `false`      | CPU (`ngl=0`) vs GPU (`-ngl`)                    |
+
+`--compare` печатает таблицу prefill/decode tok/s и флаг `GPU decode быстрее CPU`.
 
 ## `greedy`
 
 Greedy decode N токенов в JSON (token IDs) для сверки с golden.
 
 ```bash
-go run ./cmd/tools greedy -m models/Qwen3-0.6B-Q8_0.gguf --chat "Hello" -n 50
+go run ./cmd/tools greedy -m models/Qwen3-0.6B-Q8_0.gguf --chat "Привет" -n 50
 ```
 
 ## `debuglayers`
@@ -62,5 +69,5 @@ go run ./cmd/tools debuglayers -m ./models/Qwen3-0.6B-Q8_0.gguf -p "Привет
 Greedy next и top-k logits по слоям (генератор JSON fixture).
 
 ```bash
-go run ./cmd/tools layerlogits -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -top 5
+go run ./cmd/tools layerlogits -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -top 5
 ```

@@ -53,13 +53,15 @@ type Backend struct {
 	hasAttn     bool
 	hasGraphs   bool
 
-	mu         sync.Mutex
-	matrices   map[string]gpuMatrix
-	matricesQ8 map[string]gpuQ8Matrix
-	kvCache    C.gguf_kv_cache_t
-	kvReady    bool
-	attnPool   C.gguf_attn_pool_t
-	matmulPool C.gguf_matmul_pool_t
+	mu          sync.Mutex
+	matrices    map[string]gpuMatrix
+	matricesQ8  map[string]gpuQ8Matrix
+	kvCache     C.gguf_kv_cache_t
+	kvReady     bool
+	attnPool    C.gguf_attn_pool_t
+	matmulPool  C.gguf_matmul_pool_t
+	lastVecAddr uintptr
+	lastVecLen  int
 }
 
 // Open инициализирует GPU 0 и загружает kernels
@@ -225,6 +227,8 @@ func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int,
 		if ok {
 			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
 			C.gguf_cuda_free(&b.drv, gm.ptr)
+			b.lastVecAddr = 0
+			b.lastVecLen = 0
 		}
 
 		var ptr C.CUdeviceptr
@@ -242,6 +246,7 @@ func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int,
 	}
 
 	out := make([]float32, rows)
+	b.prepareVecUpload(vec)
 	rc := C.gguf_cuda_matmul_vec_device(
 		&b.drv,
 		b.ctx,
@@ -273,6 +278,8 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 		if ok {
 			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
 			C.gguf_cuda_free(&b.drv, gm.ptr)
+			b.lastVecAddr = 0
+			b.lastVecLen = 0
 		}
 
 		var ptr C.CUdeviceptr
@@ -295,6 +302,7 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 	}
 
 	out := make([]float32, rows)
+	b.prepareVecUpload(vec)
 	rc := C.gguf_cuda_matmul_vec_q8_0_device(
 		&b.drv,
 		b.ctx,
@@ -311,6 +319,19 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 	}
 
 	return out, nil
+}
+
+// prepareVecUpload помечает пропуск HtoD, если тот же host-vec уже на GPU (Q/K/V из одного h)
+func (b *Backend) prepareVecUpload(vec []float32) {
+	addr := uintptr(unsafe.Pointer(&vec[0]))
+	if addr == b.lastVecAddr && len(vec) == b.lastVecLen {
+		b.matmulPool.skip_vec_htod = 1
+		return
+	}
+
+	b.matmulPool.skip_vec_htod = 0
+	b.lastVecAddr = addr
+	b.lastVecLen = len(vec)
 }
 
 func (b *Backend) RMSNormInto(dst, x, weight []float32, eps float32) error {

@@ -16,6 +16,7 @@ type Model struct {
 	cache        *KVCache
 	gpu          gpu.Backend
 	ngl          int
+	gpuMaxSeq    int
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
@@ -25,16 +26,16 @@ type Model struct {
 }
 
 // Load создаёт Mistral из весов (префикс mistral.*)
-func Load(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
-	return loadWithConfig(w, g, ngl, ParseConfig)
+func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfig)
 }
 
 // LoadLlamaMeta создаёт Mistral из GGUF с general.architecture=llama (TheBloke, convert.py)
-func LoadLlamaMeta(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
-	return loadWithConfig(w, g, ngl, ParseConfigLlama)
+func LoadLlamaMeta(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfigLlama)
 }
 
-func loadWithConfig(w *weights.Store, g gpu.Backend, ngl int, parse func(*format.Reader) (Config, error)) (*Model, error) {
+func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int, parse func(*format.Reader) (Config, error)) (*Model, error) {
 	cfg, err := parse(w.Reader())
 	if err != nil {
 		return nil, err
@@ -60,6 +61,7 @@ func loadWithConfig(w *weights.Store, g gpu.Backend, ngl int, parse func(*format
 		cache:        NewKVCache(cfg),
 		gpu:          g,
 		ngl:          ngl,
+		gpuMaxSeq:    gpuMaxSeq,
 		scratch:      newScratch(cfg),
 		layerNorms:   layerNorms,
 		layerTensors: loadLayerTensors(cfg.NumLayers),
@@ -80,7 +82,9 @@ func (m *Model) initGPUKVCache() error {
 	}
 
 	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
-	return m.gpu.KVCacheInit(m.ngl, m.cfg.ContextLength, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
+	maxSeq := gpu.CapMaxSeq(m.cfg.ContextLength, m.gpuMaxSeq)
+
+	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
 // Config возвращает конфигурацию модели

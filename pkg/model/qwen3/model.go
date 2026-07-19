@@ -16,6 +16,7 @@ type Model struct {
 	cache        *KVCache
 	gpu          gpu.Backend
 	ngl          int
+	gpuMaxSeq    int
 	debug        *DebugHooks
 	scratch      scratch
 	layerNorms   []layerNorms
@@ -25,7 +26,7 @@ type Model struct {
 }
 
 // Load создаёт Qwen3 из весов
-func Load(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
+func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
@@ -51,6 +52,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl int) (*Model, error) {
 		cache:        NewKVCache(cfg),
 		gpu:          g,
 		ngl:          ngl,
+		gpuMaxSeq:    gpuMaxSeq,
 		scratch:      newScratch(cfg),
 		layerNorms:   layerNorms,
 		layerTensors: loadLayerTensors(cfg.NumLayers),
@@ -71,7 +73,8 @@ func (m *Model) initGPUKVCache() error {
 	}
 
 	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
-	return m.gpu.KVCacheInit(m.ngl, m.cfg.ContextLength, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
+	maxSeq := gpu.CapMaxSeq(m.cfg.ContextLength, m.gpuMaxSeq)
+	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
 // Config возвращает конфигурацию модели
