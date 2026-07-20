@@ -42,6 +42,38 @@ func (CPUBackend) SwiGLUInPlace(gate, up []float32) error {
 	return nil
 }
 
+func (CPUBackend) FFNSwiGLUCached(_, _, _ string, gateW, upW, downW, x, out []float32, embd, ffn int) error {
+	gate := make([]float32, ffn)
+	if err := ops.MatMulVecInto(gateW, ffn, embd, x, gate); err != nil {
+		return err
+	}
+
+	up := make([]float32, ffn)
+	if err := ops.MatMulVecInto(upW, ffn, embd, x, up); err != nil {
+		return err
+	}
+
+	ops.SwiGLUInPlace(gate, up)
+
+	return ops.MatMulVecInto(downW, embd, ffn, gate, out)
+}
+
+func (CPUBackend) FFNSwiGLUQ8_0Cached(_, _, _ string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
+	gate := make([]float32, ffn)
+	if err := ops.MatMulVecQ8_0Into(gateRaw, ffn, embd, x, gate); err != nil {
+		return err
+	}
+
+	up := make([]float32, ffn)
+	if err := ops.MatMulVecQ8_0Into(upRaw, ffn, embd, x, up); err != nil {
+		return err
+	}
+
+	ops.SwiGLUInPlace(gate, up)
+
+	return ops.MatMulVecQ8_0Into(downRaw, embd, ffn, gate, out)
+}
+
 func (CPUBackend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim)
 }

@@ -46,11 +46,13 @@ type Backend struct {
 	fnSwiGLU    C.CUfunction
 	fnAttnQK    C.CUfunction
 	fnAttnV     C.CUfunction
+	fnSoftmax   C.CUfunction
 	hasRMS      bool
 	hasRoPE     bool
 	hasRoPENorm bool
 	hasSwiGLU   bool
 	hasAttn     bool
+	hasSoftmax  bool
 	hasGraphs   bool
 
 	mu          sync.Mutex
@@ -149,6 +151,12 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 			}
 			C.free(unsafe.Pointer(cAttnQK))
 			C.free(unsafe.Pointer(cAttnV))
+
+			cSoftmax := C.CString("softmax")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cSoftmax, &b.fnSoftmax) == 0 {
+				b.hasSoftmax = true
+			}
+			C.free(unsafe.Pointer(cSoftmax))
 
 			return nil
 		}
@@ -321,6 +329,184 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 	return out, nil
 }
 
+func (b *Backend) ensureFP32Matrix(name string, matrix []float32, rows, cols int) (gpuMatrix, error) {
+	gm, ok := b.matrices[name]
+	if ok && gm.rows == rows && gm.cols == cols {
+		return gm, nil
+	}
+
+	if ok {
+		C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
+		C.gguf_cuda_free(&b.drv, gm.ptr)
+		b.lastVecAddr = 0
+		b.lastVecLen = 0
+	}
+
+	var ptr C.CUdeviceptr
+	rc := C.gguf_cuda_upload_matrix(
+		&b.drv,
+		b.ctx,
+		&ptr,
+		(*C.float)(unsafe.Pointer(&matrix[0])),
+		C.int(rows),
+		C.int(cols),
+	)
+	if rc != 0 {
+		return gpuMatrix{}, fmt.Errorf("cuda: upload matrix %q: код %d", name, int(rc))
+	}
+
+	gm = gpuMatrix{
+		ptr:  ptr,
+		rows: rows,
+		cols: cols,
+	}
+	b.matrices[name] = gm
+
+	return gm, nil
+}
+
+func (b *Backend) ensureQ8Matrix(name string, raw []byte, rows, cols int) (gpuQ8Matrix, error) {
+	gm, ok := b.matricesQ8[name]
+	if ok && gm.rows == rows && gm.cols == cols && gm.bytes == len(raw) {
+		return gm, nil
+	}
+
+	if ok {
+		C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
+		C.gguf_cuda_free(&b.drv, gm.ptr)
+		b.lastVecAddr = 0
+		b.lastVecLen = 0
+	}
+
+	var ptr C.CUdeviceptr
+	rc := C.gguf_cuda_upload_q8_0(
+		&b.drv,
+		b.ctx,
+		&ptr,
+		unsafe.Pointer(&raw[0]),
+		C.size_t(len(raw)),
+	)
+	if rc != 0 {
+		return gpuQ8Matrix{}, fmt.Errorf("cuda: upload q8_0 %q: код %d", name, int(rc))
+	}
+
+	gm = gpuQ8Matrix{
+		ptr:   ptr,
+		rows:  rows,
+		cols:  cols,
+		bytes: len(raw),
+	}
+	b.matricesQ8[name] = gm
+
+	return gm, nil
+}
+
+func (b *Backend) FFNSwiGLUCached(gateName, upName, downName string, gateW, upW, downW, x, out []float32, embd, ffn int) error {
+	if !b.hasSwiGLU {
+		return fmt.Errorf("cuda: SwiGLU kernel недоступен")
+	}
+
+	if len(x) < embd || len(out) < embd {
+		return fmt.Errorf("cuda: FFNSwiGLUCached: короткий x/out")
+	}
+
+	if len(gateW) < ffn*embd || len(upW) < ffn*embd || len(downW) < embd*ffn {
+		return fmt.Errorf("cuda: FFNSwiGLUCached: короткие веса")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gateM, err := b.ensureFP32Matrix(gateName, gateW, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	upM, err := b.ensureFP32Matrix(upName, upW, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	downM, err := b.ensureFP32Matrix(downName, downW, embd, ffn)
+	if err != nil {
+		return err
+	}
+
+	b.prepareVecUpload(x)
+	rc := C.gguf_cuda_ffn_swiglu_device(
+		&b.drv,
+		b.ctx,
+		b.fn,
+		b.fnSwiGLU,
+		&b.matmulPool,
+		gateM.ptr,
+		upM.ptr,
+		downM.ptr,
+		(*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&out[0])),
+		C.int(embd),
+		C.int(ffn),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: ffn_swiglu: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) FFNSwiGLUQ8_0Cached(gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
+	if !b.hasSwiGLU {
+		return fmt.Errorf("cuda: SwiGLU kernel недоступен")
+	}
+
+	if len(x) < embd || len(out) < embd {
+		return fmt.Errorf("cuda: FFNSwiGLUQ8_0Cached: короткий x/out")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gateM, err := b.ensureQ8Matrix(gateName, gateRaw, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	upM, err := b.ensureQ8Matrix(upName, upRaw, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	downM, err := b.ensureQ8Matrix(downName, downRaw, embd, ffn)
+	if err != nil {
+		return err
+	}
+
+	b.prepareVecUpload(x)
+	rc := C.gguf_cuda_ffn_swiglu_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ8,
+		b.fnSwiGLU,
+		&b.matmulPool,
+		gateM.ptr,
+		upM.ptr,
+		downM.ptr,
+		(*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&out[0])),
+		C.int(embd),
+		C.int(ffn),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: ffn_swiglu q8: код %d", int(rc))
+	}
+
+	return nil
+}
+
 // prepareVecUpload помечает пропуск HtoD, если тот же host-vec уже на GPU (Q/K/V из одного h)
 func (b *Backend) prepareVecUpload(vec []float32) {
 	addr := uintptr(unsafe.Pointer(&vec[0]))
@@ -464,11 +650,16 @@ func (b *Backend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nH
 		return fmt.Errorf("cuda: AttentionScoresInto: k/v слишком короткие")
 	}
 
+	fnSM := b.fnSoftmax
+	if !b.hasSoftmax {
+		fnSM = nil
+	}
 	rc := C.gguf_cuda_attention(
 		&b.drv,
 		b.ctx,
 		b.fnAttnQK,
 		b.fnAttnV,
+		fnSM,
 		(*C.float)(unsafe.Pointer(&dst[0])),
 		(*C.float)(unsafe.Pointer(&q[0])),
 		(*C.float)(unsafe.Pointer(&k[0])),
@@ -567,11 +758,16 @@ func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads,
 		return fmt.Errorf("cuda: kv cache не инициализирован")
 	}
 
+	fnSM := b.fnSoftmax
+	if !b.hasSoftmax {
+		fnSM = nil
+	}
 	rc := C.gguf_cuda_kv_attention(
 		&b.drv,
 		b.ctx,
 		b.fnAttnQK,
 		b.fnAttnV,
+		fnSM,
 		&b.kvCache,
 		&b.attnPool,
 		C.int(layer),

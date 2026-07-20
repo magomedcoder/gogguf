@@ -129,14 +129,16 @@ typedef struct gguf_matmul_graph_entry {
 	struct gguf_matmul_graph_entry *next;
 } gguf_matmul_graph_entry_t;
 
-// gguf_matmul_pool_t - переиспользуемые d_vec/d_out + host staging + CUDA Graph cache
+// gguf_matmul_pool_t - переиспользуемые d_vec/d_out/d_aux + host staging + CUDA Graph cache
 typedef struct {
 	CUdeviceptr d_vec;
 	CUdeviceptr d_out;
+	CUdeviceptr d_aux; // вторая активация (FFN up)
 	float *h_vec;
 	float *h_out;
 	int vec_cap;
 	int out_cap;
+	int aux_cap;
 	CUstream stream;
 	gguf_matmul_graph_entry_t *graphs;
 	int skip_vec_htod; // 1 = vec уже на GPU (задаётся из Go)
@@ -182,6 +184,9 @@ int gguf_cuda_upload_q8_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matr
 // gguf_cuda_matmul_vec_q8_0_device matmul Q8_0 с весами уже на GPU
 int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
+// gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down, активации на GPU (1* HtoD + 1* DtoH)
+int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
+
 // gguf_cuda_rmsnorm RMSNorm на GPU
 int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *x, const float *weight, float *out, int n, float eps);
 
@@ -194,8 +199,8 @@ int gguf_cuda_swiglu(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, float *ga
 // gguf_cuda_module_function получает функцию из уже загруженного модуля
 int gguf_cuda_module_function(cuda_driver_t *drv, CUmodule module, const char *name, CUfunction *fn_out);
 
-// gguf_cuda_attention scaled dot-product attention (softmax на CPU для точности)
-int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, float *dst, const float *q, const float *k, const float *v, int seq_len, int n_heads, int n_kv_heads, int head_dim);
+// gguf_cuda_attention scaled dot-product attention (fn_softmax на GPU; NULL = host softmax)
+int gguf_cuda_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, float *dst, const float *q, const float *k, const float *v, int seq_len, int n_heads, int n_kv_heads, int head_dim);
 
 typedef struct {
 	CUdeviceptr d_k;
@@ -227,7 +232,7 @@ void gguf_cuda_kv_free(cuda_driver_t *drv, gguf_kv_cache_t *cache);
 int gguf_cuda_kv_append(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int pos, const float *k, const float *v);
 
 // gguf_cuda_kv_attention attention с K/V уже на GPU
-int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, gguf_kv_cache_t *cache, gguf_attn_pool_t *pool, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim);
+int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, gguf_kv_cache_t *cache, gguf_attn_pool_t *pool, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim);
 
 // gguf_cuda_attn_pool_init выделяет переиспользуемые буферы attention
 int gguf_cuda_attn_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_attn_pool_t *pool, int q_elems, int max_seq);

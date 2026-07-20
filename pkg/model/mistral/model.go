@@ -243,6 +243,13 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.ffnGPU(lt, m.scratch.h, m.scratch.h); err == nil {
+			ops.AddInPlace(m.scratch.x, m.scratch.h)
+			return nil
+		}
+	}
+
 	if err := m.matmulInto(lt.ffnGate, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.gate, layer); err != nil {
 		return err
 	}
@@ -258,6 +265,50 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 	ops.AddInPlace(m.scratch.x, m.scratch.h)
 	return nil
+}
+
+func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {
+	info, err := m.weights.Info(lt.ffnGate)
+	if err != nil {
+		return err
+	}
+
+	embd, ffn := m.cfg.EmbeddingDim, m.cfg.FFNHidden
+	if info.Type == format.GgmlQ8_0 {
+		gateRaw, err := m.weights.Raw(lt.ffnGate)
+		if err != nil {
+			return err
+		}
+
+		upRaw, err := m.weights.Raw(lt.ffnUp)
+		if err != nil {
+			return err
+		}
+
+		downRaw, err := m.weights.Raw(lt.ffnDown)
+		if err != nil {
+			return err
+		}
+
+		return m.gpu.FFNSwiGLUQ8_0Cached(lt.ffnGate, lt.ffnUp, lt.ffnDown, gateRaw, upRaw, downRaw, x, out, embd, ffn)
+	}
+
+	gateW, err := m.weights.Floats(lt.ffnGate)
+	if err != nil {
+		return err
+	}
+
+	upW, err := m.weights.Floats(lt.ffnUp)
+	if err != nil {
+		return err
+	}
+
+	downW, err := m.weights.Floats(lt.ffnDown)
+	if err != nil {
+		return err
+	}
+
+	return m.gpu.FFNSwiGLUCached(lt.ffnGate, lt.ffnUp, lt.ffnDown, gateW, upW, downW, x, out, embd, ffn)
 }
 
 // attentionKV возвращает K/V для attention с учётом sliding window
@@ -384,21 +435,12 @@ func (m *Model) logitsFromHidden(x []float32) error {
 }
 
 func (m *Model) rmsNormInto(dst, x, weight []float32, layer int) error {
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		if err := m.gpu.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps); err == nil {
-			return nil
-		}
-	}
-
+	_ = layer
 	return ops.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps)
 }
 
 func (m *Model) applyRoPEHeads(v []float32, nHeads, pos, layer int) {
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		if err := m.gpu.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase); err == nil {
-			return
-		}
-	}
+	_ = layer
 	ops.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
 }
 

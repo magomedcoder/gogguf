@@ -28,7 +28,7 @@ CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
 
 `-ngl N` - offload the first N transformer layers to GPU (max `block_count`; Qwen3-0.6B - 28).
 
-On GPU: matmul (Q8_0 and FP32), RMSNorm, RoPE, attention, SwiGLU.
+On GPU: matmul (Q8_0 and FP32), FFN residency (gate/up/SwiGLU/down), attention (+ softmax), KV-cache. RMSNorm/RoPE stay on CPU (PCIe).
 
 Blackwell (sm_120, RTX 50xx): requires PTX 8.7+; Q8_0 scales are converted to FP32 on upload (no PTX f16).
 

@@ -600,4 +600,78 @@ AV_DONE:
 AV_EXIT:
     ret;
 }
+
+// softmax - однопоточный softmax in-place для буфера scores (decode: seq короткий)
+.visible .entry softmax(
+    .param .u64 param_x,
+    .param .u32 param_n
+)
+{
+    .reg .pred      %p<3>;
+    .reg .b32       %r<8>;
+    .reg .b64       %rd<8>;
+    .reg .f32       %f<16>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    or.b32          %r3, %r1, %r2;
+    setp.ne.u32     %p0, %r3, 0;
+    @%p0            bra SM_EXIT;
+
+    ld.param.u32    %r4, [param_n];
+    setp.eq.u32     %p1, %r4, 0;
+    @%p1            bra SM_EXIT;
+
+    ld.param.u64    %rd1, [param_x];
+    ld.global.f32   %f1, [%rd1];
+    mov.u32         %r5, 1;
+
+SM_MAX:
+    setp.ge.u32     %p2, %r5, %r4;
+    @%p2            bra SM_EXP;
+    mul.wide.u32    %rd2, %r5, 4;
+    add.u64         %rd3, %rd1, %rd2;
+    ld.global.f32   %f2, [%rd3];
+    max.f32         %f1, %f1, %f2;
+    add.u32         %r5, %r5, 1;
+    bra SM_MAX;
+
+SM_EXP:
+    mov.f32         %f3, 0f00000000;
+    mov.u32         %r5, 0;
+
+SM_EXP_LOOP:
+    setp.ge.u32     %p2, %r5, %r4;
+    @%p2            bra SM_NORM;
+    mul.wide.u32    %rd2, %r5, 4;
+    add.u64         %rd3, %rd1, %rd2;
+    ld.global.f32   %f2, [%rd3];
+    sub.f32         %f4, %f2, %f1;
+    mov.f32         %f5, 0f3fb8aa3b;
+    mul.f32         %f4, %f4, %f5;
+    ex2.approx.f32  %f4, %f4;
+    st.global.f32   [%rd3], %f4;
+    add.f32         %f3, %f3, %f4;
+    add.u32         %r5, %r5, 1;
+    bra SM_EXP_LOOP;
+
+SM_NORM:
+    mov.f32         %f6, 0f3f800000;
+    div.rn.f32      %f6, %f6, %f3;
+    mov.u32         %r5, 0;
+
+SM_NORM_LOOP:
+    setp.ge.u32     %p2, %r5, %r4;
+    @%p2            bra SM_EXIT;
+    mul.wide.u32    %rd2, %r5, 4;
+    add.u64         %rd3, %rd1, %rd2;
+    ld.global.f32   %f2, [%rd3];
+    mul.f32         %f2, %f2, %f6;
+    st.global.f32   [%rd3], %f2;
+    add.u32         %r5, %r5, 1;
+    bra SM_NORM_LOOP;
+
+SM_EXIT:
+    ret;
+}
 `

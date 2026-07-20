@@ -31,6 +31,12 @@ type Backend interface {
 	// SwiGLUInPlace вычисляет silu(gate)*up, результат в gate
 	SwiGLUInPlace(gate, up []float32) error
 
+	// FFNSwiGLUCached gate/up/down matmul + SwiGLU; на CUDA активации остаются на GPU
+	FFNSwiGLUCached(gateName, upName, downName string, gateW, upW, downW, x, out []float32, embd, ffn int) error
+
+	// FFNSwiGLUQ8_0Cached то же для Q8_0 весов
+	FFNSwiGLUQ8_0Cached(gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error
+
 	// AttentionScoresInto записывает scaled dot-product attention в dst
 	AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error
 
