@@ -42,7 +42,7 @@ func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int, parse f
 	}
 
 	if ngl > cfg.NumLayers {
-		return nil, fmt.Errorf("mistral: ngl=%d больше числа слоёв %d", ngl, cfg.NumLayers)
+		ngl = cfg.NumLayers
 	}
 
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)

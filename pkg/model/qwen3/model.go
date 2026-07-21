@@ -33,7 +33,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	}
 
 	if ngl > cfg.NumLayers {
-		return nil, fmt.Errorf("qwen3: ngl=%d больше числа слоёв %d", ngl, cfg.NumLayers)
+		ngl = cfg.NumLayers
 	}
 
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)

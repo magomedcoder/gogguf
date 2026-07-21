@@ -1,0 +1,33 @@
+{
+  "magic": "GGUFLGT1",
+  "model": "Qwen3-0.6B-Q8_0.gguf",
+  "prompt": "Hello",
+  "tokens": [
+    9707
+  ],
+  "vocab": 151936,
+  "greedy": 1479,
+  "top": [
+    {
+      "id": 1479,
+      "logit": 9.134409
+    },
+    {
+      "id": 477,
+      "logit": 8.429998
+    },
+    {
+      "id": 21806,
+      "logit": 7.898239
+    },
+    {
+      "id": 64418,
+      "logit": 7.852069
+    },
+    {
+      "id": 198,
+      "logit": 7.589089
+    }
+  ],
+  "backend": "cpu"
+}

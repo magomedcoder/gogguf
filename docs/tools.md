@@ -71,3 +71,21 @@ Per-layer greedy next and top-k logits (JSON fixture generator).
 ```bash
 go run ./cmd/tools layerlogits -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -top 5
 ```
+
+## `dumplogits`
+
+Full-vocab prefill logits -> `prefix.bin` + `prefix.json`.
+
+```bash
+go run ./cmd/tools dumplogits -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_logits
+```
+
+## `comparelogits`
+
+Compare two dumps or CPU vs GPU (full vocab).
+
+```bash
+go run ./cmd/tools comparelogits -a test/fixtures/qwen3_raw_hello_logits -b test/fixtures/qwen3_raw_hello_logits
+
+CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelogits -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -tol 0.01 -align
+```
