@@ -47,12 +47,14 @@ type Backend struct {
 	fnAttnQK    C.CUfunction
 	fnAttnV     C.CUfunction
 	fnSoftmax   C.CUfunction
+	fnAdd       C.CUfunction
 	hasRMS      bool
 	hasRoPE     bool
 	hasRoPENorm bool
 	hasSwiGLU   bool
 	hasAttn     bool
 	hasSoftmax  bool
+	hasAdd      bool
 	hasGraphs   bool
 
 	mu          sync.Mutex
@@ -157,6 +159,12 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 				b.hasSoftmax = true
 			}
 			C.free(unsafe.Pointer(cSoftmax))
+
+			cAdd := C.CString("add_inplace")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAdd, &b.fnAdd) == 0 {
+				b.hasAdd = true
+			}
+			C.free(unsafe.Pointer(cAdd))
 
 			return nil
 		}
@@ -502,6 +510,140 @@ func (b *Backend) FFNSwiGLUQ8_0Cached(gateName, upName, downName string, gateRaw
 	b.lastVecLen = 0
 	if rc != 0 {
 		return fmt.Errorf("cuda: ffn_swiglu q8: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) AttnFFNResidualCached(woName, ffnNormName, gateName, upName, downName string, woW, ffnNorm, gateW, upW, downW, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
+		return fmt.Errorf("cuda: attn+ffn residual kernels недоступны")
+	}
+
+	if len(x) < embd || len(attn) < attnDim || len(ffnNorm) < embd {
+		return fmt.Errorf("cuda: AttnFFNResidualCached: короткие буферы")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	woM, err := b.ensureFP32Matrix(woName, woW, embd, attnDim)
+	if err != nil {
+		return err
+	}
+
+	normM, err := b.ensureFP32Matrix(ffnNormName, ffnNorm, embd, 1)
+	if err != nil {
+		return err
+	}
+
+	gateM, err := b.ensureFP32Matrix(gateName, gateW, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	upM, err := b.ensureFP32Matrix(upName, upW, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	downM, err := b.ensureFP32Matrix(downName, downW, embd, ffn)
+	if err != nil {
+		return err
+	}
+
+	rc := C.gguf_cuda_attn_ffn_residual_device(
+		&b.drv,
+		b.ctx,
+		b.fn,
+		b.fnRMS,
+		b.fnSwiGLU,
+		b.fnAdd,
+		&b.matmulPool,
+		woM.ptr,
+		normM.ptr,
+		gateM.ptr,
+		upM.ptr,
+		downM.ptr,
+		(*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&attn[0])),
+		(*C.float)(unsafe.Pointer(&x[0])),
+		C.int(embd),
+		C.int(attnDim),
+		C.int(ffn),
+		C.float(eps),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+
+	if rc != 0 {
+		return fmt.Errorf("cuda: attn_ffn_residual: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
+		return fmt.Errorf("cuda: attn+ffn residual kernels недоступны")
+	}
+
+	if len(x) < embd || len(attn) < attnDim || len(ffnNorm) < embd {
+		return fmt.Errorf("cuda: AttnFFNResidualQ8_0Cached: короткие буферы")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	woM, err := b.ensureQ8Matrix(woName, woRaw, embd, attnDim)
+	if err != nil {
+		return err
+	}
+
+	normM, err := b.ensureFP32Matrix(ffnNormName, ffnNorm, embd, 1)
+	if err != nil {
+		return err
+	}
+
+	gateM, err := b.ensureQ8Matrix(gateName, gateRaw, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	upM, err := b.ensureQ8Matrix(upName, upRaw, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	downM, err := b.ensureQ8Matrix(downName, downRaw, embd, ffn)
+	if err != nil {
+		return err
+	}
+
+	rc := C.gguf_cuda_attn_ffn_residual_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ8,
+		b.fnRMS,
+		b.fnSwiGLU,
+		b.fnAdd,
+		&b.matmulPool,
+		woM.ptr,
+		normM.ptr,
+		gateM.ptr,
+		upM.ptr, downM.ptr,
+		(*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&attn[0])),
+		(*C.float)(unsafe.Pointer(&x[0])),
+		C.int(embd),
+		C.int(attnDim),
+		C.int(ffn),
+		C.float(eps),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: attn_ffn_residual q8: код %d", int(rc))
 	}
 
 	return nil

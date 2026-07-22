@@ -761,6 +761,10 @@ void gguf_cuda_matmul_pool_free(cuda_driver_t *drv, gguf_matmul_pool_t *pool) {
 		drv->cuMemFree(pool->d_aux);
 	}
 
+	if (pool->d_resid) {
+		drv->cuMemFree(pool->d_resid);
+	}
+
 	free(pool->h_vec);
 	free(pool->h_out);
 
@@ -859,6 +863,62 @@ static int gguf_cuda_matmul_pool_ensure_aux(cuda_driver_t *drv, gguf_matmul_pool
 	return 0;
 }
 
+static int gguf_cuda_matmul_pool_ensure_resid(cuda_driver_t *drv, gguf_matmul_pool_t *pool, int n) {
+	if (n <= 0) {
+		return -11;
+	}
+
+	if (n <= pool->resid_cap) {
+		return 0;
+	}
+
+	gguf_cuda_matmul_clear_graphs(drv, pool);
+	pool->skip_vec_htod = 0;
+
+	CUdeviceptr d_resid = 0;
+	size_t bytes = (size_t)n * sizeof(float);
+	if (drv->cuMemAlloc(&d_resid, bytes) != CUDA_SUCCESS) {
+		return -2;
+	}
+
+	if (pool->d_resid) {
+		drv->cuMemFree(pool->d_resid);
+	}
+
+	pool->d_resid = d_resid;
+	pool->resid_cap = n;
+
+	return 0;
+}
+
+static int gguf_cuda_launch_add(cuda_driver_t *drv, CUfunction fn, CUdeviceptr d_a, CUdeviceptr d_b, int n, CUstream stream) {
+	void *params[3];
+	params[0] = &d_a;
+	params[1] = &d_b;
+	params[2] = &n;
+	unsigned int block = 256;
+	unsigned int grid = ((unsigned int)n + block - 1) / block;
+	if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	return 0;
+}
+
+static int gguf_cuda_launch_rmsnorm(cuda_driver_t *drv, CUfunction fn, CUdeviceptr d_x, CUdeviceptr d_w, CUdeviceptr d_out, int n, float eps, CUstream stream) {
+	void *params[5];
+	params[0] = &d_x;
+	params[1] = &d_w;
+	params[2] = &d_out;
+	params[3] = &n;
+	params[4] = &eps;
+	if (drv->cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	return 0;
+}
+
 static int gguf_cuda_launch_matmul(cuda_driver_t *drv, CUfunction fn, CUdeviceptr d_matrix, CUdeviceptr d_vec, CUdeviceptr d_out, int rows, int cols, CUstream stream) {
 	void *params[5];
 	params[0] = &d_matrix;
@@ -945,6 +1005,127 @@ int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn
 	if (drv->cuMemcpyDtoH(out, d_x, embd_bytes) != CUDA_SUCCESS) {
 		return -3;
 	}
+
+	return 0;
+}
+
+// WO(attn) + x+= + RMSNorm + FFN + x+= ; 2*HtoD + 1*DtoH
+int gguf_cuda_attn_ffn_residual_device(cuda_driver_t *drv, CUcontext ctx,
+	CUfunction fn_matmul, CUfunction fn_rmsnorm, CUfunction fn_swiglu, CUfunction fn_add,
+	gguf_matmul_pool_t *pool,
+	CUdeviceptr d_wo, CUdeviceptr d_ffn_norm, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w,
+	const float *x, const float *attn, float *x_out,
+	int embd, int attn_dim, int ffn, float eps) {
+	if (!pool || !fn_matmul || !fn_rmsnorm || !fn_swiglu || !fn_add || !x || !attn || !x_out) {
+		return -20;
+	}
+
+	if (embd <= 0 || attn_dim <= 0 || ffn <= 0) {
+		return -20;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	int need_rows = ffn;
+	if (embd > need_rows) {
+		need_rows = embd;
+	}
+
+	if (attn_dim > need_rows) {
+		need_rows = attn_dim;
+	}
+
+	int need_cols = embd;
+	if (attn_dim > need_cols) {
+		need_cols = attn_dim;
+	}
+
+	int rc = gguf_cuda_matmul_pool_ensure(drv, pool, need_rows, need_cols);
+	if (rc != 0) {
+		return rc;
+	}
+
+	rc = gguf_cuda_matmul_pool_ensure_aux(drv, pool, ffn);
+	if (rc != 0) {
+		return rc;
+	}
+
+	rc = gguf_cuda_matmul_pool_ensure_resid(drv, pool, embd);
+	if (rc != 0) {
+		return rc;
+	}
+
+	size_t embd_bytes = (size_t)embd * sizeof(float);
+	size_t attn_bytes = (size_t)attn_dim * sizeof(float);
+	CUstream stream = pool->stream;
+
+	if (drv->cuMemcpyHtoD(pool->d_resid, x, embd_bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	if (drv->cuMemcpyHtoD(pool->d_vec, attn, attn_bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	CUdeviceptr d_resid = pool->d_resid;
+	CUdeviceptr d_attn = pool->d_vec;
+	CUdeviceptr d_tmp = pool->d_out;
+	CUdeviceptr d_up = pool->d_aux;
+
+	// WO: embd x attn_dim
+	if (gguf_cuda_launch_matmul(drv, fn_matmul, d_wo, d_attn, d_tmp, embd, attn_dim, stream) != 0) {
+		return -3;
+	}
+
+	if (gguf_cuda_launch_add(drv, fn_add, d_resid, d_tmp, embd, stream) != 0) {
+		return -3;
+	}
+
+	// RMSNorm(x) -> d_attn (reuse as FFN input, size embd)
+	if (gguf_cuda_launch_rmsnorm(drv, fn_rmsnorm, d_resid, d_ffn_norm, d_attn, embd, eps, stream) != 0) {
+		return -3;
+	}
+
+	if (gguf_cuda_launch_matmul(drv, fn_matmul, d_gate_w, d_attn, d_tmp, ffn, embd, stream) != 0) {
+		return -3;
+	}
+
+	if (gguf_cuda_launch_matmul(drv, fn_matmul, d_up_w, d_attn, d_up, ffn, embd, stream) != 0) {
+		return -3;
+	}
+
+	void *params_sg[3];
+	params_sg[0] = &d_tmp;
+	params_sg[1] = &d_up;
+	params_sg[2] = &ffn;
+	unsigned int block = 256;
+	unsigned int grid = ((unsigned int)ffn + block - 1) / block;
+	if (drv->cuLaunchKernel(fn_swiglu, grid, 1, 1, block, 1, 1, 0, stream, params_sg, NULL) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	// down -> d_attn, then residual add
+	if (gguf_cuda_launch_matmul(drv, fn_matmul, d_down_w, d_tmp, d_attn, embd, ffn, stream) != 0) {
+		return -3;
+	}
+
+	if (gguf_cuda_launch_add(drv, fn_add, d_resid, d_attn, embd, stream) != 0) {
+		return -3;
+	}
+
+	if (stream && drv->cuStreamSynchronize) {
+		if (drv->cuStreamSynchronize(stream) != CUDA_SUCCESS) {
+			return -5;
+		}
+	}
+
+	if (drv->cuMemcpyDtoH(x_out, d_resid, embd_bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	pool->skip_vec_htod = 0;
 
 	return 0;
 }

@@ -674,4 +674,39 @@ SM_NORM_LOOP:
 SM_EXIT:
     ret;
 }
+
+// add_inplace: a[i] += b[i]
+.visible .entry add_inplace(
+    .param .u64 param_a,
+    .param .u64 param_b,
+    .param .u32 param_n
+)
+{
+    .reg .pred      %p<2>;
+    .reg .b32       %r<8>;
+    .reg .b64       %rd<10>;
+    .reg .f32       %f<4>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_n];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra AI_EXIT;
+
+    ld.param.u64    %rd1, [param_a];
+    ld.param.u64    %rd2, [param_b];
+    mul.wide.u32    %rd3, %r4, 4;
+    add.u64         %rd4, %rd1, %rd3;
+    add.u64         %rd5, %rd2, %rd3;
+    ld.global.f32   %f1, [%rd4];
+    ld.global.f32   %f2, [%rd5];
+    add.f32         %f1, %f1, %f2;
+    st.global.f32   [%rd4], %f1;
+
+AI_EXIT:
+    ret;
+}
 `

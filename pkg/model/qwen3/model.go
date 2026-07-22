@@ -2,6 +2,7 @@ package qwen3
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
@@ -226,6 +227,14 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
+	// Опционально: WO+RMSNorm+FFN residency (GGUF_ATTN_FFN_RESIDENCY=1).
+	// По умолчанию выкл.: single-thread RMSNorm на GPU медленнее FFN-only на 1050 Ti.
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && attnFFNResidencyEnabled() {
+		if err := m.attnFFNGPU(layer, lt, ln, m.scratch.x, m.scratch.attn); err == nil {
+			return nil
+		}
+	}
+
 	if err := m.matmulInto(lt.attnOut, m.cfg.EmbeddingDim, m.cfg.NumHeads*m.cfg.HeadDim, m.scratch.attn, m.scratch.h, layer); err != nil {
 		return err
 	}
@@ -257,6 +266,68 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 	ops.AddInPlace(m.scratch.x, m.scratch.h)
 	return nil
+}
+
+func attnFFNResidencyEnabled() bool {
+	return os.Getenv("GGUF_ATTN_FFN_RESIDENCY") == "1"
+}
+
+func (m *Model) attnFFNGPU(layer int, lt layerTensors, ln layerNorms, x, attn []float32) error {
+	info, err := m.weights.Info(lt.attnOut)
+	if err != nil {
+		return err
+	}
+
+	embd := m.cfg.EmbeddingDim
+	attnDim := m.cfg.NumHeads * m.cfg.HeadDim
+	ffn := m.cfg.FFNHidden
+	eps := m.cfg.RMSNormEps
+	normName := fmt.Sprintf("blk.%d.ffn_norm.weight", layer)
+
+	if info.Type == format.GgmlQ8_0 {
+		woRaw, err := m.weights.Raw(lt.attnOut)
+		if err != nil {
+			return err
+		}
+
+		gateRaw, err := m.weights.Raw(lt.ffnGate)
+		if err != nil {
+			return err
+		}
+
+		upRaw, err := m.weights.Raw(lt.ffnUp)
+		if err != nil {
+			return err
+		}
+
+		downRaw, err := m.weights.Raw(lt.ffnDown)
+		if err != nil {
+			return err
+		}
+		return m.gpu.AttnFFNResidualQ8_0Cached(lt.attnOut, normName, lt.ffnGate, lt.ffnUp, lt.ffnDown, woRaw, gateRaw, upRaw, downRaw, ln.ffnNorm, x, attn, embd, attnDim, ffn, eps)
+	}
+
+	woW, err := m.weights.Floats(lt.attnOut)
+	if err != nil {
+		return err
+	}
+
+	gateW, err := m.weights.Floats(lt.ffnGate)
+	if err != nil {
+		return err
+	}
+
+	upW, err := m.weights.Floats(lt.ffnUp)
+	if err != nil {
+		return err
+	}
+
+	downW, err := m.weights.Floats(lt.ffnDown)
+	if err != nil {
+		return err
+	}
+
+	return m.gpu.AttnFFNResidualCached(lt.attnOut, normName, lt.ffnGate, lt.ffnUp, lt.ffnDown, woW, ln.ffnNorm, gateW, upW, downW, x, attn, embd, attnDim, ffn, eps)
 }
 
 func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {

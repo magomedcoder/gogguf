@@ -27,7 +27,7 @@ func DiffLogits(a, b []float32, tol float64) DiffStats {
 	}
 
 	var sumAbs, sumSq float64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		d := math.Abs(float64(a[i] - b[i]))
 		sumAbs += d
 		sumSq += d * d

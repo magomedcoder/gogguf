@@ -129,16 +129,18 @@ typedef struct gguf_matmul_graph_entry {
 	struct gguf_matmul_graph_entry *next;
 } gguf_matmul_graph_entry_t;
 
-// gguf_matmul_pool_t - переиспользуемые d_vec/d_out/d_aux + host staging + CUDA Graph cache
+// gguf_matmul_pool_t - переиспользуемые d_vec/d_out/d_aux/d_resid + host staging + CUDA Graph cache
 typedef struct {
 	CUdeviceptr d_vec;
 	CUdeviceptr d_out;
-	CUdeviceptr d_aux; // вторая активация (FFN up)
+	CUdeviceptr d_aux;   // FFN up
+	CUdeviceptr d_resid; // residual stream (layer residency)
 	float *h_vec;
 	float *h_out;
 	int vec_cap;
 	int out_cap;
 	int aux_cap;
+	int resid_cap;
 	CUstream stream;
 	gguf_matmul_graph_entry_t *graphs;
 	int skip_vec_htod; // 1 = vec уже на GPU (задаётся из Go)
@@ -186,6 +188,29 @@ int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfuncti
 
 // gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down, активации на GPU (1* HtoD + 1* DtoH)
 int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
+
+// gguf_cuda_attn_ffn_residual_device: WO + residual + RMSNorm + FFN + residual (2*HtoD + 1*DtoH)
+int gguf_cuda_attn_ffn_residual_device(
+    cuda_driver_t *drv,
+    CUcontext ctx,
+    CUfunction fn_matmul,
+    CUfunction fn_rmsnorm,
+    CUfunction fn_swiglu,
+    CUfunction fn_add,
+    gguf_matmul_pool_t *pool,
+    CUdeviceptr d_wo,
+    CUdeviceptr d_ffn_norm,
+    CUdeviceptr d_gate_w,
+    CUdeviceptr d_up_w,
+    CUdeviceptr d_down_w,
+    const float *x,
+    const float *attn,
+    float *x_out,
+    int embd,
+    int attn_dim,
+    int ffn,
+    float eps
+);
 
 // gguf_cuda_rmsnorm RMSNorm на GPU
 int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *x, const float *weight, float *out, int n, float eps);

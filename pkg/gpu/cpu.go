@@ -74,6 +74,48 @@ func (CPUBackend) FFNSwiGLUQ8_0Cached(_, _, _ string, gateRaw, upRaw, downRaw []
 	return ops.MatMulVecQ8_0Into(downRaw, embd, ffn, gate, out)
 }
 
+func (CPUBackend) AttnFFNResidualCached(_, _, _, _, _ string, woW, ffnNorm, gateW, upW, downW, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	h := make([]float32, embd)
+	if err := ops.MatMulVecInto(woW, embd, attnDim, attn, h); err != nil {
+		return err
+	}
+
+	ops.AddInPlace(x, h)
+
+	if err := ops.RMSNormInto(h, x, ffnNorm, eps); err != nil {
+		return err
+	}
+
+	if err := (CPUBackend{}).FFNSwiGLUCached("", "", "", gateW, upW, downW, h, h, embd, ffn); err != nil {
+		return err
+	}
+
+	ops.AddInPlace(x, h)
+
+	return nil
+}
+
+func (CPUBackend) AttnFFNResidualQ8_0Cached(_, _, _, _, _ string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	h := make([]float32, embd)
+	if err := ops.MatMulVecQ8_0Into(woRaw, embd, attnDim, attn, h); err != nil {
+		return err
+	}
+
+	ops.AddInPlace(x, h)
+
+	if err := ops.RMSNormInto(h, x, ffnNorm, eps); err != nil {
+		return err
+	}
+
+	if err := (CPUBackend{}).FFNSwiGLUQ8_0Cached("", "", "", gateRaw, upRaw, downRaw, h, h, embd, ffn); err != nil {
+		return err
+	}
+
+	ops.AddInPlace(x, h)
+
+	return nil
+}
+
 func (CPUBackend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim)
 }

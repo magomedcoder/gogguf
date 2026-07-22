@@ -37,6 +37,12 @@ type Backend interface {
 	// FFNSwiGLUQ8_0Cached то же для Q8_0 весов
 	FFNSwiGLUQ8_0Cached(gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error
 
+	// AttnFFNResidualCached WO(attn)+residual+RMSNorm+FFN+residual на GPU
+	AttnFFNResidualCached(woName, ffnNormName, gateName, upName, downName string, woW, ffnNorm, gateW, upW, downW, x, attn []float32, embd, attnDim, ffn int, eps float32) error
+
+	// AttnFFNResidualQ8_0Cached то же для Q8_0 matmul-весов (norm - FP32)
+	AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error
+
 	// AttentionScoresInto записывает scaled dot-product attention в dst
 	AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error
 
