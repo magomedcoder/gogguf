@@ -215,6 +215,7 @@ Q8_EXIT:
 const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel
 
 const opsKernelsBody = `
+// rmsnorm: 1 block - sum на tid0, apply параллельно (stride)
 .visible .entry rmsnorm(
     .param .u64 param_x,
     .param .u64 param_weight,
@@ -223,49 +224,52 @@ const opsKernelsBody = `
     .param .f32 param_eps
 )
 {
-    .reg .pred      %p<1>;
-    .reg .b32       %r<4>;
-    .reg .b64       %rd<10>;
-    .reg .f32       %f<6>;
+    .reg .pred      %p<3>;
+    .reg .b32       %r<10>;
+    .reg .b64       %rd<14>;
+    .reg .f32       %f<8>;
+    .shared .align 4 .b32 scale_s;
 
     mov.u32         %r1, %tid.x;
-    setp.ne.u32     %p0, %r1, 0;
-    @%p0            bra RN_EXIT;
-
+    mov.u32         %r2, %ntid.x;
+    ld.param.u32    %r3, [param_n];
     ld.param.u64    %rd1, [param_x];
     ld.param.u64    %rd2, [param_weight];
     ld.param.u64    %rd3, [param_out];
-    ld.param.u32    %r2, [param_n];
     ld.param.f32    %f1, [param_eps];
 
+    setp.ne.u32     %p0, %r1, 0;
+    @%p0            bra RN_WAIT;
+
     mov.f32         %f2, 0f00000000;
-    mov.u32         %r3, 0;
+    mov.u32         %r4, 0;
 
 RN_SUM:
-    setp.ge.u32     %p0, %r3, %r2;
-    @%p0            bra RN_SCALE;
-
-    mul.wide.u32    %rd4, %r3, 4;
+    setp.ge.u32     %p1, %r4, %r3;
+    @%p1            bra RN_SCALE;
+    mul.wide.u32    %rd4, %r4, 4;
     add.u64         %rd5, %rd1, %rd4;
     ld.global.f32   %f3, [%rd5];
-    mul.f32         %f3, %f3, %f3;
-    add.f32         %f2, %f2, %f3;
-
-    add.u32         %r3, %r3, 1;
+    fma.rn.f32      %f2, %f3, %f3, %f2;
+    add.u32         %r4, %r4, 1;
     bra RN_SUM;
 
 RN_SCALE:
-    cvt.rn.f32.u32  %f4, %r2;
+    cvt.rn.f32.u32  %f4, %r3;
     div.rn.f32      %f4, %f2, %f4;
     add.f32         %f4, %f4, %f1;
     rsqrt.approx.f32 %f5, %f4;
-    mov.u32         %r3, 0;
+    st.shared.f32   [scale_s], %f5;
 
-RN_OUT:
-    setp.ge.u32     %p0, %r3, %r2;
-    @%p0            bra RN_EXIT;
+RN_WAIT:
+    bar.sync        0;
+    ld.shared.f32   %f5, [scale_s];
+    mov.u32         %r4, %r1;
 
-    mul.wide.u32    %rd4, %r3, 4;
+RN_APPLY:
+    setp.ge.u32     %p2, %r4, %r3;
+    @%p2            bra RN_EXIT;
+    mul.wide.u32    %rd4, %r4, 4;
     add.u64         %rd5, %rd1, %rd4;
     ld.global.f32   %f3, [%rd5];
     add.u64         %rd6, %rd2, %rd4;
@@ -274,9 +278,8 @@ RN_OUT:
     mul.f32         %f3, %f3, %f4;
     add.u64         %rd7, %rd3, %rd4;
     st.global.f32   [%rd7], %f3;
-
-    add.u32         %r3, %r3, 1;
-    bra RN_OUT;
+    add.u32         %r4, %r4, %r2;
+    bra RN_APPLY;
 
 RN_EXIT:
     ret;

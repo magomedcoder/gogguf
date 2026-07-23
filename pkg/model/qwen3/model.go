@@ -227,8 +227,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	// Опционально: WO+RMSNorm+FFN residency (GGUF_ATTN_FFN_RESIDENCY=1).
-	// По умолчанию выкл.: single-thread RMSNorm на GPU медленнее FFN-only на 1050 Ti.
+	// WO+RMSNorm+FFN residency (отключить: GGUF_ATTN_FFN_RESIDENCY=0)
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && attnFFNResidencyEnabled() {
 		if err := m.attnFFNGPU(layer, lt, ln, m.scratch.x, m.scratch.attn); err == nil {
 			return nil
@@ -269,7 +268,12 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 }
 
 func attnFFNResidencyEnabled() bool {
-	return os.Getenv("GGUF_ATTN_FFN_RESIDENCY") == "1"
+	v := os.Getenv("GGUF_ATTN_FFN_RESIDENCY")
+	if v == "0" || v == "false" || v == "off" {
+		return false
+	}
+	// default: on (parallel RMSNorm)
+	return true
 }
 
 func (m *Model) attnFFNGPU(layer int, lt layerTensors, ln layerNorms, x, attn []float32) error {

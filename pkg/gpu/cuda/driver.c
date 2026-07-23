@@ -912,7 +912,8 @@ static int gguf_cuda_launch_rmsnorm(cuda_driver_t *drv, CUfunction fn, CUdevicep
 	params[2] = &d_out;
 	params[3] = &n;
 	params[4] = &eps;
-	if (drv->cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
+	// 1 block * 256 threads: shared reduction в PTX
+	if (drv->cuLaunchKernel(fn, 1, 1, 1, 256, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
 		return -3;
 	}
 
@@ -1361,7 +1362,7 @@ int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn,
 	params[3] = &n;
 	params[4] = &eps;
 
-	if (drv->cuLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
+	if (drv->cuLaunchKernel(fn, 1, 1, 1, 256, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
 		goto fail;
 	}
 
