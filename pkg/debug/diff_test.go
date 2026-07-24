@@ -62,3 +62,32 @@ func TestWriteReadLogitsBin(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteReadLayersBin(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/layers"
+	dump := LayersDump{
+		Embed:  []float32{1, 2, 3},
+		Layers: [][]float32{{4, 5, 6}, {7, 8, 9}},
+	}
+	if err := SaveLayersDump(path, LayersMeta{
+		Model:  "t",
+		Prompt: "p",
+	}, dump); err != nil {
+		t.Fatal(err)
+	}
+
+	_, got, err := LoadLayersDump(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.Layers) != 2 || got.Embed[0] != 1 || got.Layers[1][2] != 9 {
+		t.Fatalf("got = %+v", got)
+	}
+
+	embed, layers, err := DiffLayers(dump, got, 0)
+	if err != nil || embed.OverTol != 0 || layers[0].OverTol != 0 {
+		t.Fatalf("diff err=%v embed=%+v", err, embed)
+	}
+}

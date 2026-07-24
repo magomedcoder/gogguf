@@ -91,3 +91,23 @@ go run ./cmd/tools comparelogits -a test/fixtures/qwen3_raw_hello_logits -b test
 
 CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelogits -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -tol 0.01 -align
 ```
+
+## `dumplayers`
+
+Embed + hidden после каждого слоя -> `prefix.bin` + `prefix.json`.
+
+```bash
+go run ./cmd/tools dumplayers -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_layers
+
+go run ./cmd/tools dumplayers -m models/Qwen3-0.6B-Q8_0.gguf --chat -p Hello -o test/fixtures/qwen3_chat_hello_layers
+```
+
+## `comparelayers`
+
+Сверка двух dump или CPU vs GPU (hidden по слоям)
+
+```bash
+go run ./cmd/tools comparelayers -a test/fixtures/qwen3_raw_hello_layers -b test/fixtures/qwen3_raw_hello_layers
+
+CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelayers -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -tol 0.01
+```

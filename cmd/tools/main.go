@@ -16,6 +16,8 @@ const usage = `GoGGUF tools - утилиты отладки и бенчмарк�
   tools layerlogits -m файл.gguf -p "..."    greedy/top logits по слоям (fixture)
   tools dumplogits -m файл.gguf -p "..."     полный vocab logits -> .bin/.json
   tools comparelogits -a dump -b dump        сверка двух dump (или -m CPU vs GPU)
+  tools dumplayers -m файл.gguf -p "..."     embed+hidden по слоям -> .bin/.json
+  tools comparelayers -a dump -b dump        сверка hidden (или -m CPU vs GPU)
 `
 
 func main() {
@@ -42,6 +44,10 @@ func main() {
 		err = runDumpLogits(os.Args[2:])
 	case "comparelogits":
 		err = runCompareLogits(os.Args[2:])
+	case "dumplayers":
+		err = runDumpLayers(os.Args[2:])
+	case "comparelayers":
+		err = runCompareLayers(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "неизвестная команда: %q\n\n", os.Args[1])
 		fmt.Print(usage)
