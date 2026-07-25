@@ -44,6 +44,8 @@ typedef CUresult (*PFN_cuMemcpyHtoD_v2)(CUdeviceptr dst, const void *src, size_t
 
 typedef CUresult (*PFN_cuMemcpyDtoH_v2)(void *dst, CUdeviceptr src, size_t bytes);
 
+typedef CUresult (*PFN_cuMemcpyDtoD_v2)(CUdeviceptr dst, CUdeviceptr src, size_t bytes);
+
 typedef CUresult (*PFN_cuMemcpyHtoDAsync_v2)(CUdeviceptr dst, const void *src, size_t bytes, CUstream stream);
 
 typedef CUresult (*PFN_cuMemcpyDtoHAsync_v2)(void *dst, CUdeviceptr src, size_t bytes, CUstream stream);
@@ -96,6 +98,7 @@ typedef struct {
 	PFN_cuMemFree_v2 cuMemFree;
 	PFN_cuMemcpyHtoD_v2 cuMemcpyHtoD;
 	PFN_cuMemcpyDtoH_v2 cuMemcpyDtoH;
+	PFN_cuMemcpyDtoD_v2 cuMemcpyDtoD;
 	PFN_cuMemcpyHtoDAsync_v2 cuMemcpyHtoDAsync;
 	PFN_cuMemcpyDtoHAsync_v2 cuMemcpyDtoHAsync;
 	PFN_cuGetErrorName cuGetErrorName;
@@ -144,6 +147,7 @@ typedef struct {
 	CUstream stream;
 	gguf_matmul_graph_entry_t *graphs;
 	int skip_vec_htod; // 1 = vec уже на GPU (задаётся из Go)
+	int skip_attn_htod; // 1 = attn уже в d_vec (QKV residency)
 } gguf_matmul_pool_t;
 
 // gguf_cuda_init загружает libcuda.so и создаёт контекст на GPU 0
@@ -189,7 +193,8 @@ int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfuncti
 // gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down, активации на GPU (1* HtoD + 1* DtoH)
 int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
 
-// gguf_cuda_attn_ffn_residual_device: WO + residual + RMSNorm + FFN + residual (2*HtoD + 1*DtoH)
+// gguf_cuda_attn_ffn_residual_device: WO + residual + RMSNorm + FFN + residual
+// 2*HtoD + 1*DtoH; если pool->skip_attn_htod - attn уже в d_vec (1*HtoD x + 1*DtoH)
 int gguf_cuda_attn_ffn_residual_device(
     cuda_driver_t *drv,
     CUcontext ctx,
@@ -243,8 +248,14 @@ typedef struct {
 	CUdeviceptr d_q;
 	CUdeviceptr d_dst;
 	CUdeviceptr d_scores;
+	CUdeviceptr d_k_tok; // текущий token K (kv_dim)
+	CUdeviceptr d_v_tok; // текущий token V
+	CUdeviceptr d_cos; // RoPE cos (head_dim/2)
+	CUdeviceptr d_sin; // RoPE sin
 	int q_elems;
 	int max_seq;
+	int kv_dim;
+	int rope_half;
 } gguf_attn_pool_t;
 
 // gguf_cuda_kv_init выделяет GPU-буферы K/V для num_layers слоёв
@@ -259,10 +270,45 @@ int gguf_cuda_kv_append(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cach
 // gguf_cuda_kv_attention attention с K/V уже на GPU
 int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, gguf_kv_cache_t *cache, gguf_attn_pool_t *pool, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim);
 
-// gguf_cuda_attn_pool_init выделяет переиспользуемые буферы attention
-int gguf_cuda_attn_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_attn_pool_t *pool, int q_elems, int max_seq);
+// gguf_cuda_attn_pool_init выделяет переиспользуемые буферы attention (+ K/V token, RoPE)
+int gguf_cuda_attn_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_attn_pool_t *pool, int q_elems, int max_seq, int kv_dim, int rope_half);
 
 // gguf_cuda_attn_pool_free освобождает буферы attention
 void gguf_cuda_attn_pool_free(cuda_driver_t *drv, gguf_attn_pool_t *pool);
+
+// gguf_cuda_qkv_rope_attn_device: h->QKV->head RMSNorm->RoPE->KV append->attn (1*HtoD h + DtoH attn/k/v)
+// После успеха attn лежит в matmul_pool.d_vec и skip_attn_htod=1 для residual.
+int gguf_cuda_qkv_rope_attn_device(
+    cuda_driver_t *drv,
+    CUcontext ctx,
+    CUfunction fn_matmul,
+    CUfunction fn_rmsnorm,
+    CUfunction fn_rope,
+    CUfunction fn_qk,
+    CUfunction fn_v,
+    CUfunction fn_softmax,
+    gguf_matmul_pool_t *mpool,
+    gguf_attn_pool_t *apool,
+    gguf_kv_cache_t *kv,
+    CUdeviceptr d_wq,
+    CUdeviceptr d_wk,
+    CUdeviceptr d_wv,
+    CUdeviceptr d_q_norm,
+    CUdeviceptr d_k_norm,
+    const float *h,
+    const float *cos_tbl,
+    const float *sin_tbl,
+    float *attn_out,
+    float *k_out,
+    float *v_out,
+    int embd,
+    int n_heads,
+    int n_kv_heads,
+    int head_dim,
+    int layer,
+    int kv_pos,
+    int seq_len,
+    float eps
+);
 
 #endif

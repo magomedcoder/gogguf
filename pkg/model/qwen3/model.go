@@ -187,46 +187,55 @@ func (m *Model) embedToken(tokenID int) error {
 func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
+	usedQKVResidency := false
 
 	if err := m.rmsNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, layer); err != nil {
 		return err
 	}
 
-	if err := m.matmulInto(lt.attnQ, m.cfg.NumHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.q, layer); err != nil {
-		return err
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && qkvResidencyEnabled() {
+		if err := m.qkvAttnGPU(layer, pos, lt, ln, m.scratch.h, m.scratch.q, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
+			m.cache.Append(layer, m.scratch.k, m.scratch.v)
+			usedQKVResidency = true
+		}
 	}
 
-	if err := m.matmulInto(lt.attnK, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.k, layer); err != nil {
-		return err
+	if !usedQKVResidency {
+		if err := m.matmulInto(lt.attnQ, m.cfg.NumHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.q, layer); err != nil {
+			return err
+		}
+
+		if err := m.matmulInto(lt.attnK, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.k, layer); err != nil {
+			return err
+		}
+
+		if err := m.matmulInto(lt.attnV, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.v, layer); err != nil {
+			return err
+		}
+
+		if err := m.normHeadsInto(m.scratch.q, ln.qNorm, m.cfg.NumHeads, layer); err != nil {
+			return err
+		}
+
+		if err := m.normHeadsInto(m.scratch.k, ln.kNorm, m.cfg.NumKVHeads, layer); err != nil {
+			return err
+		}
+
+		m.applyRoPEHeads(m.scratch.q, m.cfg.NumHeads, pos, layer)
+		m.applyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, pos, layer)
+
+		kvPos := m.cache.Len()
+		m.cache.Append(layer, m.scratch.k, m.scratch.v)
+		if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+			_ = m.gpu.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
+		}
+
+		seqLen := m.cache.Len() + 1
+
+		if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, seqLen, layer); err != nil {
+			return err
+		}
 	}
-
-	if err := m.matmulInto(lt.attnV, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.v, layer); err != nil {
-		return err
-	}
-
-	if err := m.normHeadsInto(m.scratch.q, ln.qNorm, m.cfg.NumHeads, layer); err != nil {
-		return err
-	}
-
-	if err := m.normHeadsInto(m.scratch.k, ln.kNorm, m.cfg.NumKVHeads, layer); err != nil {
-		return err
-	}
-
-	m.applyRoPEHeads(m.scratch.q, m.cfg.NumHeads, pos, layer)
-	m.applyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, pos, layer)
-
-	kvPos := m.cache.Len()
-	m.cache.Append(layer, m.scratch.k, m.scratch.v)
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		_ = m.gpu.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
-	}
-
-	seqLen := m.cache.Len() + 1
-
-	if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, seqLen, layer); err != nil {
-		return err
-	}
-
 	// WO+RMSNorm+FFN residency (отключить: GGUF_ATTN_FFN_RESIDENCY=0)
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && attnFFNResidencyEnabled() {
 		if err := m.attnFFNGPU(layer, lt, ln, m.scratch.x, m.scratch.attn); err == nil {
@@ -273,6 +282,15 @@ func attnFFNResidencyEnabled() bool {
 		return false
 	}
 	// default: on (parallel RMSNorm)
+	return true
+}
+
+func qkvResidencyEnabled() bool {
+	v := os.Getenv("GGUF_QKV_RESIDENCY")
+	if v == "0" || v == "false" || v == "off" {
+		return false
+	}
+
 	return true
 }
 
@@ -332,6 +350,59 @@ func (m *Model) attnFFNGPU(layer int, lt layerTensors, ln layerNorms, x, attn []
 	}
 
 	return m.gpu.AttnFFNResidualCached(lt.attnOut, normName, lt.ffnGate, lt.ffnUp, lt.ffnDown, woW, ln.ffnNorm, gateW, upW, downW, x, attn, embd, attnDim, ffn, eps)
+}
+
+func (m *Model) qkvAttnGPU(layer, pos int, lt layerTensors, ln layerNorms, h, qOut, kOut, vOut, attn []float32) error {
+	info, err := m.weights.Info(lt.attnQ)
+	if err != nil {
+		return err
+	}
+
+	half := m.cfg.HeadDim / 2
+	cos := make([]float32, half)
+	sin := make([]float32, half)
+	ops.RoPECosSin(cos, sin, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+
+	kvPos := m.cache.Len()
+	seqLen := kvPos + 1
+	qNormName := fmt.Sprintf("blk.%d.attn_q_norm.weight", layer)
+	kNormName := fmt.Sprintf("blk.%d.attn_k_norm.weight", layer)
+
+	if info.Type == format.GgmlQ8_0 {
+		qRaw, err := m.weights.Raw(lt.attnQ)
+		if err != nil {
+			return err
+		}
+
+		kRaw, err := m.weights.Raw(lt.attnK)
+		if err != nil {
+			return err
+		}
+
+		vRaw, err := m.weights.Raw(lt.attnV)
+		if err != nil {
+			return err
+		}
+
+		return m.gpu.QKVRoPEAttentionQ8_0Cached(lt.attnQ, lt.attnK, lt.attnV, qNormName, kNormName, qRaw, kRaw, vRaw, ln.qNorm, ln.kNorm, h, cos, sin, attn, kOut, vOut, m.cfg.EmbeddingDim, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim, layer, kvPos, seqLen, m.cfg.RMSNormEps)
+	}
+
+	qW, err := m.weights.Floats(lt.attnQ)
+	if err != nil {
+		return err
+	}
+
+	kW, err := m.weights.Floats(lt.attnK)
+	if err != nil {
+		return err
+	}
+
+	vW, err := m.weights.Floats(lt.attnV)
+	if err != nil {
+		return err
+	}
+
+	return m.gpu.QKVRoPEAttentionCached(lt.attnQ, lt.attnK, lt.attnV, qNormName, kNormName, qW, kW, vW, ln.qNorm, ln.kNorm, h, cos, sin, attn, kOut, vOut, m.cfg.EmbeddingDim, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim, layer, kvPos, seqLen, m.cfg.RMSNormEps)
 }
 
 func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {

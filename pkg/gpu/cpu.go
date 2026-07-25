@@ -116,6 +116,86 @@ func (CPUBackend) AttnFFNResidualQ8_0Cached(_, _, _, _, _ string, woRaw, gateRaw
 	return nil
 }
 
+func (CPUBackend) QKVRoPEAttentionCached(_, _, _, _, _ string, qW, kW, vW, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
+	_ = cos
+	_ = sin
+	_ = layer
+	_ = kvPos
+	_ = seqLen
+	q := make([]float32, nHeads*headDim)
+	if err := ops.MatMulVecInto(qW, nHeads*headDim, embd, h, q); err != nil {
+		return err
+	}
+
+	k := make([]float32, nKVHeads*headDim)
+	if err := ops.MatMulVecInto(kW, nKVHeads*headDim, embd, h, k); err != nil {
+		return err
+	}
+
+	if err := ops.MatMulVecInto(vW, nKVHeads*headDim, embd, h, vOut); err != nil {
+		return err
+	}
+
+	for hi := 0; hi < nHeads; hi++ {
+		off := hi * headDim
+		if err := ops.RMSNormInto(q[off:off+headDim], q[off:off+headDim], qNorm, eps); err != nil {
+			return err
+		}
+	}
+
+	for hi := 0; hi < nKVHeads; hi++ {
+		off := hi * headDim
+		if err := ops.RMSNormInto(k[off:off+headDim], k[off:off+headDim], kNorm, eps); err != nil {
+			return err
+		}
+	}
+
+	copy(kOut, k)
+	copy(attn, q)
+
+	return nil
+}
+
+func (CPUBackend) QKVRoPEAttentionQ8_0Cached(_, _, _, _, _ string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
+	_ = cos
+	_ = sin
+	_ = layer
+	_ = kvPos
+	_ = seqLen
+	q := make([]float32, nHeads*headDim)
+	if err := ops.MatMulVecQ8_0Into(qRaw, nHeads*headDim, embd, h, q); err != nil {
+		return err
+	}
+
+	k := make([]float32, nKVHeads*headDim)
+	if err := ops.MatMulVecQ8_0Into(kRaw, nKVHeads*headDim, embd, h, k); err != nil {
+		return err
+	}
+
+	if err := ops.MatMulVecQ8_0Into(vRaw, nKVHeads*headDim, embd, h, vOut); err != nil {
+		return err
+	}
+
+	for hi := 0; hi < nHeads; hi++ {
+		off := hi * headDim
+		if err := ops.RMSNormInto(q[off:off+headDim], q[off:off+headDim], qNorm, eps); err != nil {
+			return err
+		}
+	}
+
+	for hi := 0; hi < nKVHeads; hi++ {
+		off := hi * headDim
+		if err := ops.RMSNormInto(k[off:off+headDim], k[off:off+headDim], kNorm, eps); err != nil {
+			return err
+		}
+	}
+
+	copy(kOut, k)
+	copy(attn, q)
+
+	return nil
+}
+
 func (CPUBackend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim)
 }

@@ -43,6 +43,12 @@ type Backend interface {
 	// AttnFFNResidualQ8_0Cached то же для Q8_0 matmul-весов (norm - FP32)
 	AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error
 
+	// QKVRoPEAttentionCached: h->QKV->head RMSNorm->RoPE->KV append->attention на GPU
+	QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormName string, qW, kW, vW, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error
+
+	// QKVRoPEAttentionQ8_0Cached то же для Q8_0 matmul-весов (norm - FP32)
+	QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error
+
 	// AttentionScoresInto записывает scaled dot-product attention в dst
 	AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error
 

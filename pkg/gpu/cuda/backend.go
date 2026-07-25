@@ -649,6 +649,178 @@ func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upNam
 	return nil
 }
 
+func (b *Backend) QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormName string, qW, kW, vW, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
+	if !b.hasAttn || !b.hasRoPE || !b.hasRMS {
+		return fmt.Errorf("cuda: qkv+rope+attn kernels недоступны")
+	}
+
+	if len(h) < embd || len(cos) < headDim/2 || len(sin) < headDim/2 || len(attn) < nHeads*headDim || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
+		return fmt.Errorf("cuda: QKVRoPEAttentionCached: короткие буферы")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache не инициализирован")
+	}
+
+	qM, err := b.ensureFP32Matrix(qName, qW, nHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	kM, err := b.ensureFP32Matrix(kName, kW, nKVHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	vM, err := b.ensureFP32Matrix(vName, vW, nKVHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	qNormM, err := b.ensureFP32Matrix(qNormName, qNorm, headDim, 1)
+	if err != nil {
+		return err
+	}
+
+	kNormM, err := b.ensureFP32Matrix(kNormName, kNorm, headDim, 1)
+	if err != nil {
+		return err
+	}
+
+	fnSM := b.fnSoftmax
+	if !b.hasSoftmax {
+		fnSM = nil
+	}
+
+	rc := C.gguf_cuda_qkv_rope_attn_device(
+		&b.drv,
+		b.ctx,
+		b.fn,
+		b.fnRMS,
+		b.fnRoPE,
+		b.fnAttnQK,
+		b.fnAttnV,
+		fnSM,
+		&b.matmulPool,
+		&b.attnPool,
+		&b.kvCache,
+		qM.ptr,
+		kM.ptr,
+		vM.ptr,
+		qNormM.ptr,
+		kNormM.ptr,
+		(*C.float)(unsafe.Pointer(&h[0])),
+		(*C.float)(unsafe.Pointer(&cos[0])),
+		(*C.float)(unsafe.Pointer(&sin[0])),
+		(*C.float)(unsafe.Pointer(&attn[0])),
+		(*C.float)(unsafe.Pointer(&kOut[0])),
+		(*C.float)(unsafe.Pointer(&vOut[0])),
+		C.int(embd),
+		C.int(nHeads),
+		C.int(nKVHeads),
+		C.int(headDim),
+		C.int(layer),
+		C.int(kvPos),
+		C.int(seqLen),
+		C.float(eps),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: qkv_rope_attn: код %d", int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
+	if !b.hasAttn || !b.hasRoPE || !b.hasRMS {
+		return fmt.Errorf("cuda: qkv+rope+attn kernels недоступны")
+	}
+
+	if len(h) < embd || len(cos) < headDim/2 || len(sin) < headDim/2 || len(attn) < nHeads*headDim || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
+		return fmt.Errorf("cuda: QKVRoPEAttentionQ8_0Cached: короткие буферы")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache не инициализирован")
+	}
+
+	qM, err := b.ensureQ8Matrix(qName, qRaw, nHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	kM, err := b.ensureQ8Matrix(kName, kRaw, nKVHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	vM, err := b.ensureQ8Matrix(vName, vRaw, nKVHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	qNormM, err := b.ensureFP32Matrix(qNormName, qNorm, headDim, 1)
+	if err != nil {
+		return err
+	}
+
+	kNormM, err := b.ensureFP32Matrix(kNormName, kNorm, headDim, 1)
+	if err != nil {
+		return err
+	}
+
+	fnSM := b.fnSoftmax
+	if !b.hasSoftmax {
+		fnSM = nil
+	}
+
+	rc := C.gguf_cuda_qkv_rope_attn_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ8,
+		b.fnRMS,
+		b.fnRoPE,
+		b.fnAttnQK,
+		b.fnAttnV,
+		fnSM,
+		&b.matmulPool,
+		&b.attnPool,
+		&b.kvCache,
+		qM.ptr,
+		kM.ptr,
+		vM.ptr,
+		qNormM.ptr,
+		kNormM.ptr,
+		(*C.float)(unsafe.Pointer(&h[0])),
+		(*C.float)(unsafe.Pointer(&cos[0])),
+		(*C.float)(unsafe.Pointer(&sin[0])),
+		(*C.float)(unsafe.Pointer(&attn[0])),
+		(*C.float)(unsafe.Pointer(&kOut[0])),
+		(*C.float)(unsafe.Pointer(&vOut[0])),
+		C.int(embd),
+		C.int(nHeads),
+		C.int(nKVHeads),
+		C.int(headDim),
+		C.int(layer),
+		C.int(kvPos),
+		C.int(seqLen),
+		C.float(eps),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: qkv_rope_attn q8: код %d", int(rc))
+	}
+
+	return nil
+}
+
 // prepareVecUpload помечает пропуск HtoD, если тот же host-vec уже на GPU (Q/K/V из одного h)
 func (b *Backend) prepareVecUpload(vec []float32) {
 	addr := uintptr(unsafe.Pointer(&vec[0]))
@@ -838,7 +1010,7 @@ func (b *Backend) KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error 
 	}
 
 	qBytes := nHeads * headDim
-	rc = C.gguf_cuda_attn_pool_init(&b.drv, b.ctx, &b.attnPool, C.int(qBytes), C.int(maxSeq))
+	rc = C.gguf_cuda_attn_pool_init(&b.drv, b.ctx, &b.attnPool, C.int(qBytes), C.int(maxSeq), C.int(kvDim), C.int(headDim/2))
 	if rc != 0 {
 		C.gguf_cuda_kv_free(&b.drv, &b.kvCache)
 		return fmt.Errorf("cuda: attn_pool_init: код %d", int(rc))
