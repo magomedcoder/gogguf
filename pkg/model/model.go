@@ -13,7 +13,10 @@ import (
 // Model - интерфейс архитектуры для forward pass
 type Model interface {
 	Forward(tokenIDs []int, startPos int) ([]float32, error)
+
 	ResetCache()
+
+	Close() error
 }
 
 // Load загружает модель по полю general.architecture

@@ -32,13 +32,16 @@ func TestFullLayersCPUVsGPU(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer cpuEng.Close()
 
 	gpuEng, err := gogguf.Load(model, gogguf.LoadOptions{
-		NGL: 999,
+		NGL:       999,
+		GPUMaxSeq: 256,
 	})
 	if err != nil {
 		t.Skipf("CUDA недоступен: %v", err)
 	}
+	defer gpuEng.Close()
 
 	ctx, err := cpuEng.NewContext()
 	if err != nil {

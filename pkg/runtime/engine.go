@@ -79,3 +79,14 @@ func (e *Engine) ContextLength() int {
 func (e *Engine) ForwardTokenIDs(tokens []int, startPos int) ([]float32, error) {
 	return e.Model.Forward(tokens, startPos)
 }
+
+// Close освобождает GPU и связанные ресурсы модели
+func (e *Engine) Close() error {
+	if e == nil || e.Model == nil {
+		return nil
+	}
+	err := e.Model.Close()
+	e.Model = nil
+
+	return err
+}

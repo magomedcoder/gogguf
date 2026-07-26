@@ -100,6 +100,17 @@ func (m *Model) ResetCache() {
 	}
 }
 
+// Close освобождает GPU-ресурсы модели
+func (m *Model) Close() error {
+	if m.gpu == nil {
+		return nil
+	}
+	err := m.gpu.Close()
+	m.gpu = nil
+
+	return err
+}
+
 // SetDebugHooks включает колбэки для пошаговой отладки forward pass
 func (m *Model) SetDebugHooks(h *DebugHooks) {
 	m.debug = h
