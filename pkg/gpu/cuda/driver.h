@@ -128,6 +128,7 @@ typedef struct gguf_matmul_graph_entry {
 	int rows;
 	int cols;
 	int is_q8;
+	int kernel_only; // 1 = без HtoD (vec уже на GPU)
 	CUgraphExec exec;
 	struct gguf_matmul_graph_entry *next;
 } gguf_matmul_graph_entry_t;

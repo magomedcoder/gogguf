@@ -60,13 +60,13 @@ func TestMatMulVecCachedGraphReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Первый вызов: upload + capture graph (если API доступен)
+	// Первый вызов: HtoD + capture full graph
 	got1, err := b.MatMulVecCached("graph-fp32", matrix, rows, cols, vec)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Второй: replay того же graph
+	// Второй: same vec -> kernel-only graph (без HtoD)
 	got2, err := b.MatMulVecCached("graph-fp32", matrix, rows, cols, vec)
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +105,70 @@ func TestMatMulVecCachedGraphReplay(t *testing.T) {
 
 	if !b.hasGraphs {
 		t.Log("CUDA Graphs API недоступен - используется pool + обычный launch")
+	}
+}
+
+// TestMatMulVecCachedKernelOnlySameVec: один h -> две матрицы (как Q/K), второй matmul без HtoD
+func TestMatMulVecCachedKernelOnlySameVec(t *testing.T) {
+	b, err := Open()
+	if err != nil {
+		t.Skip("CUDA недоступна:", err)
+	}
+	defer b.Close()
+
+	rows, cols := 8, 16
+	wq := make([]float32, rows*cols)
+	wk := make([]float32, rows*cols)
+	for i := range wq {
+		wq[i] = float32(i%5) * 0.25
+		wk[i] = float32((i*3)%7) * 0.1
+	}
+
+	h := make([]float32, cols)
+	for i := range h {
+		h[i] = float32(i+1) * 0.05
+	}
+
+	wantQ, err := ops.MatMulVec(wq, rows, cols, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantK, err := ops.MatMulVec(wk, rows, cols, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotQ, err := b.MatMulVecCached("ko-q", wq, rows, cols, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotK, err := b.MatMulVecCached("ko-k", wk, rows, cols, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range wantQ {
+		if math.Abs(float64(gotQ[i]-wantQ[i])) > 1e-4 {
+			t.Fatalf("Q[%d]=%v want %v", i, gotQ[i], wantQ[i])
+		}
+
+		if math.Abs(float64(gotK[i]-wantK[i])) > 1e-4 {
+			t.Fatalf("K[%d]=%v want %v", i, gotK[i], wantK[i])
+		}
+	}
+
+	// повтор K: снова kernel-only replay
+	gotK2, err := b.MatMulVecCached("ko-k", wk, rows, cols, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range wantK {
+		if math.Abs(float64(gotK2[i]-wantK[i])) > 1e-4 {
+			t.Fatalf("K replay[%d]=%v want %v", i, gotK2[i], wantK[i])
+		}
 	}
 }
 

@@ -1383,9 +1383,9 @@ static int gguf_cuda_graph_instantiate(cuda_driver_t *drv, CUgraph graph, CUgrap
 	return -1;
 }
 
-static gguf_matmul_graph_entry_t *gguf_cuda_matmul_find_graph(gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, int rows, int cols, int is_q8) {
+static gguf_matmul_graph_entry_t *gguf_cuda_matmul_find_graph(gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, int rows, int cols, int is_q8, int kernel_only) {
 	for (gguf_matmul_graph_entry_t *e = pool->graphs; e; e = e->next) {
-		if (e->d_matrix == d_matrix && e->rows == rows && e->cols == cols && e->is_q8 == is_q8) {
+		if (e->d_matrix == d_matrix && e->rows == rows && e->cols == cols && e->is_q8 == is_q8 && e->kernel_only == kernel_only) {
 			return e;
 		}
 	}
@@ -1393,7 +1393,7 @@ static gguf_matmul_graph_entry_t *gguf_cuda_matmul_find_graph(gguf_matmul_pool_t
 	return NULL;
 }
 
-static int gguf_cuda_matmul_capture(cuda_driver_t *drv, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, int rows, int cols, int is_q8, CUgraphExec *exec_out) {
+static int gguf_cuda_matmul_capture(cuda_driver_t *drv, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, int rows, int cols, int is_q8, int kernel_only, CUgraphExec *exec_out) {
 	CUdeviceptr d_vec = pool->d_vec;
 	CUdeviceptr d_out = pool->d_out;
 	size_t vec_bytes = (size_t)cols * sizeof(float);
@@ -1413,8 +1413,10 @@ static int gguf_cuda_matmul_capture(cuda_driver_t *drv, CUfunction fn, gguf_matm
 		return -1;
 	}
 
-	if (drv->cuMemcpyHtoDAsync(d_vec, pool->h_vec, vec_bytes, pool->stream) != CUDA_SUCCESS) {
-		goto capture_fail;
+	if (!kernel_only) {
+		if (drv->cuMemcpyHtoDAsync(d_vec, pool->h_vec, vec_bytes, pool->stream) != CUDA_SUCCESS) {
+			goto capture_fail;
+		}
 	}
 
 	if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, pool->stream, params, NULL) != CUDA_SUCCESS) {
@@ -1476,12 +1478,13 @@ static int gguf_cuda_matmul_run_pooled(cuda_driver_t *drv, CUcontext ctx, CUfunc
 		memcpy(pool->h_vec, vec, vec_bytes);
 	}
 
-	// CUDA Graph включает HtoD - при повторном том же vec идём в kernel-only путь
-	if (use_graph && drv->has_graphs && pool->stream && !same_vec) {
-		gguf_matmul_graph_entry_t *entry = gguf_cuda_matmul_find_graph(pool, d_matrix, rows, cols, is_q8);
+	// full graph: HtoD+kernel+DtoH; kernel-only: kernel+DtoH (vec уже на GPU)
+	if (use_graph && drv->has_graphs && pool->stream) {
+		int kernel_only = same_vec ? 1 : 0;
+		gguf_matmul_graph_entry_t *entry = gguf_cuda_matmul_find_graph(pool, d_matrix, rows, cols, is_q8, kernel_only);
 		if (!entry) {
 			CUgraphExec exec = NULL;
-			if (gguf_cuda_matmul_capture(drv, fn, pool, d_matrix, rows, cols, is_q8, &exec) != 0) {
+			if (gguf_cuda_matmul_capture(drv, fn, pool, d_matrix, rows, cols, is_q8, kernel_only, &exec) != 0) {
 				goto fallback;
 			}
 
@@ -1495,6 +1498,7 @@ static int gguf_cuda_matmul_run_pooled(cuda_driver_t *drv, CUcontext ctx, CUfunc
 			entry->rows = rows;
 			entry->cols = cols;
 			entry->is_q8 = is_q8;
+			entry->kernel_only = kernel_only;
 			entry->exec = exec;
 			entry->next = pool->graphs;
 			pool->graphs = entry;
