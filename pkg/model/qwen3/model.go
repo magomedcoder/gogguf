@@ -529,7 +529,7 @@ func (m *Model) matmul(name string, rows, cols int, vec []float32, layer int) ([
 	}
 }
 
-// matmulGPU выполняет matmul на GPU (Q8_0 без деквантизации, иначе FP32)
+// matmulGPU выполняет matmul на GPU (Q8_0/Q4_0 без полной деквантизации, иначе FP32)
 func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32, error) {
 	info, err := m.weights.Info(name)
 	if err != nil {
@@ -543,6 +543,15 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		}
 
 		return m.gpu.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
+	}
+
+	if info.Type == format.GgmlQ4_0 {
+		raw, err := m.weights.Raw(name)
+		if err != nil {
+			return nil, err
+		}
+
+		return m.gpu.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
 	}
 
 	f32, err := m.weights.Floats(name)

@@ -40,6 +40,7 @@ type Backend struct {
 	moduleOps   C.CUmodule
 	fn          C.CUfunction
 	fnQ8        C.CUfunction
+	fnQ4        C.CUfunction
 	fnRMS       C.CUfunction
 	fnRoPE      C.CUfunction
 	fnRoPENorm  C.CUfunction
@@ -56,10 +57,12 @@ type Backend struct {
 	hasSoftmax  bool
 	hasAdd      bool
 	hasGraphs   bool
+	hasQ4       bool
 
 	mu          sync.Mutex
 	matrices    map[string]gpuMatrix
 	matricesQ8  map[string]gpuQ8Matrix
+	matricesQ4  map[string]gpuQ8Matrix
 	kvCache     C.gguf_kv_cache_t
 	kvReady     bool
 	attnPool    C.gguf_attn_pool_t
@@ -73,6 +76,7 @@ func Open() (*Backend, error) {
 	b := &Backend{
 		matrices:   make(map[string]gpuMatrix),
 		matricesQ8: make(map[string]gpuQ8Matrix),
+		matricesQ4: make(map[string]gpuQ8Matrix),
 	}
 
 	var nameBuf [256]C.char
@@ -119,6 +123,11 @@ func (b *Backend) loadMatmulModule(gpuCC int, errBuf *[4096]C.char) error {
 		rc := C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
 		C.free(unsafe.Pointer(cptx))
 		if rc == 0 {
+			cQ4 := C.CString("matmul_vec_q4_0")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cQ4, &b.fnQ4) == 0 {
+				b.hasQ4 = true
+			}
+			C.free(unsafe.Pointer(cQ4))
 			return nil
 		}
 
@@ -198,6 +207,11 @@ func (b *Backend) Close() error {
 		C.gguf_cuda_free(&b.drv, m.ptr)
 	}
 	b.matricesQ8 = nil
+
+	for _, m := range b.matricesQ4 {
+		C.gguf_cuda_free(&b.drv, m.ptr)
+	}
+	b.matricesQ4 = nil
 
 	C.gguf_cuda_shutdown(&b.drv, b.ctx)
 	return nil
@@ -332,6 +346,65 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 	)
 	if rc != 0 {
 		return nil, fmt.Errorf("cuda: matmul_vec_q8_0 %q: код %d", name, int(rc))
+	}
+
+	return out, nil
+}
+
+func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	if !b.hasQ4 {
+		return nil, fmt.Errorf("cuda: q4_0 matmul kernel недоступен")
+	}
+	if err := validateQ4MatMul(raw, rows, cols, vec); err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gm, ok := b.matricesQ4[name]
+	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
+		if ok {
+			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
+			C.gguf_cuda_free(&b.drv, gm.ptr)
+			b.lastVecAddr = 0
+			b.lastVecLen = 0
+		}
+
+		var ptr C.CUdeviceptr
+		rc := C.gguf_cuda_upload_q4_0(
+			&b.drv, b.ctx, &ptr,
+			unsafe.Pointer(&raw[0]),
+			C.size_t(len(raw)),
+		)
+		if rc != 0 {
+			return nil, fmt.Errorf("cuda: upload q4_0 %q: код %d", name, int(rc))
+		}
+
+		gm = gpuQ8Matrix{
+			ptr:   ptr,
+			rows:  rows,
+			cols:  cols,
+			bytes: len(raw),
+		}
+		b.matricesQ4[name] = gm
+	}
+
+	out := make([]float32, rows)
+	b.prepareVecUpload(vec)
+	rc := C.gguf_cuda_matmul_vec_q4_0_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ4,
+		&b.matmulPool,
+		gm.ptr,
+		(*C.float)(unsafe.Pointer(&vec[0])),
+		(*C.float)(unsafe.Pointer(&out[0])),
+		C.int(rows),
+		C.int(cols),
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("cuda: matmul_vec_q4_0 %q: код %d", name, int(rc))
 	}
 
 	return out, nil
@@ -1132,6 +1205,28 @@ func validateQ8MatMul(raw []byte, rows, cols int, vec []float32) error {
 	want := rows * blocksPerRow * quant.BlockQ8_0Size
 	if len(raw) < want {
 		return fmt.Errorf("cuda: Q8_0 matrix слишком короткая")
+	}
+
+	return nil
+}
+
+func validateQ4MatMul(raw []byte, rows, cols int, vec []float32) error {
+	if rows <= 0 || cols <= 0 {
+		return fmt.Errorf("cuda: rows=%d cols=%d", rows, cols)
+	}
+
+	if cols%quant.QK4_0 != 0 {
+		return fmt.Errorf("cuda: cols=%d не кратно %d", cols, quant.QK4_0)
+	}
+
+	if len(vec) != cols {
+		return fmt.Errorf("cuda: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	blocksPerRow := cols / quant.QK4_0
+	want := rows * blocksPerRow * quant.BlockQ4_0Size
+	if len(raw) < want {
+		return fmt.Errorf("cuda: Q4_0 matrix слишком короткая")
 	}
 
 	return nil

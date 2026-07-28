@@ -358,6 +358,15 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		return m.gpu.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
 	}
 
+	if info.Type == format.GgmlQ4_0 {
+		raw, err := m.weights.Raw(name)
+		if err != nil {
+			return nil, err
+		}
+
+		return m.gpu.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
+	}
+
 	f32, err := m.weights.Floats(name)
 	if err != nil {
 		return nil, err

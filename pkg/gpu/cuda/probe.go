@@ -28,6 +28,11 @@ func MatmulQ8PTXForTarget(target int) string {
 	return ptxHeaderForTarget(target) + matmulQ8Kernel
 }
 
+// MatmulQ4PTXForTarget только matmul_vec_q4_0
+func MatmulQ4PTXForTarget(target int) string {
+	return ptxHeaderForTarget(target) + matmulQ4Kernel
+}
+
 // ProbeLoadPTX пробует загрузить PTX на GPU 0
 func ProbeLoadPTX(ptx string) error {
 	var drv C.cuda_driver_t

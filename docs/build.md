@@ -28,7 +28,7 @@ CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
 
 `-ngl N` - offload the first N transformer layers to GPU (max `block_count`; Qwen3-0.6B - 28).
 
-On GPU: matmul (Q8_0 and FP32) with CUDA Graphs (full HtoD+kernel+DtoH, or kernel-only when the same vec is already resident), FFN residency, QKV+RoPE+attn residency, attn+FFN residual (WO+RMSNorm+FFN, parallel RMSNorm apply), attention (+ softmax), KV-cache. Disable with `GGUF_QKV_RESIDENCY=0` / `GGUF_ATTN_FFN_RESIDENCY=0`. Call `Engine.Close()` to free VRAM between loads.
+On GPU: matmul (FP32, Q8_0, Q4_0) with CUDA Graphs (full HtoD+kernel+DtoH, or kernel-only when the same vec is already resident), FFN residency, QKV+RoPE+attn residency, attn+FFN residual (WO+RMSNorm+FFN, parallel RMSNorm apply), attention (+ softmax), KV-cache. Disable with `GGUF_QKV_RESIDENCY=0` / `GGUF_ATTN_FFN_RESIDENCY=0`. Call `Engine.Close()` to free VRAM between loads.
 
 Blackwell (sm_120, RTX 50xx): requires PTX 8.7+; Q8_0 scales are converted to FP32 on upload (no PTX f16).
 

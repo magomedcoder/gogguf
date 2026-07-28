@@ -259,6 +259,67 @@ func TestMatMulVecQ8_0GPU(t *testing.T) {
 	}
 }
 
+func TestMatMulVecQ4_0GPU(t *testing.T) {
+	b, err := Open()
+	if err != nil {
+		t.Skip("CUDA недоступна:", err)
+	}
+	defer b.Close()
+
+	if !b.hasQ4 {
+		t.Skip("CUDA q4_0 kernel недоступен")
+	}
+
+	rows, cols := 2, 32
+	vec := make([]float32, cols)
+	for i := range cols {
+		vec[i] = 1
+	}
+
+	// Q4_0: scale fp16=1.0, qs pack nibbles for values 0..15 then 0..15 -> dequant (q-8)
+	raw := make([]byte, rows*(cols/quant.QK4_0)*quant.BlockQ4_0Size)
+	for r := range rows {
+		block := raw[r*quant.BlockQ4_0Size:]
+		binary.LittleEndian.PutUint16(block[0:2], 0x3c00) // fp16 1.0
+		for i := 0; i < quant.QK4_0/2; i++ {
+			lo := byte(i % 16)
+			hi := byte((i + 8) % 16)
+			if r == 1 {
+				lo = byte((15 - i) % 16)
+				hi = byte((7 - i + 16) % 16)
+			}
+			block[2+i] = lo | (hi << 4)
+		}
+	}
+
+	want, err := ops.MatMulVecQ4_0(raw, rows, cols, vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := b.MatMulVecQ4_0Cached("test-q4", raw, rows, cols, vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(got[i]-want[i])) > 1e-3 {
+			t.Fatalf("строка %d: получили %v, ожидали %v", i, got[i], want[i])
+		}
+	}
+
+	got2, err := b.MatMulVecQ4_0Cached("test-q4", raw, rows, cols, vec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(got2[i]-want[i])) > 1e-3 {
+			t.Fatalf("replay строка %d: получили %v, ожидали %v", i, got2[i], want[i])
+		}
+	}
+}
+
 func TestRMSNormGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
