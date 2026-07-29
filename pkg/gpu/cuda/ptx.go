@@ -307,7 +307,122 @@ Q4_EXIT:
 }
 `
 
-const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel + matmulQ4Kernel
+const matmulQ4KKernel = `
+.visible .entry matmul_vec_q4_k(
+    .param .u64 param_matrix,
+    .param .u64 param_vec,
+    .param .u64 param_out,
+    .param .u32 param_rows,
+    .param .u32 param_cols
+)
+{
+    .reg .pred      %p<5>;
+    .reg .b32       %r<20>;
+    .reg .b64       %rd<24>;
+    .reg .f32       %f<8>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_rows];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra Q4K_EXIT;
+
+    ld.param.u64    %rd1, [param_matrix];
+    ld.param.u64    %rd2, [param_vec];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_cols];
+
+    shr.u32         %r7, %r6, 8;
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r8, 0;
+
+Q4K_BLOCK:
+    setp.ge.u32     %p1, %r8, %r7;
+    @%p1            bra Q4K_DONE;
+
+    mul.lo.u32      %r9, %r4, %r7;
+    add.u32         %r9, %r9, %r8;
+    mul.wide.u32    %rd4, %r9, 192;
+    add.u64         %rd5, %rd1, %rd4;
+
+    mov.u32         %r10, 0;
+
+Q4K_GROUP:
+    setp.ge.u32     %p2, %r10, 8;
+    @%p2            bra Q4K_GROUP_DONE;
+
+    mul.wide.u32    %rd6, %r10, 4;
+    add.u64         %rd7, %rd5, %rd6;
+    ld.global.f32   %f2, [%rd7];
+    add.u64         %rd8, %rd7, 32;
+    ld.global.f32   %f3, [%rd8];
+
+    shr.u32         %r11, %r10, 1;
+    mul.lo.u32      %r12, %r11, 32;
+    add.u64         %rd9, %rd5, 64;
+    cvt.u64.u32     %rd10, %r12;
+    add.u64         %rd11, %rd9, %rd10;
+
+    and.b32         %r19, %r10, 1;
+    mov.u32         %r14, 0;
+
+Q4K_INNER:
+    setp.ge.u32     %p3, %r14, 32;
+    @%p3            bra Q4K_INNER_DONE;
+
+    cvt.u64.u32     %rd12, %r14;
+    add.u64         %rd13, %rd11, %rd12;
+    ld.global.u8    %r15, [%rd13];
+
+    setp.ne.u32     %p4, %r19, 0;
+    @%p4            bra Q4K_HIGH;
+    and.b32         %r16, %r15, 15;
+    bra Q4K_HAVE_Q;
+
+Q4K_HIGH:
+    shr.u32         %r16, %r15, 4;
+
+Q4K_HAVE_Q:
+    cvt.rn.f32.u32  %f4, %r16;
+    mul.f32         %f5, %f2, %f4;
+    sub.f32         %f5, %f5, %f3;
+
+    mul.lo.u32      %r17, %r8, 256;
+    mul.lo.u32      %r18, %r10, 32;
+    add.u32         %r17, %r17, %r18;
+    add.u32         %r17, %r17, %r14;
+    mul.wide.u32    %rd14, %r17, 4;
+    add.u64         %rd15, %rd2, %rd14;
+    ld.global.f32   %f6, [%rd15];
+
+    fma.rn.f32      %f1, %f5, %f6, %f1;
+
+    add.u32         %r14, %r14, 1;
+    bra Q4K_INNER;
+
+Q4K_INNER_DONE:
+    add.u32         %r10, %r10, 1;
+    bra Q4K_GROUP;
+
+Q4K_GROUP_DONE:
+    add.u32         %r8, %r8, 1;
+    bra Q4K_BLOCK;
+
+Q4K_DONE:
+    cvt.u64.u32     %rd16, %r4;
+    shl.b64         %rd17, %rd16, 2;
+    add.u64         %rd18, %rd3, %rd17;
+    st.global.f32   [%rd18], %f1;
+
+Q4K_EXIT:
+    ret;
+}
+`
+
+const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel + matmulQ4Kernel + matmulQ4KKernel
 
 const opsKernelsBody = `
 // rmsnorm: 1 block - sum на tid0, apply параллельно (stride)

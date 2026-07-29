@@ -197,6 +197,12 @@ int gguf_cuda_upload_q4_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matr
 // gguf_cuda_matmul_vec_q4_0_device matmul Q4_0 с весами уже на GPU
 int gguf_cuda_matmul_vec_q4_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
+// gguf_cuda_upload_q4_k загружает Q4_K (scales->fp32 d_sc/d_mn + qs)
+int gguf_cuda_upload_q4_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_matmul_vec_q4_k_device matmul Q4_K с весами уже на GPU
+int gguf_cuda_matmul_vec_q4_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+
 // gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down, активации на GPU (1* HtoD + 1* DtoH)
 int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
 

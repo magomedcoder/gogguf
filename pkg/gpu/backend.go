@@ -22,6 +22,9 @@ type Backend interface {
 	// MatMulVecQ4_0Cached matmul Q4_0-матрицы без полной деквантизации в FP32
 	MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
+	// MatMulVecQ4_KCached matmul Q4_K-матрицы (K-quant)
+	MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
 	// RMSNormInto записывает RMS-нормализацию в dst (GPU или CPU)
 	RMSNormInto(dst, x, weight []float32, eps float32) error
 
