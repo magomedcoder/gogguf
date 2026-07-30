@@ -51,7 +51,7 @@ curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GG
 ```bash
 docker build -t gogguf .
 
-docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /models/Qwen3-0.6B-Q8_0.gguf --addr 0.0.0.0:8000
+docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /models/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0:8000
 ```
 
 **CUDA** (NVIDIA GPU, `linux/amd64` only):
@@ -59,5 +59,5 @@ docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /mode
 ```bash
 docker build --target runtime-cuda -t gogguf-cuda .
 
-docker run --rm --gpus all -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf-cuda serve -m /models/Qwen3-0.6B-Q8_0.gguf --addr 0.0.0.0:8000 -ngl 28
+docker run --rm --gpus all -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf-cuda serve -m /models/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0:8000 -ngl 28
 ```

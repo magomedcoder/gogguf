@@ -43,7 +43,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
 
 ENTRYPOINT ["gogguf"]
 
-CMD ["serve", "-m", "/models/model.gguf", "--addr", "0.0.0.0:8000"]
+CMD ["serve", "-m", "/models/model.gguf", "--host", "0.0.0.0:8000"]
 
 FROM alpine:3.24.0 AS runtime
 
@@ -60,4 +60,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
 
 ENTRYPOINT ["gogguf"]
 
-CMD ["serve", "-m", "/models/model.gguf", "--addr", "0.0.0.0:8000"]
+CMD ["serve", "-m", "/models/model.gguf", "--host", "0.0.0.0:8000"]

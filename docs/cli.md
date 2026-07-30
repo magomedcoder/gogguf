@@ -91,20 +91,20 @@ HTTP server for text generation API.
 Graceful shutdown on `Ctrl+C` (SIGINT/SIGTERM).
 
 ```bash
-./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --addr 127.0.0.1:8000
+./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --host 127.0.0.1:8000
 ```
 
 Or from Hugging Face:
 
 ```bash
-./build/gogguf serve -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --addr 127.0.0.1:8000
+./build/gogguf serve -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --host 127.0.0.1:8000
 ```
 
 | Flag                | Default          | Description                                          |
 |---------------------|------------------|------------------------------------------------------|
 | `-m`                | -                | path to `.gguf` file (mutually exclusive with `-hf`) |
 | `-hf` / `--hf-repo` | -                | Hugging Face `owner/repo[:quant]`                    |
-| `--addr`            | `127.0.0.1:8000` | HTTP listen address                                  |
+| `--host`            | `127.0.0.1:8000` | HTTP listen address                                  |
 | `-ngl`              | `0`              | matmul N transformer layers on GPU (CUDA build)      |
 
 See [HTTP API](api.md) for endpoints.

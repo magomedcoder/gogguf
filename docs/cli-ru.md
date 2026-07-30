@@ -91,20 +91,20 @@ HTTP-сервер для генерации текста по API.
 Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 
 ```bash
-./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --addr 127.0.0.1:8000
+./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --host 127.0.0.1:8000
 ```
 
 Или с Hugging Face:
 
 ```bash
-./build/gogguf serve -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --addr 127.0.0.1:8000
+./build/gogguf serve -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --host 127.0.0.1:8000
 ```
 
 | Флаг                | По умолчанию     | Описание                                        |
 |---------------------|------------------|-------------------------------------------------|
 | `-m`                | -                | путь к файлу `.gguf` (взаимоисключающе с `-hf`) |
 | `-hf` / `--hf-repo` | -                | Hugging Face `owner/repo[:quant]`               |
-| `--addr`            | `127.0.0.1:8000` | адрес HTTP-сервера                              |
+| `--host`            | `127.0.0.1:8000` | адрес HTTP-сервера                              |
 | `-ngl`              | `0`              | matmul N transformer-слоёв на GPU (CUDA-сборка) |
 
 Подробнее об эндпоинтах: [HTTP API](api-ru.md).
