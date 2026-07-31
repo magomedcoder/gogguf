@@ -135,6 +135,7 @@ typedef struct gguf_matmul_graph_entry {
 
 #define GGUF_LAYER_GRAPH_FFN 1
 #define GGUF_LAYER_GRAPH_RESIDUAL 2
+#define GGUF_LAYER_GRAPH_QKV 3
 
 typedef struct gguf_layer_graph_entry {
 	int kind;
@@ -143,9 +144,17 @@ typedef struct gguf_layer_graph_entry {
 	CUdeviceptr d_gate_w;
 	CUdeviceptr d_up_w;
 	CUdeviceptr d_down_w;
+	CUdeviceptr d_wq;
+	CUdeviceptr d_wk;
+	CUdeviceptr d_wv;
+	CUdeviceptr d_q_norm;
+	CUdeviceptr d_k_norm;
 	int embd;
 	int attn_dim;
 	int ffn;
+	int n_heads;
+	int n_kv_heads;
+	int head_dim;
 	int skip_attn; // residual: attn уже в d_vec
 	int skip_vec;  // ffn: x уже в d_vec
 	CUgraphExec exec;
@@ -286,6 +295,8 @@ typedef struct {
 	CUdeviceptr d_v_tok; // текущий token V
 	CUdeviceptr d_cos; // RoPE cos (head_dim/2)
 	CUdeviceptr d_sin; // RoPE sin
+	float *h_cos;
+	float *h_sin;
 	int q_elems;
 	int max_seq;
 	int kv_dim;
@@ -310,7 +321,7 @@ int gguf_cuda_attn_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_attn_pool_t
 // gguf_cuda_attn_pool_free освобождает буферы attention
 void gguf_cuda_attn_pool_free(cuda_driver_t *drv, gguf_attn_pool_t *pool);
 
-// gguf_cuda_qkv_rope_attn_device: h->QKV->head RMSNorm->RoPE->KV append->attn (1*HtoD h + DtoH attn/k/v)
+// gguf_cuda_qkv_rope_attn_device: h->QKV->head RMSNorm->RoPE (CUDA Graph) -> KV append->attn
 // После успеха attn лежит в matmul_pool.d_vec и skip_attn_htod=1 для residual.
 int gguf_cuda_qkv_rope_attn_device(
     cuda_driver_t *drv,

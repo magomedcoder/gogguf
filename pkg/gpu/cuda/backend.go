@@ -1151,6 +1151,7 @@ func (b *Backend) KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error 
 	}
 
 	C.gguf_cuda_attn_pool_free(&b.drv, &b.attnPool)
+	C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
 
 	rc := C.gguf_cuda_kv_init(&b.drv, b.ctx, &b.kvCache, C.int(layers), C.int(maxSeq), C.int(kvDim))
 	if rc != 0 {
