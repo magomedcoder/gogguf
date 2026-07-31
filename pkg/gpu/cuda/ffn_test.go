@@ -77,4 +77,8 @@ func TestFFNSwiGLUGPU(t *testing.T) {
 			t.Fatalf("replay out[%d]=%v want %v", i, out2[i], want[i])
 		}
 	}
+
+	if b.hasGraphs && b.matmulPool.layer_graphs == nil {
+		t.Fatal("ожидался FFN layer CUDA Graph после replay")
+	}
 }

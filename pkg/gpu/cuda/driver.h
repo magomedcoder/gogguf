@@ -133,6 +133,25 @@ typedef struct gguf_matmul_graph_entry {
 	struct gguf_matmul_graph_entry *next;
 } gguf_matmul_graph_entry_t;
 
+#define GGUF_LAYER_GRAPH_FFN 1
+#define GGUF_LAYER_GRAPH_RESIDUAL 2
+
+typedef struct gguf_layer_graph_entry {
+	int kind;
+	CUdeviceptr d_wo;
+	CUdeviceptr d_ffn_norm;
+	CUdeviceptr d_gate_w;
+	CUdeviceptr d_up_w;
+	CUdeviceptr d_down_w;
+	int embd;
+	int attn_dim;
+	int ffn;
+	int skip_attn; // residual: attn уже в d_vec
+	int skip_vec;  // ffn: x уже в d_vec
+	CUgraphExec exec;
+	struct gguf_layer_graph_entry *next;
+} gguf_layer_graph_entry_t;
+
 // gguf_matmul_pool_t - переиспользуемые d_vec/d_out/d_aux/d_resid + host staging + CUDA Graph cache
 typedef struct {
 	CUdeviceptr d_vec;
@@ -141,12 +160,14 @@ typedef struct {
 	CUdeviceptr d_resid; // residual stream (layer residency)
 	float *h_vec;
 	float *h_out;
+	float *h_resid; // staging для residual HtoD(x)
 	int vec_cap;
 	int out_cap;
 	int aux_cap;
 	int resid_cap;
 	CUstream stream;
 	gguf_matmul_graph_entry_t *graphs;
+	gguf_layer_graph_entry_t *layer_graphs;
 	int skip_vec_htod; // 1 = vec уже на GPU (задаётся из Go)
 	int skip_attn_htod; // 1 = attn уже в d_vec (QKV residency)
 } gguf_matmul_pool_t;
@@ -203,10 +224,10 @@ int gguf_cuda_upload_q4_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matr
 // gguf_cuda_matmul_vec_q4_k_device matmul Q4_K с весами уже на GPU
 int gguf_cuda_matmul_vec_q4_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
-// gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down, активации на GPU (1* HtoD + 1* DtoH)
+// gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down (CUDA Graph при has_graphs)
 int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
 
-// gguf_cuda_attn_ffn_residual_device: WO + residual + RMSNorm + FFN + residual
+// gguf_cuda_attn_ffn_residual_device: WO + residual + RMSNorm + FFN + residual (CUDA Graph)
 // 2*HtoD + 1*DtoH; если pool->skip_attn_htod - attn уже в d_vec (1*HtoD x + 1*DtoH)
 int gguf_cuda_attn_ffn_residual_device(
     cuda_driver_t *drv,

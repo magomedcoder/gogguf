@@ -92,4 +92,19 @@ func TestAttnFFNResidualGPU(t *testing.T) {
 			t.Fatalf("x[%d]=%v want %v", i, got[i], wantX[i])
 		}
 	}
+
+	got2 := append([]float32(nil), x...)
+	if err := b.AttnFFNResidualCached("wo", "norm", "g", "u", "d", wo, ffnNorm, gate, up, down, got2, attn, embd, attnDim, ffn, eps); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range wantX {
+		if math.Abs(float64(got2[i]-wantX[i])) > 2e-3 {
+			t.Fatalf("replay x[%d]=%v want %v", i, got2[i], wantX[i])
+		}
+	}
+
+	if b.hasGraphs && b.matmulPool.layer_graphs == nil {
+		t.Fatal("ожидался residual layer CUDA Graph после replay")
+	}
 }
