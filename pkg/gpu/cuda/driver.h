@@ -287,6 +287,19 @@ typedef struct {
 	int num_layers;
 } gguf_kv_cache_t;
 
+typedef struct gguf_attn_graph_entry {
+	CUdeviceptr d_k;
+	CUdeviceptr d_v;
+	int seq_len;
+	int n_heads;
+	int n_kv_heads;
+	int head_dim;
+	int skip_q_htod;
+	int skip_dst_dtoh;
+	CUgraphExec exec;
+	struct gguf_attn_graph_entry *next;
+} gguf_attn_graph_entry_t;
+
 typedef struct {
 	CUdeviceptr d_q;
 	CUdeviceptr d_dst;
@@ -301,6 +314,8 @@ typedef struct {
 	int max_seq;
 	int kv_dim;
 	int rope_half;
+	gguf_attn_graph_entry_t *graphs;
+	int graph_count;
 } gguf_attn_pool_t;
 
 // gguf_cuda_kv_init выделяет GPU-буферы K/V для num_layers слоёв

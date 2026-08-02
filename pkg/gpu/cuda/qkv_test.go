@@ -197,4 +197,8 @@ func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 	if b.hasGraphs && b.matmulPool.layer_graphs == nil {
 		t.Fatal("ожидался QKV layer CUDA Graph после replay")
 	}
+
+	if b.hasGraphs && b.attnPool.graphs == nil {
+		t.Fatal("ожидался attention CUDA Graph по seq_len")
+	}
 }

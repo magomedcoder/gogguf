@@ -337,6 +337,27 @@ static void softmax_host(float *x, int n) {
 	}
 }
 
+static int gguf_cuda_graph_instantiate(cuda_driver_t *drv, CUgraph graph, CUgraphExec *exec_out);
+
+static void gguf_cuda_attn_clear_graphs(cuda_driver_t *drv, gguf_attn_pool_t *pool) {
+	if (!drv || !pool) {
+		return;
+	}
+
+	gguf_attn_graph_entry_t *e = pool->graphs;
+	while (e) {
+		gguf_attn_graph_entry_t *next = e->next;
+		if (drv->cuGraphExecDestroy && e->exec) {
+			drv->cuGraphExecDestroy(e->exec);
+		}
+		free(e);
+		e = next;
+	}
+
+	pool->graphs = NULL;
+	pool->graph_count = 0;
+}
+
 static int gguf_cuda_attention_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, float *dst, const float *q, CUdeviceptr d_k, CUdeviceptr d_v, gguf_attn_pool_t *pool, int seq_len, int n_heads, int n_kv_heads, int head_dim, int skip_q_htod, int skip_dst_dtoh, CUstream stream) {
 	if (gguf_cuda_set_context(drv, ctx) != 0) {
 		return -10;
@@ -402,6 +423,121 @@ static int gguf_cuda_attention_device(cuda_driver_t *drv, CUcontext ctx, CUfunct
 	if (!skip_q_htod) {
 		if (!q || drv->cuMemcpyHtoD(d_q, q, q_bytes) != CUDA_SUCCESS) {
 			goto fail;
+		}
+	}
+
+    // График CUDA: пул + Softmax GPU + поток (путь резидентности QKV)
+	if (pooled && pool && fn_softmax && drv->has_graphs && stream) {
+		gguf_attn_graph_entry_t *entry = NULL;
+		for (gguf_attn_graph_entry_t *e = pool->graphs; e; e = e->next) {
+			if (e->d_k == d_k && e->d_v == d_v && e->seq_len == seq_len && e->n_heads == n_heads && e->n_kv_heads == n_kv_heads && e->head_dim == head_dim && e->skip_q_htod == skip_q_htod && e->skip_dst_dtoh == skip_dst_dtoh) {
+				entry = e;
+				break;
+			}
+		}
+
+		if (!entry) {
+			if (pool->graph_count >= 128) {
+				gguf_cuda_attn_clear_graphs(drv, pool);
+			}
+
+			if (drv->cuStreamBeginCapture(stream, 0) == CUDA_SUCCESS) {
+				unsigned int block = 256;
+				int ok = 1;
+				for (int h = 0; h < n_heads && ok; h++) {
+					int kv_head = h / group;
+					int q_off = h * head_dim;
+					int kv_off = kv_head * head_dim;
+					CUdeviceptr d_out_head = d_dst + (CUdeviceptr)((size_t)q_off * sizeof(float));
+
+					void *params_qk[9];
+					params_qk[0] = &d_q;
+					params_qk[1] = &d_k;
+					params_qk[2] = &d_scores;
+					params_qk[3] = &seq_len;
+					params_qk[4] = &head_dim;
+					params_qk[5] = &kv_stride;
+					params_qk[6] = &kv_off;
+					params_qk[7] = &q_off;
+					params_qk[8] = &scale;
+
+					unsigned int grid_qk = ((unsigned int)seq_len + block - 1) / block;
+					if (drv->cuLaunchKernel(fn_qk, grid_qk, 1, 1, block, 1, 1, 0, stream, params_qk, NULL) != CUDA_SUCCESS) {
+						ok = 0;
+						break;
+					}
+
+					void *params_sm[2];
+					params_sm[0] = &d_scores;
+					params_sm[1] = &seq_len;
+					if (drv->cuLaunchKernel(fn_softmax, 1, 1, 1, 1, 1, 1, 0, stream, params_sm, NULL) != CUDA_SUCCESS) {
+						ok = 0;
+						break;
+					}
+
+					void *params_v[7];
+					params_v[0] = &d_scores;
+					params_v[1] = &d_v;
+					params_v[2] = &d_out_head;
+					params_v[3] = &seq_len;
+					params_v[4] = &head_dim;
+					params_v[5] = &kv_stride;
+					params_v[6] = &kv_off;
+
+					unsigned int grid_v = ((unsigned int)head_dim + block - 1) / block;
+					if (drv->cuLaunchKernel(fn_v, grid_v, 1, 1, block, 1, 1, 0, stream, params_v, NULL) != CUDA_SUCCESS) {
+						ok = 0;
+						break;
+					}
+				}
+
+				CUgraph graph = NULL;
+				if (!ok) {
+					drv->cuStreamEndCapture(stream, &graph);
+					if (graph) {
+						drv->cuGraphDestroy(graph);
+					}
+				} else if (drv->cuStreamEndCapture(stream, &graph) == CUDA_SUCCESS && graph) {
+					CUgraphExec exec = NULL;
+					if (gguf_cuda_graph_instantiate(drv, graph, &exec) == 0 && exec) {
+						entry = (gguf_attn_graph_entry_t *)calloc(1, sizeof(*entry));
+						if (!entry) {
+							drv->cuGraphExecDestroy(exec);
+						} else {
+							entry->d_k = d_k;
+							entry->d_v = d_v;
+							entry->seq_len = seq_len;
+							entry->n_heads = n_heads;
+							entry->n_kv_heads = n_kv_heads;
+							entry->head_dim = head_dim;
+							entry->skip_q_htod = skip_q_htod;
+							entry->skip_dst_dtoh = skip_dst_dtoh;
+							entry->exec = exec;
+							entry->next = pool->graphs;
+							pool->graphs = entry;
+							pool->graph_count++;
+						}
+					}
+					drv->cuGraphDestroy(graph);
+				}
+			}
+		}
+
+		if (entry && entry->exec) {
+			if (drv->cuGraphLaunch(entry->exec, stream) == CUDA_SUCCESS) {
+				if (!skip_dst_dtoh) {
+					if (drv->cuStreamSynchronize(stream) != CUDA_SUCCESS) {
+						goto fail;
+					}
+
+					if (!dst || drv->cuMemcpyDtoH(dst, d_dst, dst_bytes) != CUDA_SUCCESS) {
+						goto fail;
+					}
+				}
+
+				free(h_scores);
+				return 0;
+			}
 		}
 	}
 
@@ -708,6 +844,8 @@ void gguf_cuda_attn_pool_free(cuda_driver_t *drv, gguf_attn_pool_t *pool) {
 	if (!pool) {
 		return;
 	}
+
+	gguf_cuda_attn_clear_graphs(drv, pool);
 
 	if (pool->d_q) {
 		drv->cuMemFree(pool->d_q);
