@@ -247,6 +247,57 @@ func matMulVecQ4_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
+// MatMulVecQ5_K умножает Q5_K-матрицу [rows*cols] на float32-вектор [cols]
+func MatMulVecQ5_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := MatMulVecQ5_KInto(raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// MatMulVecQ5_KInto записывает Q5_K matmul в out [rows]
+func MatMulVecQ5_KInto(raw []byte, rows, cols int, vec, out []float32) error {
+	if len(vec) != cols {
+		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	if cols%quant.QK_K != 0 {
+		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK_K)
+	}
+
+	blocksPerRow := cols / quant.QK_K
+	want := rows * blocksPerRow * quant.BlockQ5_KSize
+	if len(raw) < want {
+		return fmt.Errorf("ops: Q5_K matrix слишком короткая")
+	}
+
+	if len(out) < rows {
+		return fmt.Errorf("ops: out слишком короткий")
+	}
+
+	parallelForRows(rows, func(rowStart, rowEnd int) {
+		matMulVecQ5_KRows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	})
+
+	return nil
+}
+
+func matMulVecQ5_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) {
+	for r := rowStart; r < rowEnd; r++ {
+		var sum float32
+		rowOff := r * blocksPerRow * quant.BlockQ5_KSize
+		for b := range blocksPerRow {
+			block := raw[rowOff+b*quant.BlockQ5_KSize:]
+			vecOff := b * quant.QK_K
+			dot, _ := quant.DotBlockQ5_K(block, vec[vecOff:vecOff+quant.QK_K])
+			sum += dot
+		}
+		out[r] = sum
+	}
+}
+
 // MatMulVecQ6_KInto записывает Q6_K matmul в out [rows]
 func MatMulVecQ6_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {

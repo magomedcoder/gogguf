@@ -21,6 +21,8 @@ func ToFloat32(typ format.GGML, data []byte, n int) ([]float32, error) {
 		return DequantQ4_0(data, n)
 	case format.GgmlQ4_K:
 		return DequantQ4_K(data, n)
+	case format.GgmlQ5_K:
+		return DequantQ5_K(data, n)
 	case format.GgmlQ6_K:
 		return DequantQ6_K(data, n)
 	case format.GgmlInt32:

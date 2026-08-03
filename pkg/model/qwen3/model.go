@@ -184,6 +184,10 @@ func (m *Model) embedToken(tokenID int) error {
 		return ops.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ4_K:
 		return ops.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ5_K:
+		return ops.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ6_K:
+		return ops.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	default:
 		f32, err := m.weights.Floats("token_embd.weight")
 		if err != nil {
@@ -487,6 +491,10 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 		return ops.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
 	case format.GgmlQ4_K:
 		return ops.MatMulVecQ4_KInto(raw, rows, cols, vec, out)
+	case format.GgmlQ5_K:
+		return ops.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
+	case format.GgmlQ6_K:
+		return ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
@@ -519,6 +527,14 @@ func (m *Model) matmul(name string, rows, cols int, vec []float32, layer int) ([
 		return ops.MatMulVecQ4_0(raw, rows, cols, vec)
 	case format.GgmlQ4_K:
 		return ops.MatMulVecQ4_K(raw, rows, cols, vec)
+	case format.GgmlQ5_K:
+		return ops.MatMulVecQ5_K(raw, rows, cols, vec)
+	case format.GgmlQ6_K:
+		out := make([]float32, rows)
+		if err := ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out); err != nil {
+			return nil, err
+		}
+		return out, nil
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
@@ -598,6 +614,10 @@ func (m *Model) logitsFromHidden(x []float32) error {
 		err = ops.MatMulVecQ4_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	case format.GgmlQ4_K:
 		err = ops.MatMulVecQ4_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ5_K:
+		err = ops.MatMulVecQ5_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ6_K:
+		err = ops.MatMulVecQ6_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {

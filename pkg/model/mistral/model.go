@@ -195,6 +195,8 @@ func (m *Model) embedToken(tokenID int) error {
 		return ops.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ4_K:
 		return ops.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ5_K:
+		return ops.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ6_K:
 		return ops.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	default:
@@ -369,6 +371,8 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 		return ops.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
 	case format.GgmlQ4_K:
 		return ops.MatMulVecQ4_KInto(raw, rows, cols, vec, out)
+	case format.GgmlQ5_K:
+		return ops.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
 	case format.GgmlQ6_K:
 		return ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
 	default:
@@ -451,6 +455,8 @@ func (m *Model) logitsFromHidden(x []float32) error {
 		return ops.MatMulVecQ4_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	case format.GgmlQ4_K:
 		return ops.MatMulVecQ4_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ5_K:
+		return ops.MatMulVecQ5_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	case format.GgmlQ6_K:
 		return ops.MatMulVecQ6_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	default:

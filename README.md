@@ -15,7 +15,7 @@ Optional: **CUDA** via Driver API (`libcuda.so`, build with `-tags cuda`, CGO).
 ## What works today
 
 - GGUF v2/v3 parsing (`info`, `inspect`), memory-map (`LoadMapped`, zero-copy `RawView`);
-- dequantization and matmul: Q8_0, Q4_0, Q4_K, Q6_K;
+- dequantization and matmul: Q8_0, Q4_0, Q4_K, Q5_K, Q6_K;
 - basic ops: RoPE, RMSNorm, GQA attention, SwiGLU;
 - **SIMD** FP32 matmul: AVX2 (amd64), NEON (arm64); Q8_0 dot: AVX2 (amd64);
 - **Qwen3**, **Llama 3**, and **Mistral** forward pass + KV-cache;

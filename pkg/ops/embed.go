@@ -59,6 +59,20 @@ func EmbeddingQ4_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	return quant.DequantQ4_KInto(dst, raw[off:off+rowBytes], dim)
 }
 
+// EmbeddingQ5_KInto деквантизирует embedding-строку в dst
+func EmbeddingQ5_KInto(dst []float32, raw []byte, dim, tokenID int) error {
+	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ5_KSize, quant.QK_K)
+	if err != nil {
+		return err
+	}
+
+	if off+rowBytes > len(raw) {
+		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+	}
+
+	return quant.DequantQ5_KInto(dst, raw[off:off+rowBytes], dim)
+}
+
 // EmbeddingQ6_KInto деквантизирует embedding-строку в dst
 func EmbeddingQ6_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ6_KSize, quant.QK_K)

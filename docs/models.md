@@ -10,7 +10,7 @@
 | Llama 3      | verified | Llama-3.2-1B (CUDA RoPE NORM)                            |
 | Mistral      | verified | Mistral-7B-Instruct-v0.2 (NeoX RoPE, GQA; golden Q4_K_M) |
 
-Weight formats: **Q8_0**, **Q4_0**, **Q4_K**, **Q6_K**.
+Weight formats: **Q8_0**, **Q4_0**, **Q4_K**, **Q5_K**, **Q6_K**.
 
 ```bash
 mkdir -p models

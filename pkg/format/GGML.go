@@ -72,7 +72,7 @@ var ggmlBlocks = map[GGML]ggmlBlock{
 	GgmlQ2_K:    {blockSize: qK_K/2 + qK_K/4 + 2 + 2, valuesInBlock: qK_K},
 	GgmlQ3_K:    {blockSize: qK_K/8 + qK_K/4 + 2 + 2, valuesInBlock: qK_K},
 	GgmlQ4_K:    {blockSize: 2*2 + kScaleSize + qK_K/2, valuesInBlock: qK_K},
-	GgmlQ5_K:    {blockSize: 2 + 2 + kScaleSize + qK_K/2, valuesInBlock: qK_K},
+	GgmlQ5_K:    {blockSize: 2*2 + kScaleSize + qK_K/8 + qK_K/2, valuesInBlock: qK_K},
 	GgmlQ6_K:    {blockSize: qK_K/2 + qK_K/4 + qK_K/16 + 2, valuesInBlock: qK_K},
 	GgmlQ8_K:    {blockSize: 4 + qK_K + 2*qK_K/16, valuesInBlock: qK_K},
 	GgmlInt8:    {blockSize: 1, valuesInBlock: 1},
