@@ -298,6 +298,16 @@ func matMulVecQ5_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
+// MatMulVecQ6_K умножает Q6_K-матрицу [rows*cols] на float32-вектор [cols]
+func MatMulVecQ6_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := MatMulVecQ6_KInto(raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
 // MatMulVecQ6_KInto записывает Q6_K matmul в out [rows]
 func MatMulVecQ6_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {

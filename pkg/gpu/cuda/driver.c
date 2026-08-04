@@ -2533,3 +2533,128 @@ int gguf_cuda_upload_q4_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matr
 int gguf_cuda_matmul_vec_q4_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols) {
 	return gguf_cuda_matmul_run_pooled(drv, ctx, fn, pool, d_matrix, vec, out, rows, cols, 3, 1);
 }
+
+// 8*f32 d_sc + 8*f32 d_mn + 32 qh + 128 qs
+#define GGUF_GPU_Q5_K_BLOCK 224
+
+int gguf_cuda_upload_q5_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix,
+	const void *raw, size_t nbytes) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (nbytes == 0 || nbytes % 176 != 0) {
+		return -11;
+	}
+
+	size_t nblocks = nbytes / 176;
+	size_t gpu_bytes = nblocks * GGUF_GPU_Q5_K_BLOCK;
+	uint8_t *expanded = (uint8_t *)malloc(gpu_bytes);
+	if (!expanded) {
+		return -12;
+	}
+
+	const uint8_t *src = (const uint8_t *)raw;
+	uint8_t *dst = expanded;
+	for (size_t i = 0; i < nblocks; i++) {
+		uint16_t d_fp16 = (uint16_t)src[0] | ((uint16_t)src[1] << 8);
+		uint16_t dm_fp16 = (uint16_t)src[2] | ((uint16_t)src[3] << 8);
+		float d = fp16_to_fp32(d_fp16);
+		float dmin = fp16_to_fp32(dm_fp16);
+		const uint8_t *scales = src + 4;
+		float *d_sc = (float *)(void *)dst;
+		float *d_mn = (float *)(void *)(dst + 32);
+		for (int j = 0; j < 8; j++) {
+			uint8_t sc, m;
+			gguf_q4_k_scale_min(j, scales, &sc, &m);
+			d_sc[j] = d * (float)sc;
+			d_mn[j] = dmin * (float)m;
+		}
+
+		memcpy(dst + 64, src + 16, 32);  // qh
+		memcpy(dst + 96, src + 48, 128); // qs
+		src += 176;
+		dst += GGUF_GPU_Q5_K_BLOCK;
+	}
+
+	if (drv->cuMemAlloc(d_matrix, gpu_bytes) != CUDA_SUCCESS) {
+		free(expanded);
+		return -1;
+	}
+
+	if (drv->cuMemcpyHtoD(*d_matrix, expanded, gpu_bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(*d_matrix);
+		*d_matrix = 0;
+		free(expanded);
+		return -2;
+	}
+
+	free(expanded);
+
+	return 0;
+}
+
+int gguf_cuda_matmul_vec_q5_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols) {
+	return gguf_cuda_matmul_run_pooled(drv, ctx, fn, pool, d_matrix, vec, out, rows, cols, 4, 1);
+}
+
+// 16*f32 scales + 128 ql + 64 qh
+#define GGUF_GPU_Q6_K_BLOCK 256
+
+int gguf_cuda_upload_q6_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix,
+	const void *raw, size_t nbytes) {
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (nbytes == 0 || nbytes % 210 != 0) {
+		return -11;
+	}
+
+	size_t nblocks = nbytes / 210;
+	size_t gpu_bytes = nblocks * GGUF_GPU_Q6_K_BLOCK;
+	uint8_t *expanded = (uint8_t *)malloc(gpu_bytes);
+	if (!expanded) {
+		return -12;
+	}
+
+	const uint8_t *src = (const uint8_t *)raw;
+	uint8_t *dst = expanded;
+	for (size_t i = 0; i < nblocks; i++) {
+		const uint8_t *ql = src;
+		const uint8_t *qh = src + 128;
+		const uint8_t *sc = src + 192;
+		uint16_t d_fp16 = (uint16_t)src[208] | ((uint16_t)src[209] << 8);
+		float d = fp16_to_fp32(d_fp16);
+
+		float *scales = (float *)(void *)dst;
+		for (int j = 0; j < 16; j++) {
+			scales[j] = d * (float)(int8_t)sc[j];
+		}
+
+		memcpy(dst + 64, ql, 128);
+		memcpy(dst + 192, qh, 64);
+		src += 210;
+		dst += GGUF_GPU_Q6_K_BLOCK;
+	}
+
+	if (drv->cuMemAlloc(d_matrix, gpu_bytes) != CUDA_SUCCESS) {
+		free(expanded);
+		return -1;
+	}
+
+	if (drv->cuMemcpyHtoD(*d_matrix, expanded, gpu_bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(*d_matrix);
+		*d_matrix = 0;
+		free(expanded);
+		return -2;
+	}
+
+	free(expanded);
+
+	return 0;
+}
+
+int gguf_cuda_matmul_vec_q6_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols) {
+	return gguf_cuda_matmul_run_pooled(drv, ctx, fn, pool, d_matrix, vec, out, rows, cols, 5, 1);
+}

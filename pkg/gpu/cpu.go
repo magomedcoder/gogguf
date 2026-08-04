@@ -31,6 +31,14 @@ func (CPUBackend) MatMulVecQ4_KCached(_ string, raw []byte, rows, cols int, vec 
 	return ops.MatMulVecQ4_K(raw, rows, cols, vec)
 }
 
+func (CPUBackend) MatMulVecQ5_KCached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return ops.MatMulVecQ5_K(raw, rows, cols, vec)
+}
+
+func (CPUBackend) MatMulVecQ6_KCached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return ops.MatMulVecQ6_K(raw, rows, cols, vec)
+}
+
 func (CPUBackend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 	return ops.RMSNormInto(dst, x, weight, eps)
 }

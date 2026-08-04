@@ -530,11 +530,7 @@ func (m *Model) matmul(name string, rows, cols int, vec []float32, layer int) ([
 	case format.GgmlQ5_K:
 		return ops.MatMulVecQ5_K(raw, rows, cols, vec)
 	case format.GgmlQ6_K:
-		out := make([]float32, rows)
-		if err := ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out); err != nil {
-			return nil, err
-		}
-		return out, nil
+		return ops.MatMulVecQ6_K(raw, rows, cols, vec)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
@@ -577,6 +573,24 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		}
 
 		return m.gpu.MatMulVecQ4_KCached(name, raw, rows, cols, vec)
+	}
+
+	if info.Type == format.GgmlQ5_K {
+		raw, err := m.weights.Raw(name)
+		if err != nil {
+			return nil, err
+		}
+
+		return m.gpu.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
+	}
+
+	if info.Type == format.GgmlQ6_K {
+		raw, err := m.weights.Raw(name)
+		if err != nil {
+			return nil, err
+		}
+
+		return m.gpu.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
 	}
 
 	f32, err := m.weights.Floats(name)

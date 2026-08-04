@@ -25,6 +25,12 @@ type Backend interface {
 	// MatMulVecQ4_KCached matmul Q4_K-матрицы (K-quant)
 	MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
+	// MatMulVecQ5_KCached matmul Q5_K-матрицы (K-quant)
+	MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
+	// MatMulVecQ6_KCached matmul Q6_K-матрицы (K-quant)
+	MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
 	// RMSNormInto записывает RMS-нормализацию в dst (GPU или CPU)
 	RMSNormInto(dst, x, weight []float32, eps float32) error
 
