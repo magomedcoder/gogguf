@@ -183,6 +183,12 @@ func (m *Model) embedToken(tokenID int) error {
 		return ops.EmbeddingQ8_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ4_0:
 		return ops.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ4_1:
+		return ops.EmbeddingQ4_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ5_0:
+		return ops.EmbeddingQ5_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ5_1:
+		return ops.EmbeddingQ5_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ4_K:
 		return ops.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ5_K:
@@ -337,6 +343,12 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 		return ops.MatMulVecQ8_0Into(raw, rows, cols, vec, out)
 	case format.GgmlQ4_0:
 		return ops.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
+	case format.GgmlQ4_1:
+		return ops.MatMulVecQ4_1Into(raw, rows, cols, vec, out)
+	case format.GgmlQ5_0:
+		return ops.MatMulVecQ5_0Into(raw, rows, cols, vec, out)
+	case format.GgmlQ5_1:
+		return ops.MatMulVecQ5_1Into(raw, rows, cols, vec, out)
 	case format.GgmlQ4_K:
 		return ops.MatMulVecQ4_KInto(raw, rows, cols, vec, out)
 	case format.GgmlQ5_K:
@@ -437,6 +449,12 @@ func (m *Model) logitsFromHidden(x []float32) error {
 		return ops.MatMulVecQ8_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	case format.GgmlQ4_0:
 		return ops.MatMulVecQ4_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ4_1:
+		return ops.MatMulVecQ4_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ5_0:
+		return ops.MatMulVecQ5_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ5_1:
+		return ops.MatMulVecQ5_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	case format.GgmlQ4_K:
 		return ops.MatMulVecQ4_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	case format.GgmlQ5_K:
