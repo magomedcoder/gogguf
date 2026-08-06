@@ -194,6 +194,12 @@ func (m *Model) embedToken(tokenID int) error {
 		return ops.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	case format.GgmlQ6_K:
 		return ops.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ2_K:
+		return ops.EmbeddingQ2_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ3_K:
+		return ops.EmbeddingQ3_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case format.GgmlQ8_K:
+		return ops.EmbeddingQ8_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	default:
 		f32, err := m.weights.Floats("token_embd.weight")
 		if err != nil {
@@ -507,6 +513,12 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 		return ops.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
 	case format.GgmlQ6_K:
 		return ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
+	case format.GgmlQ2_K:
+		return ops.MatMulVecQ2_KInto(raw, rows, cols, vec, out)
+	case format.GgmlQ3_K:
+		return ops.MatMulVecQ3_KInto(raw, rows, cols, vec, out)
+	case format.GgmlQ8_K:
+		return ops.MatMulVecQ8_KInto(raw, rows, cols, vec, out)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
@@ -549,6 +561,12 @@ func (m *Model) matmul(name string, rows, cols int, vec []float32, layer int) ([
 		return ops.MatMulVecQ5_K(raw, rows, cols, vec)
 	case format.GgmlQ6_K:
 		return ops.MatMulVecQ6_K(raw, rows, cols, vec)
+	case format.GgmlQ2_K:
+		return ops.MatMulVecQ2_K(raw, rows, cols, vec)
+	case format.GgmlQ3_K:
+		return ops.MatMulVecQ3_K(raw, rows, cols, vec)
+	case format.GgmlQ8_K:
+		return ops.MatMulVecQ8_K(raw, rows, cols, vec)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
@@ -656,6 +674,12 @@ func (m *Model) logitsFromHidden(x []float32) error {
 		err = ops.MatMulVecQ5_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	case format.GgmlQ6_K:
 		err = ops.MatMulVecQ6_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ2_K:
+		err = ops.MatMulVecQ2_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ3_K:
+		err = ops.MatMulVecQ3_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case format.GgmlQ8_K:
+		err = ops.MatMulVecQ8_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
