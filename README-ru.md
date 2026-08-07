@@ -29,7 +29,7 @@
 ## Модели
 
 **Работает:** Qwen3, Llama 3, Mistral
-**Скоро:** Llama 2, Phi, Gemma
+**Скоро:** Llama 2, Phi-2, Gemma
 
 Подробнее: [docs/models-ru.md](docs/models-ru.md).
 

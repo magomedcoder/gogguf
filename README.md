@@ -28,7 +28,7 @@ Optional: **CUDA** via Driver API (`libcuda.so`, build with `-tags cuda`, CGO).
 ## Models
 
 **Works:** Qwen3, Llama 3, Mistral
-**Soon:** Llama 2, Phi, Gemma
+**Soon:** Llama 2, Phi-2, Gemma
 
 Details: [docs/models.md](docs/models.md).
 
