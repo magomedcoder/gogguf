@@ -152,14 +152,14 @@ func (CPUBackend) QKVRoPEAttentionCached(_, _, _, _, _ string, qW, kW, vW, qNorm
 		return err
 	}
 
-	for hi := 0; hi < nHeads; hi++ {
+	for hi := range nHeads {
 		off := hi * headDim
 		if err := ops.RMSNormInto(q[off:off+headDim], q[off:off+headDim], qNorm, eps); err != nil {
 			return err
 		}
 	}
 
-	for hi := 0; hi < nKVHeads; hi++ {
+	for hi := range nKVHeads {
 		off := hi * headDim
 		if err := ops.RMSNormInto(k[off:off+headDim], k[off:off+headDim], kNorm, eps); err != nil {
 			return err
@@ -192,14 +192,14 @@ func (CPUBackend) QKVRoPEAttentionQ8_0Cached(_, _, _, _, _ string, qRaw, kRaw, v
 		return err
 	}
 
-	for hi := 0; hi < nHeads; hi++ {
+	for hi := range nHeads {
 		off := hi * headDim
 		if err := ops.RMSNormInto(q[off:off+headDim], q[off:off+headDim], qNorm, eps); err != nil {
 			return err
 		}
 	}
 
-	for hi := 0; hi < nKVHeads; hi++ {
+	for hi := range nKVHeads {
 		off := hi * headDim
 		if err := ops.RMSNormInto(k[off:off+headDim], k[off:off+headDim], kNorm, eps); err != nil {
 			return err

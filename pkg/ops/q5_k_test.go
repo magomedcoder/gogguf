@@ -20,13 +20,13 @@ func TestMatMulVecQ5_K(t *testing.T) {
 		block := raw[r*quant.BlockQ5_KSize:]
 		binary.LittleEndian.PutUint16(block[0:2], 0x3c00)
 		binary.LittleEndian.PutUint16(block[2:4], 0x0000)
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			block[4+i] = 1
 			block[8+i] = 0
 		}
 
 		qs := block[48:]
-		for i := 0; i < 128; i++ {
+		for i := range 128 {
 			v := byte((i + r) % 16)
 			qs[i] = v | (v << 4)
 		}

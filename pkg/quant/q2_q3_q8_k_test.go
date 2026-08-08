@@ -16,7 +16,7 @@ func TestBlockQ2_KSizeMatchesFormat(t *testing.T) {
 // TestDequantBlockQ2_K проверяет формулу w = d*scale*q - dmin*min на синтетическом блоке.
 func TestDequantBlockQ2_K(t *testing.T) {
 	block := make([]byte, BlockQ2_KSize)
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		block[i] = 0x11 // scale=1, min=1
 	}
 	for i := 16; i < 80; i++ {
@@ -46,7 +46,7 @@ func TestBlockQ3_KSizeMatchesFormat(t *testing.T) {
 // TestDequantBlockQ3_K проверяет, что деквант Q3_K даёт конечные значения.
 func TestDequantBlockQ3_K(t *testing.T) {
 	block := make([]byte, BlockQ3_KSize)
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		block[i] = 0xff // все старшие биты -> без смещения -4
 	}
 
@@ -55,7 +55,7 @@ func TestDequantBlockQ3_K(t *testing.T) {
 	}
 
 	// scales[12]: упакованные 6-битные шкалы (после unpack: scale-32)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		block[96+i] = 0x21
 	}
 	binary.LittleEndian.PutUint16(block[108:110], 0x3c00) // d = 1.0

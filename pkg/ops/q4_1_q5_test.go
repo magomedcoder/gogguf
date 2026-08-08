@@ -20,7 +20,7 @@ func TestMatMulVecQ4_1(t *testing.T) {
 		block := raw[r*quant.BlockQ4_1Size:]
 		binary.LittleEndian.PutUint16(block[0:2], 0x3c00)
 		binary.LittleEndian.PutUint16(block[2:4], 0x3800)
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			v := byte((i + r) % 16)
 			block[4+i] = v | (v << 4)
 		}
@@ -60,7 +60,7 @@ func TestMatMulVecQ5_0(t *testing.T) {
 		block := raw[r*quant.BlockQ5_0Size:]
 		binary.LittleEndian.PutUint16(block[0:2], 0x3c00)
 		binary.LittleEndian.PutUint32(block[2:6], uint32(0x55555555+r))
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			v := byte((i + r) % 16)
 			block[6+i] = v | (v << 4)
 		}
@@ -101,7 +101,7 @@ func TestMatMulVecQ5_1(t *testing.T) {
 		binary.LittleEndian.PutUint16(block[0:2], 0x3c00)
 		binary.LittleEndian.PutUint16(block[2:4], 0x3800)
 		binary.LittleEndian.PutUint32(block[4:8], uint32(0x55555555+r))
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			v := byte((i + r) % 16)
 			block[8+i] = v | (v << 4)
 		}

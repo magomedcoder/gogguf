@@ -10,7 +10,7 @@ func TestDequantBlockQ4_1(t *testing.T) {
 	block := make([]byte, BlockQ4_1Size)
 	binary.LittleEndian.PutUint16(block[0:2], 0x3c00) // d = 1.0
 	binary.LittleEndian.PutUint16(block[2:4], 0x3800) // m = 0.5
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		block[4+i] = byte(i) | (byte(i+1) << 4)
 	}
 

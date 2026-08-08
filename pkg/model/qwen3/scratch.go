@@ -1,32 +1,39 @@
 package qwen3
 
-// scratch - переиспользуемые буферы forward pass (без аллокаций на слой)
+import "github.com/magomedcoder/gogguf/pkg/mempool"
+
+// scratch - переиспользуемые буферы forward pass из одного Arena
 type scratch struct {
-	x      []float32 // embedding dim - текущий hidden state
-	h      []float32 // embedding dim - временный
-	q      []float32 // numHeads * headDim
-	k      []float32 // numKVHeads * headDim
-	v      []float32 // numKVHeads * headDim
-	attn   []float32 // numHeads * headDim
-	scores []float32 // context_length - softmax scores в attention
-	gate   []float32 // ffn hidden
-	up     []float32 // ffn hidden
-	logits []float32 // vocab
+	x      []float32
+	h      []float32
+	q      []float32
+	k      []float32
+	v      []float32
+	attn   []float32
+	scores []float32
+	gate   []float32
+	up     []float32
+	logits []float32
+	out    []float32 // копия logits для возврата из Forward
 }
 
 func newScratch(cfg Config) scratch {
 	qDim := cfg.NumHeads * cfg.HeadDim
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
+	need := 2*cfg.EmbeddingDim + 2*qDim + 2*kvDim + cfg.ContextLength + 2*cfg.FFNHidden + 2*cfg.VocabSize
+	a := mempool.NewArena(need)
+
 	return scratch{
-		x:      make([]float32, cfg.EmbeddingDim),
-		h:      make([]float32, cfg.EmbeddingDim),
-		q:      make([]float32, qDim),
-		k:      make([]float32, kvDim),
-		v:      make([]float32, kvDim),
-		attn:   make([]float32, qDim),
-		scores: make([]float32, cfg.ContextLength),
-		gate:   make([]float32, cfg.FFNHidden),
-		up:     make([]float32, cfg.FFNHidden),
-		logits: make([]float32, cfg.VocabSize),
+		x:      a.Alloc(cfg.EmbeddingDim),
+		h:      a.Alloc(cfg.EmbeddingDim),
+		q:      a.Alloc(qDim),
+		k:      a.Alloc(kvDim),
+		v:      a.Alloc(kvDim),
+		attn:   a.Alloc(qDim),
+		scores: a.Alloc(cfg.ContextLength),
+		gate:   a.Alloc(cfg.FFNHidden),
+		up:     a.Alloc(cfg.FFNHidden),
+		logits: a.Alloc(cfg.VocabSize),
+		out:    a.Alloc(cfg.VocabSize),
 	}
 }

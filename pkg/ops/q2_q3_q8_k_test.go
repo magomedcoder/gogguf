@@ -20,7 +20,7 @@ func TestMatMulVecQ2_K(t *testing.T) {
 	for r := range rows {
 		block := raw[r*quant.BlockQ2_KSize:]
 		// scales[16]: младшие 4 бита - scale, старшие - min
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			block[i] = byte(0x11 + r)
 		}
 
@@ -66,7 +66,7 @@ func TestMatMulVecQ8_K(t *testing.T) {
 	for r := range rows {
 		block := raw[r*quant.BlockQ8_KSize:]
 		binary.LittleEndian.PutUint32(block[0:4], math.Float32bits(1)) // d = 1.0
-		for i := 0; i < quant.QK_K; i++ {
+		for i := range quant.QK_K {
 			block[4+i] = byte(i%7 + r) // qs[i] как int8
 		}
 	}

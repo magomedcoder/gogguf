@@ -128,9 +128,8 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, err
 	}
 
-	out := make([]float32, m.cfg.VocabSize)
-	copy(out, m.scratch.logits)
-	return out, nil
+	copy(m.scratch.out, m.scratch.logits)
+	return m.scratch.out, nil
 }
 
 func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
