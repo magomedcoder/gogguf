@@ -45,6 +45,51 @@ func TestParseConfigPhi3Mini(t *testing.T) {
 	if cfg.VocabSize != 32064 {
 		t.Fatalf("VocabSize = %d, ожидали 32064", cfg.VocabSize)
 	}
+
+	if cfg.OrigCtxLen != 4096 {
+		t.Fatalf("OrigCtxLen = %d, ожидали 4096", cfg.OrigCtxLen)
+	}
+
+	if cfg.RopeFreqScale != 1 || cfg.RopeAttnFactor != 1 {
+		t.Fatalf("scale=%v attn=%v, ожидали 1", cfg.RopeFreqScale, cfg.RopeAttnFactor)
+	}
+}
+
+func TestParseConfigPhi3LongRoPE(t *testing.T) {
+	r := &format.Reader{
+		Metadata: format.Metadata{
+			"phi3.context_length":                       int32(131072),
+			"phi3.embedding_length":                     int32(3072),
+			"phi3.feed_forward_length":                  int32(8192),
+			"phi3.block_count":                          int32(32),
+			"phi3.attention.head_count":                 int32(32),
+			"phi3.attention.head_count_kv":              int32(32),
+			"phi3.rope.dimension_count":                 int32(96),
+			"phi3.rope.scaling.original_context_length": int32(4096),
+			"phi3.rope.scaling.factor":                  float32(32),
+			"phi3.rope.scaling.attn_factor":             float32(1.1),
+		},
+		Tensors: []format.TensorInfo{
+			{Name: "token_embd.weight", Dimensions: []uint64{3072, 32064}},
+		},
+	}
+
+	cfg, err := phi3.ParseConfig(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.OrigCtxLen != 4096 {
+		t.Fatalf("OrigCtxLen = %d, ожидали 4096", cfg.OrigCtxLen)
+	}
+
+	if cfg.RopeFreqScale != 1.0/32 {
+		t.Fatalf("RopeFreqScale = %v, ожидали %v", cfg.RopeFreqScale, float32(1)/32)
+	}
+
+	if cfg.RopeAttnFactor != 1.1 {
+		t.Fatalf("RopeAttnFactor = %v, ожидали 1.1", cfg.RopeAttnFactor)
+	}
 }
 
 func TestApplyRoPEPartialLeavesTail(t *testing.T) {

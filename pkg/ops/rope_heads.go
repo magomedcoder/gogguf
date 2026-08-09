@@ -14,6 +14,11 @@ func ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
 
 // ApplyRoPEHeadsPartial применяет NeoX RoPE к первым nRot dim каждой головы (Phi-3 partial rotary)
 func ApplyRoPEHeadsPartial(v []float32, nHeads, headDim, nRot, pos int, freqBase float32) {
+	ApplyRoPEHeadsPartialScaled(v, nHeads, headDim, nRot, pos, freqBase, RoPEScale{})
+}
+
+// ApplyRoPEHeadsPartialScaled как ApplyRoPEHeadsPartial + LongRoPE factors
+func ApplyRoPEHeadsPartialScaled(v []float32, nHeads, headDim, nRot, pos int, freqBase float32, scale RoPEScale) {
 	if nHeads <= 0 || headDim <= 0 {
 		return
 	}
@@ -27,10 +32,10 @@ func ApplyRoPEHeadsPartial(v []float32, nHeads, headDim, nRot, pos int, freqBase
 	}
 
 	half := nRot / 2
-	if half > maxRoPEPairs || half != headDim/2 {
+	if half > maxRoPEPairs {
 		for h := range nHeads {
 			off := h * headDim
-			ApplyRoPEPartial(v[off:off+headDim], pos, freqBase, nRot)
+			ApplyRoPEPartialScaled(v[off:off+headDim], pos, freqBase, nRot, scale)
 		}
 		return
 	}
@@ -38,7 +43,7 @@ func ApplyRoPEHeadsPartial(v []float32, nHeads, headDim, nRot, pos int, freqBase
 	var cosTab [maxRoPEPairs]float32
 	var sinTab [maxRoPEPairs]float32
 
-	RoPECosSin(cosTab[:half], sinTab[:half], nRot, pos, freqBase)
+	RoPECosSinScaled(cosTab[:half], sinTab[:half], nRot, pos, freqBase, scale)
 
 	for h := range nHeads {
 		base := h * headDim

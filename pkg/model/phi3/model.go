@@ -11,17 +11,19 @@ import (
 
 // Model - Phi-3 / Phi-3.5 (RMSNorm, NeoX partial RoPE, SwiGLU; fused QKV/FFN)
 type Model struct {
-	cfg          Config
-	weights      *weights.Store
-	cache        *KVCache
-	gpu          gpu.Backend
-	ngl          int
-	gpuMaxSeq    int
-	scratch      scratch
-	layerNorms   []layerNorms
-	layerTensors []layerTensors
-	outNorm      []float32
-	lmHeadName   string
+	cfg              Config
+	weights          *weights.Store
+	cache            *KVCache
+	gpu              gpu.Backend
+	ngl              int
+	gpuMaxSeq        int
+	scratch          scratch
+	layerNorms       []layerNorms
+	layerTensors     []layerTensors
+	outNorm          []float32
+	lmHeadName       string
+	ropeFactorsShort []float32
+	ropeFactorsLong  []float32
 }
 
 // Load создаёт Phi-3 из весов GGUF
@@ -50,18 +52,25 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 		return nil, err
 	}
 
+	ropeShort, ropeLong, err := loadRopeFactors(w)
+	if err != nil {
+		return nil, err
+	}
+
 	m := &Model{
-		cfg:          cfg,
-		weights:      w,
-		cache:        NewKVCache(cfg),
-		gpu:          g,
-		ngl:          ngl,
-		gpuMaxSeq:    gpuMaxSeq,
-		scratch:      newScratch(cfg),
-		layerNorms:   layerNorms,
-		layerTensors: layerTensors,
-		outNorm:      outNorm,
-		lmHeadName:   lmHeadName,
+		cfg:              cfg,
+		weights:          w,
+		cache:            NewKVCache(cfg),
+		gpu:              g,
+		ngl:              ngl,
+		gpuMaxSeq:        gpuMaxSeq,
+		scratch:          newScratch(cfg),
+		layerNorms:       layerNorms,
+		layerTensors:     layerTensors,
+		outNorm:          outNorm,
+		lmHeadName:       lmHeadName,
+		ropeFactorsShort: ropeShort,
+		ropeFactorsLong:  ropeLong,
 	}
 
 	if err := m.initGPUKVCache(); err != nil {
@@ -193,8 +202,9 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	ops.ApplyRoPEHeadsPartial(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, m.cfg.RopeDim, pos, m.cfg.RopeFreqBase)
-	ops.ApplyRoPEHeadsPartial(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, m.cfg.RopeDim, pos, m.cfg.RopeFreqBase)
+	scale := m.ropeScale()
+	ops.ApplyRoPEHeadsPartialScaled(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, m.cfg.RopeDim, pos, m.cfg.RopeFreqBase, scale)
+	ops.ApplyRoPEHeadsPartialScaled(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, m.cfg.RopeDim, pos, m.cfg.RopeFreqBase, scale)
 
 	kvPos := m.cache.Len()
 	m.cache.Append(layer, m.scratch.k, m.scratch.v)
@@ -225,6 +235,34 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	ops.AddInPlace(m.scratch.x, m.scratch.h)
 
 	return nil
+}
+
+// ropeScale выбирает short/long factors как в llama.cpp get_rope_factors
+func (m *Model) ropeScale() ops.RoPEScale {
+	s := ops.RoPEScale{
+		FreqScale:  m.cfg.RopeFreqScale,
+		AttnFactor: m.cfg.RopeAttnFactor,
+	}
+	orig := m.cfg.OrigCtxLen
+	if orig <= 0 {
+		orig = m.cfg.ContextLength
+	}
+
+	if m.cfg.ContextLength > orig && len(m.ropeFactorsLong) > 0 {
+		s.Factors = m.ropeFactorsLong
+		return s
+	}
+
+	if len(m.ropeFactorsShort) > 0 {
+		s.Factors = m.ropeFactorsShort
+		return s
+	}
+
+	if len(m.ropeFactorsLong) > 0 {
+		s.Factors = m.ropeFactorsLong
+	}
+
+	return s
 }
 
 func (m *Model) projectQKV(lt layerTensors, layer int) error {

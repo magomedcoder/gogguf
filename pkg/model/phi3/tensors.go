@@ -72,3 +72,26 @@ func resolveLMHeadName(w *weights.Store) (string, error) {
 
 	return fallback, nil
 }
+
+// loadRopeFactors загружает LongRoPE short/long (опционально; 4k-модели без тензоров)
+func loadRopeFactors(w *weights.Store) (short, long []float32, err error) {
+	short, err = optionalFloats(w, "rope_factors_short.weight")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	long, err = optionalFloats(w, "rope_factors_long.weight")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return short, long, nil
+}
+
+func optionalFloats(w *weights.Store, name string) ([]float32, error) {
+	if _, err := w.Info(name); err != nil {
+		return nil, nil
+	}
+
+	return w.Floats(name)
+}
