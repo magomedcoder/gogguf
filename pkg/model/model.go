@@ -6,6 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/model/llama"
 	"github.com/magomedcoder/gogguf/pkg/model/mistral"
+	"github.com/magomedcoder/gogguf/pkg/model/phi2"
 	"github.com/magomedcoder/gogguf/pkg/model/phi3"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 	"github.com/magomedcoder/gogguf/pkg/weights"
@@ -38,6 +39,8 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 		return qwen3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "mistral":
 		return mistral.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+	case "phi2":
+		return phi2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "phi3":
 		return phi3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "llama":
