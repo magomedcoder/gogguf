@@ -8,6 +8,11 @@ import (
 // AttentionScoresInto записывает attention в dst [nHeads*headDim]
 // scores - буфер длины >= seqLen для softmax weights (переиспользуется между головами)
 func AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
+	return AttentionScoresIntoSoftcap(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim, 0)
+}
+
+// AttentionScoresIntoSoftcap как AttentionScoresInto; softcap>0 -> softcap*tanh(score/softcap) (Gemma2)
+func AttentionScoresIntoSoftcap(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int, softcap float32) error {
 	if len(dst) < nHeads*headDim {
 		return fmt.Errorf("ops: dst слишком короткий")
 	}
@@ -23,6 +28,8 @@ func AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHead
 	groupSize := nHeads / nKVHeads
 	scale := float32(1 / math.Sqrt(float64(headDim)))
 	headScores := scores[:seqLen]
+	useCap := softcap != 0
+	capF := float64(softcap)
 
 	for h := range nHeads {
 		kvHead := h / groupSize
@@ -30,7 +37,11 @@ func AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHead
 
 		for t := range seqLen {
 			kOff := t*nKVHeads*headDim + kvHead*headDim
-			headScores[t] = dot(q[qOff:qOff+headDim], k[kOff:kOff+headDim]) * scale
+			s := float64(dot(q[qOff:qOff+headDim], k[kOff:kOff+headDim]) * scale)
+			if useCap {
+				s = capF * math.Tanh(s/capF)
+			}
+			headScores[t] = float32(s)
 		}
 
 		SoftmaxInPlace(headScores)

@@ -26,3 +26,9 @@ func GELUInPlace(x []float32) {
 		x[i] = float32(0.5 * xf * (1 + math.Tanh(sqrt2OverPi*(xf+geluCoefA*xf*xf*xf))))
 	}
 }
+
+// GeGLUInPlace: gelu(gate) * up -> gate (Gemma FFN)
+func GeGLUInPlace(gate, up []float32) {
+	GELUInPlace(gate)
+	vecMulInPlace(gate, up)
+}
