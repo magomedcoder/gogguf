@@ -40,3 +40,37 @@ func TestParseConfigLlama3(t *testing.T) {
 		t.Fatalf("RopeFreqBase = %v, want 500000", cfg.RopeFreqBase)
 	}
 }
+
+func TestParseConfigLlama2Defaults(t *testing.T) {
+	r := &format.Reader{
+		Metadata: format.Metadata{
+			"llama.context_length":          int32(4096),
+			"llama.embedding_length":        int32(4096),
+			"llama.feed_forward_length":     int32(11008),
+			"llama.block_count":             int32(32),
+			"llama.attention.head_count":    int32(32),
+			"llama.attention.head_count_kv": int32(32),
+			// rope.freq_base отсутствует -> default по vocab (~32k) = 10000
+		},
+		Tensors: []format.TensorInfo{
+			{Name: "token_embd.weight", Dimensions: []uint64{4096, 32000}},
+		},
+	}
+
+	cfg, err := llama.ParseConfig(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.VocabSize != 32000 {
+		t.Fatalf("VocabSize=%d", cfg.VocabSize)
+	}
+
+	if cfg.RopeFreqBase != 10000 {
+		t.Fatalf("RopeFreqBase=%v, ожидали 10000 для Llama2-sized vocab", cfg.RopeFreqBase)
+	}
+
+	if cfg.HeadDim != 128 {
+		t.Fatalf("HeadDim=%d", cfg.HeadDim)
+	}
+}

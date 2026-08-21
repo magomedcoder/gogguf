@@ -12,6 +12,15 @@ const (
 	llamaDefaultDate   = "26 Jul 2024"
 )
 
+// formatLlamaFallback выбирает Llama 3 Instruct или Llama 2 [INST]
+func formatLlamaFallback(messages []Message, opts Options) string {
+	if isLlama3Family(opts.Metadata) {
+		return formatLlama3(messages, opts)
+	}
+
+	return formatLlama2Instruct(messages, opts)
+}
+
 // formatLlama3 форматирует диалог в стиле Llama 3 Instruct
 func formatLlama3(messages []Message, opts Options) string {
 	meta := opts.Metadata
@@ -32,15 +41,7 @@ func formatLlama3(messages []Message, opts Options) string {
 	b.WriteString(llamaDefaultDate)
 	b.WriteString("\n\n")
 
-	system := opts.System
-	for _, msg := range messages {
-		if msg.Role == "system" {
-			if system != "" {
-				system += "\n"
-			}
-			system += msg.Content
-		}
-	}
+	system := collectSystemPrompt(messages, opts)
 	if HasTools(opts) {
 		if system != "" {
 			system += "\n\n"
@@ -82,6 +83,85 @@ func formatLlama3(messages []Message, opts Options) string {
 	return b.String()
 }
 
+// formatLlama2Instruct - Meta Llama 2 chat: [INST] <<SYS>> ... <</SYS>> ... [/INST]
+func formatLlama2Instruct(messages []Message, opts Options) string {
+	meta := opts.Metadata
+	bos := tokenFromVocab(meta, meta.IntOptional("tokenizer.ggml.bos_token_id", 1))
+	eos := tokenFromVocab(meta, meta.IntOptional("tokenizer.ggml.eos_token_id", 2))
+	if bos == "" {
+		bos = "<s>"
+	}
+
+	if eos == "" {
+		eos = "</s>"
+	}
+
+	system := collectSystemPrompt(messages, opts)
+	if HasTools(opts) {
+		if system != "" {
+			system += "\n\n"
+		}
+		system += toolsSystemPreamble(opts)
+	}
+
+	var b strings.Builder
+	firstUser := true
+	for _, msg := range messages {
+		switch msg.Role {
+		case "system":
+			continue
+		case "user":
+			b.WriteString(bos)
+			b.WriteString("[INST] ")
+			if firstUser && system != "" {
+				b.WriteString("<<SYS>>\n")
+				b.WriteString(system)
+				b.WriteString("\n<</SYS>>\n\n")
+				system = ""
+			}
+			b.WriteString(msg.Content)
+			b.WriteString(" [/INST]")
+			firstUser = false
+		case "assistant":
+			b.WriteString(" ")
+			b.WriteString(formatAssistantBody(msg))
+			b.WriteString(" ")
+			b.WriteString(eos)
+		case "tool":
+			b.WriteString(bos)
+			b.WriteString("[INST] ")
+			b.WriteString(msg.Content)
+			b.WriteString(" [/INST]")
+			firstUser = false
+		}
+	}
+
+	if system != "" {
+		b.WriteString(bos)
+		b.WriteString("[INST] <<SYS>>\n")
+		b.WriteString(system)
+		b.WriteString("\n<</SYS>>\n\n [/INST]")
+	}
+
+	return b.String()
+}
+
+// collectSystemPrompt: system из messages; opts.System - только если system-сообщений нет
+func collectSystemPrompt(messages []Message, opts Options) string {
+	var parts []string
+	for _, msg := range messages {
+		if msg.Role == "system" && msg.Content != "" {
+			parts = append(parts, msg.Content)
+		}
+	}
+
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
+	}
+
+	return opts.System
+}
+
 func tokenFromVocab(meta format.Metadata, id int) string {
 	if meta == nil || id < 0 {
 		return ""
@@ -103,4 +183,32 @@ func isLlamaArchitecture(meta format.Metadata) bool {
 	arch, err := meta.String("general.architecture")
 
 	return err == nil && arch == "llama"
+}
+
+// isLlama3Family: header tokens / llama-bpe / большой vocab / высокий rope.freq_base
+func isLlama3Family(meta format.Metadata) bool {
+	if !isLlamaArchitecture(meta) {
+		return false
+	}
+
+	if tok := tokenFromVocab(meta, llamaStartHeaderID); tok != "" && strings.Contains(tok, "start_header") {
+		return true
+	}
+
+	if pre, err := meta.String("tokenizer.ggml.pre"); err == nil {
+		switch pre {
+		case "llama-bpe", "llama3":
+			return true
+		}
+	}
+
+	if v, err := format.MetaValue[float32](meta, "llama.rope.freq_base"); err == nil && v >= 100000 {
+		return true
+	}
+
+	if tokens, err := meta.StringArray("tokenizer.ggml.tokens"); err == nil && len(tokens) >= 100000 {
+		return true
+	}
+
+	return false
 }

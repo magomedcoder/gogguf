@@ -19,7 +19,7 @@
 - деквантизация и matmul: Q8_0, Q4_0, Q4_K, Q5_K, Q6_K;
 - базовые ops: RoPE, RMSNorm, GQA attention, SwiGLU;
 - **SIMD** matmul FP32: AVX2 (amd64), NEON (arm64); Q8_0 dot: AVX2 (amd64);
-- forward pass **Qwen3**, **Llama 3** и **Mistral** + KV-cache;
+- forward pass **Qwen3**, **Llama 2/3**, **Mistral**, **Phi-2/3**, **Gemma/Gemma2** + KV-cache;
 - tokenizer BPE из метаданных GGUF;
 - chat template ChatML/Qwen и Jinja (`--chat`, `--thinking`, `FormatChatUser`);
 - генерация текста: `gguf run` (greedy / temperature / top-k / top-p / min-p / repeat penalty);
@@ -28,8 +28,8 @@
 
 ## Модели
 
-**Работает:** Qwen3, Llama 3, Mistral
-**Скоро:** Llama 2, Phi-2, Gemma
+**Работает:** Qwen3, Llama 2/3, Mistral, Phi-2/3, Gemma/Gemma2
+**Скоро:** Vision, отдельные embedding-модели
 
 Подробнее: [docs/models-ru.md](docs/models-ru.md).
 

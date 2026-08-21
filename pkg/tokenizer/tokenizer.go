@@ -158,13 +158,25 @@ func (t *Tokenizer) Encode(text string) ([]int, error) {
 // Decode преобразует token IDs в текст
 func (t *Tokenizer) Decode(ids []int) string {
 	var b strings.Builder
-	for _, id := range ids {
+	stripLeadSPM := false
+	for i, id := range ids {
 		if id < 0 || id >= len(t.tokens) {
 			continue
 		}
-		b.WriteString(t.decodeToken(t.tokens[id]))
+
+		tok := t.tokens[id]
+		if !t.byteEncode && i == 0 && strings.HasPrefix(tok, "▁") {
+			stripLeadSPM = true
+		}
+		b.WriteString(t.decodeToken(tok))
 	}
-	return b.String()
+
+	s := b.String()
+	if stripLeadSPM && strings.HasPrefix(s, " ") {
+		return s[1:]
+	}
+
+	return s
 }
 
 func (t *Tokenizer) decodeToken(tok string) string {
@@ -172,7 +184,8 @@ func (t *Tokenizer) decodeToken(tok string) string {
 		return byteDecodeToken(tok)
 	}
 
-	return strings.ReplaceAll(tok, "Ġ", " ")
+	s := strings.ReplaceAll(tok, "Ġ", " ")
+	return strings.ReplaceAll(s, "▁", " ")
 }
 
 func (t *Tokenizer) bpe(text string) []string {

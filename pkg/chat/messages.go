@@ -14,7 +14,7 @@ func FormatMessages(messages []Message, opts Options) (string, error) {
 	}
 
 	if isLlamaArchitecture(opts.Metadata) {
-		return formatLlama3(messages, opts), nil
+		return formatLlamaFallback(messages, opts), nil
 	}
 
 	return formatMessagesFallback(messages, opts), nil

@@ -83,7 +83,7 @@ func FormatUser(user string, opts Options) (string, error) {
 	}
 
 	if isLlamaArchitecture(opts.Metadata) {
-		return formatLlama3(msgs, opts), nil
+		return formatLlamaFallback(msgs, opts), nil
 	}
 
 	return formatUserFallback(user, opts), nil

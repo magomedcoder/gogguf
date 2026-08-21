@@ -62,11 +62,6 @@ func ParseConfig(r *format.Reader) (Config, error) {
 		eps = v
 	}
 
-	freqBase := float32(500000)
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.freq_base"); err == nil {
-		freqBase = v
-	}
-
 	headDim := emb / heads
 	if heads <= 0 {
 		return Config{}, fmt.Errorf("llama: attention.head_count=%d", heads)
@@ -79,6 +74,16 @@ func ParseConfig(r *format.Reader) (Config, error) {
 	vocab, err := vocabSize(r, emb)
 	if err != nil {
 		return Config{}, err
+	}
+
+	// Llama 2 ≈ 32k vocab / rope 10k; Llama 3 ≈ 128k / 500k - если ключ отсутствует
+	freqBase := float32(10000)
+	if vocab >= 100000 {
+		freqBase = 500000
+	}
+
+	if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.freq_base"); err == nil {
+		freqBase = v
 	}
 
 	return Config{

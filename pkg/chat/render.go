@@ -33,7 +33,7 @@ func Render(meta format.Metadata, messages []Message, addGenerationPrompt bool, 
 		}
 
 		if isLlamaArchitecture(meta) {
-			return formatLlama3(messages, opts), nil
+			return formatLlamaFallback(messages, opts), nil
 		}
 
 		return renderChatML(messages, addGenerationPrompt, opts), nil
