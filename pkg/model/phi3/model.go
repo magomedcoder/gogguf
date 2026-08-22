@@ -144,6 +144,40 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	return m.scratch.out, nil
 }
 
+// EmbeddingDim возвращает размер скрытого состояния
+func (m *Model) EmbeddingDim() int {
+	return m.cfg.EmbeddingDim
+}
+
+// Embed - last-token RMSNorm(hidden) до lm_head (сбрасывает KV)
+func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
+	if len(tokenIDs) == 0 {
+		return nil, fmt.Errorf("phi3: пустой ввод")
+	}
+	m.ResetCache()
+	defer m.ResetCache()
+
+	for i, id := range tokenIDs {
+		if err := m.embed(id); err != nil {
+			return nil, err
+		}
+
+		for layer := range m.cfg.NumLayers {
+			if err := m.forwardBlock(layer, i); err != nil {
+				return nil, err
+			}
+		}
+		m.cache.Advance()
+	}
+	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+		return nil, err
+	}
+
+	out := make([]float32, m.cfg.EmbeddingDim)
+	copy(out, m.scratch.h)
+	return out, nil
+}
+
 func (m *Model) embed(tokenID int) error {
 	raw, err := m.weights.Raw("token_embd.weight")
 	if err != nil {

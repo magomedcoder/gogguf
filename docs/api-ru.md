@@ -12,7 +12,7 @@
 | GET   | `/v1/models`           | список моделей                        |
 | POST  | `/v1/reset`            | сброс KV-cache на сервере (новый чат) |
 | POST  | `/v1/chat/completions` | chat API (messages + stream)          |
-| POST  | `/v1/embeddings`       | embeddings (пока не поддерживается)   |
+| POST  | `/v1/embeddings`       | embeddings (last-token hidden)        |
 
 ## `GET /v1/models`
 
@@ -115,4 +115,14 @@ curl -N 127.0.0.1:8000/v1/chat/completions \
 
 ## `POST /v1/embeddings`
 
-Возвращает HTTP `501` - generative GGUF модели пока не поддерживают embeddings.
+Hidden последнего токена после output-norm (до lm_head). Generative GGUF - не отдельные embedding-модели.
+
+`input`: строка, массив строк, токены (`[]int`) или батчи (`[][]int`).
+
+```bash
+curl 127.0.0.1:8000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"Привет мир"}'
+```
+
+Сбрасывает KV / conversation на сервере.

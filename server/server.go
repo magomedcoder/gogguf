@@ -120,7 +120,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name, _ := s.engine.Metadata().String("general.name")
+	name := ""
+	if meta := s.engine.Metadata(); meta != nil {
+		name, _ = meta.String("general.name")
+	}
 	if name == "" {
 		name = "gguf"
 	}
@@ -141,22 +144,6 @@ type apiErrorResponse struct {
 type apiErrorBody struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
-}
-
-func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "метод не разрешен", http.StatusMethodNotAllowed)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	_ = json.NewEncoder(w).Encode(apiErrorResponse{
-		Error: apiErrorBody{
-			Message: "embeddings не поддерживаются для generative GGUF моделей",
-			Type:    "not_supported",
-		},
-	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

@@ -17,6 +17,11 @@ import (
 type Model interface {
 	Forward(tokenIDs []int, startPos int) ([]float32, error)
 
+	// Embed - last-token hidden после output-norm (до lm_head); сбрасывает KV-cache
+	Embed(tokenIDs []int) ([]float32, error)
+
+	EmbeddingDim() int
+
 	ResetCache()
 
 	Close() error

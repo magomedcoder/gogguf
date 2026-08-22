@@ -133,6 +133,35 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	return m.scratch.out, nil
 }
 
+// EmbeddingDim возвращает размер скрытого состояния
+func (m *Model) EmbeddingDim() int {
+	return m.cfg.EmbeddingDim
+}
+
+// Embed - last-token RMSNorm(hidden) до lm_head (сбрасывает KV)
+func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
+	if len(tokenIDs) == 0 {
+		return nil, fmt.Errorf("llama: пустой ввод")
+	}
+
+	m.ResetCache()
+	defer m.ResetCache()
+
+	for i, tok := range tokenIDs {
+		if err := m.forwardToken(tok, i, false); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+		return nil, err
+	}
+
+	out := make([]float32, m.cfg.EmbeddingDim)
+	copy(out, m.scratch.h)
+	return out, nil
+}
+
 func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 	if err := m.embedToken(tokenID); err != nil {
 		return err

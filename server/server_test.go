@@ -61,13 +61,48 @@ func TestHandlerRoutes(t *testing.T) {
 	}
 }
 
-func TestEmbeddingsNotSupported(t *testing.T) {
+func TestEmbeddingsBadRequest(t *testing.T) {
 	srv := New(&runtime.Engine{}, "")
 	rec := httptest.NewRecorder()
-	srv.handleEmbeddings(rec, httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil))
+	body := bytes.NewBufferString(`{"input":null}`)
+	srv.handleEmbeddings(rec, httptest.NewRequest(http.MethodPost, "/v1/embeddings", body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("статус = %d, ожидали 400", rec.Code)
+	}
+}
 
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("статус = %d, ожидали 501", rec.Code)
+func TestParseEmbeddingsInput(t *testing.T) {
+	cases := []struct {
+		raw  string
+		n    int
+		toks bool
+	}{
+		{`"hi"`, 1, false},
+		{`["a","b"]`, 2, false},
+		{`[1,2,3]`, 1, true},
+		{`[[1,2],[3]]`, 2, true},
+	}
+	for _, tc := range cases {
+		got, err := parseEmbeddingsInput(json.RawMessage(tc.raw))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.raw, err)
+		}
+
+		if len(got) != tc.n {
+			t.Fatalf("%s: len=%d want %d", tc.raw, len(got), tc.n)
+		}
+
+		if tc.toks && got[0].tokens == nil {
+			t.Fatalf("%s: ожидали tokens", tc.raw)
+		}
+
+		if !tc.toks && got[0].text == "" && tc.raw != `["a","b"]` {
+			// first of ["a","b"] is "a"
+		}
+
+		if !tc.toks && len(got) > 0 && got[0].tokens != nil {
+			t.Fatalf("%s: не ожидали tokens", tc.raw)
+		}
 	}
 }
 

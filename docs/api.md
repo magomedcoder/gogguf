@@ -12,7 +12,7 @@ Start the server with `gguf serve` (see [CLI](cli.md)).
 | GET    | `/v1/models`           | list loaded models                    |
 | POST   | `/v1/reset`            | reset server-side KV-cache (new chat) |
 | POST   | `/v1/chat/completions` | chat API (messages + stream)          |
-| POST   | `/v1/embeddings`       | embeddings (not supported yet, 501)   |
+| POST   | `/v1/embeddings`       | last-token hidden embeddings          |
 
 ## `GET /v1/models`
 
@@ -115,4 +115,14 @@ curl -N 127.0.0.1:8000/v1/chat/completions \
 
 ## `POST /v1/embeddings`
 
-Returns HTTP `501` - generative GGUF models do not provide embeddings yet.
+Last-token hidden state after output norm (before lm_head). Generative GGUF models - not dedicated embedding models.
+
+Request `input`: string, array of strings, token ids (`[]int`), or batches (`[][]int`).
+
+```bash
+curl 127.0.0.1:8000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"Hello world"}'
+```
+
+Resets the server KV / conversation cache (same as after competing with chat).

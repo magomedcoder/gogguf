@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"fmt"
+
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/model"
 	"github.com/magomedcoder/gogguf/pkg/tokenizer"
@@ -78,6 +80,52 @@ func (e *Engine) ContextLength() int {
 // ForwardTokenIDs выполняет forward pass для token IDs
 func (e *Engine) ForwardTokenIDs(tokens []int, startPos int) ([]float32, error) {
 	return e.Model.Forward(tokens, startPos)
+}
+
+// EmbedTokens - embedding last-token hidden (output-norm); сбрасывает KV-cache модели
+func (e *Engine) EmbedTokens(tokens []int) ([]float32, error) {
+	if e == nil || e.Model == nil {
+		return nil, fmt.Errorf("runtime: модель не загружена")
+	}
+
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("runtime: пустой ввод для embeddings")
+	}
+
+	return e.Model.Embed(tokens)
+}
+
+// EmbedText кодирует текст (с BOS где нужно) и возвращает embedding + token IDs
+func (e *Engine) EmbedText(text string) (vec []float32, tokens []int, err error) {
+	if e == nil || e.tok == nil {
+		return nil, nil, fmt.Errorf("runtime: tokenizer не загружен")
+	}
+
+	tokens, err = e.encodeForEmbed(text)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	vec, err = e.EmbedTokens(tokens)
+	return vec, tokens, err
+}
+
+func (e *Engine) encodeForEmbed(text string) ([]int, error) {
+	ids, err := e.tok.Encode(text)
+	if err != nil {
+		return nil, err
+	}
+
+	if !needsBOSPrefix(e.meta, ids) {
+		return ids, nil
+	}
+
+	bos := e.tok.BOS()
+	if bos < 0 {
+		return ids, nil
+	}
+
+	return append([]int{bos}, ids...), nil
 }
 
 // Close освобождает GPU и связанные ресурсы модели
