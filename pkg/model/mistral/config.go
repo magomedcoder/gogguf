@@ -23,15 +23,20 @@ type Config struct {
 
 // ParseConfig читает конфиг из метаданных GGUF (префикс mistral.)
 func ParseConfig(r *format.Reader) (Config, error) {
-	return parseConfigWithPrefix(r, "mistral.")
+	return parseConfigWithPrefix(r, "mistral.", 1e-5, 1000000)
 }
 
 // ParseConfigLlama читает конфиг Mistral-модели с префиксом llama.* (TheBloke и convert.py)
 func ParseConfigLlama(r *format.Reader) (Config, error) {
-	return parseConfigWithPrefix(r, "llama.")
+	return parseConfigWithPrefix(r, "llama.", 1e-5, 1000000)
 }
 
-func parseConfigWithPrefix(r *format.Reader, prefix string) (Config, error) {
+// ParseConfigQwen2 читает qwen2.* (DeepSeek distill и др.)
+func ParseConfigQwen2(r *format.Reader) (Config, error) {
+	return parseConfigWithPrefix(r, "qwen2.", 1e-6, 10000)
+}
+
+func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultRope float32) (Config, error) {
 	getInt := func(key string) (int, error) {
 		return r.Metadata.Int(prefix + key)
 	}
@@ -66,12 +71,12 @@ func parseConfigWithPrefix(r *format.Reader, prefix string) (Config, error) {
 		return Config{}, err
 	}
 
-	eps := float32(1e-5)
+	eps := defaultEps
 	if v, err := format.MetaValue[float32](r.Metadata, prefix+"attention.layer_norm_rms_epsilon"); err == nil {
 		eps = v
 	}
 
-	freqBase := float32(1000000)
+	freqBase := defaultRope
 	if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.freq_base"); err == nil {
 		freqBase = v
 	}

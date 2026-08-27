@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/model/deepseek"
 	"github.com/magomedcoder/gogguf/pkg/model/gemma"
 	"github.com/magomedcoder/gogguf/pkg/model/llama"
 	"github.com/magomedcoder/gogguf/pkg/model/mistral"
@@ -43,6 +44,9 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 	switch arch {
 	case "qwen3":
 		return qwen3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+	case "qwen2":
+		// DeepSeek-R1-Distill-Qwen и др. distill с arch=qwen2 (без QK-norm)
+		return mistral.LoadQwen2(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "mistral":
 		return mistral.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "gemma":
@@ -53,6 +57,8 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 		return phi2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "phi3":
 		return phi3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+	case "deepseek":
+		return deepseek.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "llama":
 		if isMistralModel(r) {
 			return mistral.LoadLlamaMeta(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)

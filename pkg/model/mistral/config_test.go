@@ -45,3 +45,39 @@ func TestParseConfigMistral7B(t *testing.T) {
 		t.Fatalf("SlidingWindow = %d, ожидали 4096", cfg.SlidingWindow)
 	}
 }
+
+func TestParseConfigQwen2Defaults(t *testing.T) {
+	r := &format.Reader{
+		Metadata: format.Metadata{
+			"qwen2.context_length":          int32(32768),
+			"qwen2.embedding_length":        int32(3584),
+			"qwen2.feed_forward_length":     int32(18944),
+			"qwen2.block_count":             int32(28),
+			"qwen2.attention.head_count":    int32(28),
+			"qwen2.attention.head_count_kv": int32(4),
+		},
+		Tensors: []format.TensorInfo{
+			{
+				Name:       "token_embd.weight",
+				Dimensions: []uint64{3584, 152064},
+			},
+		},
+	}
+
+	cfg, err := mistral.ParseConfigQwen2(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.RopeFreqBase != 10000 {
+		t.Fatalf("RopeFreqBase=%v, want 10000 default", cfg.RopeFreqBase)
+	}
+
+	if cfg.HeadDim != 128 {
+		t.Fatalf("HeadDim=%d", cfg.HeadDim)
+	}
+
+	if cfg.VocabSize != 152064 {
+		t.Fatalf("VocabSize=%d", cfg.VocabSize)
+	}
+}
