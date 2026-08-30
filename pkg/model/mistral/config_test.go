@@ -81,3 +81,37 @@ func TestParseConfigQwen2Defaults(t *testing.T) {
 		t.Fatalf("VocabSize=%d", cfg.VocabSize)
 	}
 }
+
+func TestParseConfigLlamaMixtralMoE(t *testing.T) {
+	r := &format.Reader{
+		Metadata: format.Metadata{
+			"llama.context_length":          int32(32768),
+			"llama.embedding_length":        int32(4096),
+			"llama.feed_forward_length":     int32(14336),
+			"llama.block_count":             int32(32),
+			"llama.attention.head_count":    int32(32),
+			"llama.attention.head_count_kv": int32(8),
+			"llama.expert_count":            int32(8),
+			"llama.expert_used_count":       int32(2),
+		},
+		Tensors: []format.TensorInfo{
+			{
+				Name:       "token_embd.weight",
+				Dimensions: []uint64{4096, 32000},
+			},
+		},
+	}
+
+	cfg, err := mistral.ParseConfigLlama(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.ExpertCount != 8 || cfg.ExpertUsedCount != 2 {
+		t.Fatalf("experts=%d used=%d", cfg.ExpertCount, cfg.ExpertUsedCount)
+	}
+
+	if !cfg.MoENormWeights {
+		t.Fatal("Mixtral MoE должен renorm веса")
+	}
+}

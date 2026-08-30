@@ -47,3 +47,28 @@ func TestIsMistralModel(t *testing.T) {
 		t.Fatal("ожидали архитектуру mistral")
 	}
 }
+
+func TestIsMixtralModel(t *testing.T) {
+	r := &format.Reader{
+		Metadata: format.Metadata{
+			"general.architecture": "llama",
+			"llama.expert_count":   int32(8),
+			"general.name":         "mixtral-8x7b-instruct-v0.1",
+		},
+	}
+
+	if !isMixtralModel(r) {
+		t.Fatal("ожидали Mixtral по expert_count")
+	}
+
+	r2 := &format.Reader{
+		Metadata: format.Metadata{
+			"general.architecture": "llama",
+			"general.name":         "Llama-3.2-1B",
+		},
+	}
+
+	if isMixtralModel(r2) {
+		t.Fatal("Llama 3 не должна определяться как Mixtral")
+	}
+}

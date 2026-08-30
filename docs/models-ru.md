@@ -11,6 +11,7 @@
 | Llama 3      | проверено | Llama-3.2-1B (CUDA RoPE NORM)                            |
 | Llama 2      | код       | тот же `llama`; `[INST]`/<<SYS>>, SPM vocab              |
 | Mistral      | проверено | Mistral-7B-Instruct-v0.2 (NeoX RoPE, GQA; golden Q4_K_M) |
+| Mixtral      | код       | `llama` + MoE (8x7B); NeoX через mistral                 |
 | Phi-3        | код       | `phi3` / Phi-3.5: fused QKV+FFN, partial RoPE, LongRoPE  |
 | Phi-2        | код       | `phi2`: LayerNorm, parallel residual, GELU               |
 | Gemma/Gemma2 | код       | `gemma`/`gemma2`: GeGLU; gemma2 softcap/SWA              |

@@ -1,18 +1,17 @@
-package deepseek
+package moe
 
 import (
 	"math"
 	"testing"
 )
 
-func TestMoeTopKSoftmax(t *testing.T) {
+func TestTopKSoftmax(t *testing.T) {
 	logits := []float32{1, 3, 2, 0}
-	idxs, w := moeTopKSoftmax(logits, 2, false, 1)
+	idxs, w := TopKSoftmax(logits, 2, false, 1)
 	if len(idxs) != 2 || idxs[0] != 1 || idxs[1] != 2 {
 		t.Fatalf("idxs=%v", idxs)
 	}
 
-	// softmax of [1,3,2,0]; top are idx1=3 and idx2=2
 	maxV := float32(3)
 	e1 := float32(math.Exp(float64(3 - maxV)))
 	e2 := float32(math.Exp(float64(2 - maxV)))
@@ -24,9 +23,9 @@ func TestMoeTopKSoftmax(t *testing.T) {
 		t.Fatalf("weights=%v want %v %v", w, want0, want1)
 	}
 
-	_, wn := moeTopKSoftmax(logits, 2, true, 2)
+	_, wn := TopKSoftmax(logits, 2, true, 2)
 	s := wn[0] + wn[1]
-	if math.Abs(float64(s-2)) > 1e-5 { // renormalized then *2
+	if math.Abs(float64(s-2)) > 1e-5 {
 		t.Fatalf("norm+scale sum=%v", s)
 	}
 }

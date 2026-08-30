@@ -1,18 +1,19 @@
-package deepseek
+package moe
 
 import (
 	"math"
 	"slices"
 )
 
-// moeTopKSoftmax выбирает top-k экспертов после softmax по router logits.
-// normWeights=false (DeepSeek V1): веса - softmax-вероятности выбранных экспертов без ренормализации.
-// wScale умножает веса (expert_weights_scale); 0 и 1 - без масштаба
-func moeTopKSoftmax(logits []float32, k int, normWeights bool, wScale float32) (idxs []int, weights []float32) {
+// TopKSoftmax выбирает top-k экспертов после softmax по router logits.
+// normWeights: true - renorm top-k weights (Mixtral); false - raw softmax probs (DeepSeek V1).
+// wScale умножает веса (expert_weights_scale); 0 и 1 - без масштаба.
+func TopKSoftmax(logits []float32, k int, normWeights bool, wScale float32) (idxs []int, weights []float32) {
 	n := len(logits)
 	if n == 0 || k <= 0 {
 		return nil, nil
 	}
+
 	if k > n {
 		k = n
 	}
@@ -34,9 +35,11 @@ func moeTopKSoftmax(logits []float32, k int, normWeights bool, wScale float32) (
 		if a.p > b.p {
 			return -1
 		}
+
 		if a.p < b.p {
 			return 1
 		}
+
 		return a.i - b.i
 	})
 

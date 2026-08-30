@@ -60,7 +60,7 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 	case "deepseek":
 		return deepseek.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "llama":
-		if isMistralModel(r) {
+		if isMixtralModel(r) || isMistralModel(r) {
 			return mistral.LoadLlamaMeta(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 		}
 		return llama.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)

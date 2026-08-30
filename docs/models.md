@@ -11,6 +11,7 @@
 | Llama 3      | verified | Llama-3.2-1B (CUDA RoPE NORM)                            |
 | Llama 2      | code     | same `llama` package; `[INST]`/<<SYS>>, SPM vocab        |
 | Mistral      | verified | Mistral-7B-Instruct-v0.2 (NeoX RoPE, GQA; golden Q4_K_M) |
+| Mixtral      | code     | `llama` + MoE (8x7B); NeoX via mistral path              |
 | Phi-3        | code     | `phi3` / Phi-3.5: fused QKV+FFN, partial RoPE, LongRoPE  |
 | Phi-2        | code     | `phi2`: LayerNorm, parallel residual, GELU               |
 | Gemma/Gemma2 | code     | `gemma`/`gemma2`: GeGLU; gemma2 softcap/SWA              |

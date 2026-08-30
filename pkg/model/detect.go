@@ -37,3 +37,24 @@ func isMistralModel(r *format.Reader) bool {
 
 	return false
 }
+
+// isMixtralModel определяет Mixtral MoE по llama.* + expert_count или имени
+func isMixtralModel(r *format.Reader) bool {
+	arch, err := r.Metadata.String("general.architecture")
+	if err != nil || arch != "llama" {
+		return false
+	}
+
+	if n, err := r.Metadata.Int("llama.expert_count"); err == nil && n > 0 {
+		return true
+	}
+
+	if name, err := r.Metadata.String("general.name"); err == nil {
+		n := strings.ToLower(name)
+		if strings.Contains(n, "mixtral") {
+			return true
+		}
+	}
+
+	return false
+}
