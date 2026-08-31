@@ -115,3 +115,43 @@ func TestParseConfigLlamaMixtralMoE(t *testing.T) {
 		t.Fatal("Mixtral MoE должен renorm веса")
 	}
 }
+
+func TestParseConfigQwen2MoE(t *testing.T) {
+	r := &format.Reader{
+		Metadata: format.Metadata{
+			"qwen2moe.context_length":                    int32(32768),
+			"qwen2moe.embedding_length":                  int32(2048),
+			"qwen2moe.feed_forward_length":               int32(5632),
+			"qwen2moe.block_count":                       int32(24),
+			"qwen2moe.attention.head_count":              int32(16),
+			"qwen2moe.attention.head_count_kv":           int32(16),
+			"qwen2moe.expert_count":                      int32(60),
+			"qwen2moe.expert_used_count":                 int32(4),
+			"qwen2moe.expert_feed_forward_length":        int32(1408),
+			"qwen2moe.expert_shared_feed_forward_length": int32(5632),
+		},
+		Tensors: []format.TensorInfo{
+			{
+				Name:       "token_embd.weight",
+				Dimensions: []uint64{2048, 151936},
+			},
+		},
+	}
+
+	cfg, err := mistral.ParseConfigQwen2MoE(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.ExpertCount != 60 || cfg.ExpertUsedCount != 4 {
+		t.Fatalf("experts=%d used=%d", cfg.ExpertCount, cfg.ExpertUsedCount)
+	}
+
+	if cfg.ExpertFFN != 1408 || cfg.SharedFFN != 5632 {
+		t.Fatalf("expertFFN=%d sharedFFN=%d", cfg.ExpertFFN, cfg.SharedFFN)
+	}
+
+	if cfg.MoENormWeights || !cfg.SharedExpertGate {
+		t.Fatalf("norm=%v gate=%v", cfg.MoENormWeights, cfg.SharedExpertGate)
+	}
+}

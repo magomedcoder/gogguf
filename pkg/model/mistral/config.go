@@ -21,8 +21,11 @@ type Config struct {
 	SlidingWindow     int // 0 = без ограничения (полный KV-cache)
 	ExpertCount       int
 	ExpertUsedCount   int
+	ExpertFFN         int // expert_feed_forward_length; 0 -> FFNHidden
+	SharedFFN         int // expert_shared_feed_forward_length; 0 -> none
 	ExpertWeightScale float32
-	MoENormWeights    bool // Mixtral/llama MoE renorm top-k; DeepSeek - false
+	MoENormWeights    bool // Mixtral renorm top-k; Qwen2MoE/DeepSeek - false
+	SharedExpertGate  bool // Qwen2MoE: silu(gate_inp)/gate_inp на shared FFN
 }
 
 // ParseConfig читает конфиг из метаданных GGUF (префикс mistral.)
@@ -38,6 +41,30 @@ func ParseConfigLlama(r *format.Reader) (Config, error) {
 // ParseConfigQwen2 читает qwen2.* (DeepSeek distill и др.)
 func ParseConfigQwen2(r *format.Reader) (Config, error) {
 	return parseConfigWithPrefix(r, "qwen2.", 1e-6, 10000)
+}
+
+// ParseConfigQwen2MoE читает qwen2moe.* (MoE + gated shared expert)
+func ParseConfigQwen2MoE(r *format.Reader) (Config, error) {
+	cfg, err := parseConfigWithPrefix(r, "qwen2moe.", 1e-6, 10000)
+	if err != nil {
+		return Config{}, err
+	}
+
+	if cfg.ExpertCount <= 0 {
+		return Config{}, fmt.Errorf("qwen2moe: expert_count=%d", cfg.ExpertCount)
+	}
+
+	cfg.MoENormWeights = false
+	cfg.SharedExpertGate = true
+	if cfg.ExpertFFN <= 0 && cfg.ExpertUsedCount > 0 {
+		cfg.ExpertFFN = cfg.FFNHidden / cfg.ExpertUsedCount
+	}
+
+	if cfg.SharedFFN <= 0 {
+		cfg.SharedFFN = cfg.FFNHidden
+	}
+
+	return cfg, nil
 }
 
 func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultRope float32) (Config, error) {
@@ -124,6 +151,16 @@ func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultR
 		}
 	}
 
+	expertFFN := 0
+	if v, err := getInt("expert_feed_forward_length"); err == nil && v > 0 {
+		expertFFN = v
+	}
+
+	sharedFFN := 0
+	if v, err := getInt("expert_shared_feed_forward_length"); err == nil && v > 0 {
+		sharedFFN = v
+	}
+
 	vocab, err := vocabSize(r, emb)
 	if err != nil {
 		return Config{}, err
@@ -143,6 +180,8 @@ func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultR
 		SlidingWindow:     slidingWindow,
 		ExpertCount:       nExpert,
 		ExpertUsedCount:   nExpertUsed,
+		ExpertFFN:         expertFFN,
+		SharedFFN:         sharedFFN,
 		ExpertWeightScale: wScale,
 		MoENormWeights:    nExpert > 0,
 	}, nil
@@ -152,8 +191,25 @@ func (c Config) isMoE() bool {
 	return c.ExpertCount > 0
 }
 
-func (c Config) maxFFN() int {
+func (c Config) expertFFN() int {
+	if c.ExpertFFN > 0 {
+		return c.ExpertFFN
+	}
+
 	return c.FFNHidden
+}
+
+func (c Config) maxFFN() int {
+	m := c.FFNHidden
+	if e := c.expertFFN(); e > m {
+		m = e
+	}
+
+	if c.SharedFFN > m {
+		m = c.SharedFFN
+	}
+
+	return m
 }
 
 func vocabSize(r *format.Reader, emb int) (int, error) {

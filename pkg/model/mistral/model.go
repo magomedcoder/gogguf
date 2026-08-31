@@ -41,6 +41,11 @@ func LoadQwen2(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, err
 	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfigQwen2)
 }
 
+// LoadQwen2MoE создаёт Qwen2-MoE (qwen2moe.*, gated shared expert)
+func LoadQwen2MoE(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfigQwen2MoE)
+}
+
 func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int, parse func(*format.Reader) (Config, error)) (*Model, error) {
 	cfg, err := parse(w.Reader())
 	if err != nil {
@@ -341,7 +346,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	embd := m.cfg.EmbeddingDim
 	nExp := m.cfg.ExpertCount
-	ffn := m.cfg.FFNHidden
+	ffn := m.cfg.expertFFN()
 
 	if err := m.matmulInto(lt.gateInp, nExp, embd, m.scratch.h, m.scratch.router[:nExp], layer); err != nil {
 		return err
@@ -391,7 +396,54 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		}
 	}
 
+	if lt.gateShexp != "" {
+		shared := m.cfg.SharedFFN
+		if shared <= 0 {
+			shared = m.cfg.FFNHidden
+		}
+
+		sg := m.scratch.gate[:shared]
+		su := m.scratch.up[:shared]
+
+		gateScale := float32(1)
+		if lt.gateInpShexp != "" {
+			var gateInp [1]float32
+			if err := m.matmulInto(lt.gateInpShexp, 1, embd, m.scratch.h, gateInp[:], layer); err != nil {
+				return err
+			}
+
+			gateScale = siluDiv(gateInp[0])
+		}
+
+		if err := m.matmulInto(lt.gateShexp, shared, embd, m.scratch.h, sg, layer); err != nil {
+			return err
+		}
+
+		if err := m.matmulInto(lt.upShexp, shared, embd, m.scratch.h, su, layer); err != nil {
+			return err
+		}
+
+		ops.SwiGLUInPlace(sg, su)
+
+		if err := m.matmulInto(lt.downShexp, embd, shared, sg, m.scratch.tmp, layer); err != nil {
+			return err
+		}
+
+		if gateScale != 1 {
+			ops.ScaleInPlace(m.scratch.tmp, gateScale)
+		}
+
+		ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+	}
+
 	return nil
+}
+
+func siluDiv(x float32) float32 {
+	if x == 0 {
+		return 0.5
+	}
+	return ops.SiLU(x) / x
 }
 
 func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {

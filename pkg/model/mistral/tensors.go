@@ -16,11 +16,15 @@ type layerTensors struct {
 	ffnUp   string
 	ffnDown string
 	// MoE
-	moe      bool
-	gateInp  string
-	gateExps string
-	upExps   string
-	downExps string
+	moe          bool
+	gateInp      string
+	gateExps     string
+	upExps       string
+	downExps     string
+	gateInpShexp string
+	gateShexp    string
+	upShexp      string
+	downShexp    string
 }
 
 func loadLayerTensors(w *weights.Store, cfg Config) ([]layerTensors, error) {
@@ -43,6 +47,17 @@ func loadLayerTensors(w *weights.Store, cfg Config) ([]layerTensors, error) {
 			for _, name := range []string{lt.gateInp, lt.gateExps, lt.upExps, lt.downExps} {
 				if _, err := w.Info(name); err != nil {
 					return nil, fmt.Errorf("mistral: %s: %w", name, err)
+				}
+			}
+			if cfg.SharedFFN > 0 || cfg.SharedExpertGate {
+				lt.gateInpShexp = p + "ffn_gate_inp_shexp.weight"
+				lt.gateShexp = p + "ffn_gate_shexp.weight"
+				lt.upShexp = p + "ffn_up_shexp.weight"
+				lt.downShexp = p + "ffn_down_shexp.weight"
+				for _, name := range []string{lt.gateInpShexp, lt.gateShexp, lt.upShexp, lt.downShexp} {
+					if _, err := w.Info(name); err != nil {
+						return nil, fmt.Errorf("mistral: %s: %w", name, err)
+					}
 				}
 			}
 		} else {
