@@ -7,6 +7,7 @@
 | Architecture | Status   | Models / notes                                           |
 |--------------|----------|----------------------------------------------------------|
 | Qwen3        | verified | Qwen3-0.6B, Qwen3-8B, Qwen3-14B                          |
+| Qwen3-MoE    | code     | `qwen3moe`: QK-norm + MoE (30B-A3B, 235B-A22B)           |
 | Qwen2        | code     | `qwen2` via mistral path (Distill-Qwen и т.п.)           |
 | Qwen2-MoE    | code     | `qwen2moe`: MoE + gated shared expert                    |
 | Llama 3      | verified | Llama-3.2-1B (CUDA RoPE NORM)                            |

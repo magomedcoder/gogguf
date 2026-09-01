@@ -13,14 +13,20 @@ type scratch struct {
 	scores []float32
 	gate   []float32
 	up     []float32
+	router []float32
+	moeAcc []float32
+	tmp    []float32
 	logits []float32
-	out    []float32 // копия logits для возврата из Forward
+	out    []float32
 }
 
 func newScratch(cfg Config) scratch {
 	qDim := cfg.NumHeads * cfg.HeadDim
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
-	need := 2*cfg.EmbeddingDim + 2*qDim + 2*kvDim + cfg.ContextLength + 2*cfg.FFNHidden + 2*cfg.VocabSize
+	ffn := cfg.maxFFN()
+	nExp := max(cfg.ExpertCount, 1)
+
+	need := 4*cfg.EmbeddingDim + 2*qDim + 2*kvDim + cfg.ContextLength + 2*ffn + nExp + 2*cfg.VocabSize
 	a := mempool.NewArena(need)
 
 	return scratch{
@@ -31,8 +37,11 @@ func newScratch(cfg Config) scratch {
 		v:      a.Alloc(kvDim),
 		attn:   a.Alloc(qDim),
 		scores: a.Alloc(cfg.ContextLength),
-		gate:   a.Alloc(cfg.FFNHidden),
-		up:     a.Alloc(cfg.FFNHidden),
+		gate:   a.Alloc(ffn),
+		up:     a.Alloc(ffn),
+		router: a.Alloc(nExp),
+		moeAcc: a.Alloc(cfg.EmbeddingDim),
+		tmp:    a.Alloc(cfg.EmbeddingDim),
 		logits: a.Alloc(cfg.VocabSize),
 		out:    a.Alloc(cfg.VocabSize),
 	}

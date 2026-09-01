@@ -339,7 +339,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		}
 
 		w := weights[i]
-		for j := 0; j < embd; j++ {
+		for j := range embd {
 			m.scratch.moeAcc[j] += m.scratch.tmp[j] * w
 		}
 	}

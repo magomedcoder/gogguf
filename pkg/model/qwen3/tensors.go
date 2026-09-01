@@ -7,30 +7,50 @@ import (
 )
 
 type layerTensors struct {
-	attnQ   string
-	attnK   string
-	attnV   string
-	attnOut string
-	ffnGate string
-	ffnUp   string
-	ffnDown string
+	attnQ    string
+	attnK    string
+	attnV    string
+	attnOut  string
+	ffnGate  string
+	ffnUp    string
+	ffnDown  string
+	moe      bool
+	gateInp  string
+	gateExps string
+	upExps   string
+	downExps string
 }
 
-func loadLayerTensors(numLayers int) []layerTensors {
-	layers := make([]layerTensors, numLayers)
-	for i := range numLayers {
+func loadLayerTensors(w *weights.Store, cfg Config) ([]layerTensors, error) {
+	layers := make([]layerTensors, cfg.NumLayers)
+	for i := range cfg.NumLayers {
 		p := fmt.Sprintf("blk.%d.", i)
-		layers[i] = layerTensors{
+		lt := layerTensors{
 			attnQ:   p + "attn_q.weight",
 			attnK:   p + "attn_k.weight",
 			attnV:   p + "attn_v.weight",
 			attnOut: p + "attn_output.weight",
-			ffnGate: p + "ffn_gate.weight",
-			ffnUp:   p + "ffn_up.weight",
-			ffnDown: p + "ffn_down.weight",
 		}
+		if cfg.isMoE() {
+			lt.moe = true
+			lt.gateInp = p + "ffn_gate_inp.weight"
+			lt.gateExps = p + "ffn_gate_exps.weight"
+			lt.upExps = p + "ffn_up_exps.weight"
+			lt.downExps = p + "ffn_down_exps.weight"
+			for _, name := range []string{lt.gateInp, lt.gateExps, lt.upExps, lt.downExps} {
+				if _, err := w.Info(name); err != nil {
+					return nil, fmt.Errorf("qwen3: %s: %w", name, err)
+				}
+			}
+		} else {
+			lt.ffnGate = p + "ffn_gate.weight"
+			lt.ffnUp = p + "ffn_up.weight"
+			lt.ffnDown = p + "ffn_down.weight"
+		}
+		layers[i] = lt
 	}
-	return layers
+
+	return layers, nil
 }
 
 func resolveLMHeadName(w *weights.Store) (string, error) {

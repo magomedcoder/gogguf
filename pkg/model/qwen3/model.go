@@ -6,6 +6,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/moe"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
@@ -28,7 +29,16 @@ type Model struct {
 
 // Load создаёт Qwen3 из весов
 func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
-	cfg, err := ParseConfig(w.Reader())
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfig)
+}
+
+// LoadMoE создаёт Qwen3-MoE (qwen3moe.*, QK-norm + MoE)
+func LoadMoE(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfigMoE)
+}
+
+func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int, parse func(*format.Reader) (Config, error)) (*Model, error) {
+	cfg, err := parse(w.Reader())
 	if err != nil {
 		return nil, err
 	}
@@ -47,6 +57,11 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 		return nil, err
 	}
 
+	layerTensors, err := loadLayerTensors(w, cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	m := &Model{
 		cfg:          cfg,
 		weights:      w,
@@ -56,7 +71,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 		gpuMaxSeq:    gpuMaxSeq,
 		scratch:      newScratch(cfg),
 		layerNorms:   layerNorms,
-		layerTensors: loadLayerTensors(cfg.NumLayers),
+		layerTensors: layerTensors,
 		outNorm:      outNorm,
 		lmHeadName:   lmHeadName,
 	}
@@ -291,7 +306,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		}
 	}
 	// WO+RMSNorm+FFN residency (отключить: GGUF_ATTN_FFN_RESIDENCY=0)
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && attnFFNResidencyEnabled() {
+	if !lt.moe && m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && attnFFNResidencyEnabled() {
 		if err := m.attnFFNGPU(layer, lt, ln, m.scratch.x, m.scratch.attn); err == nil {
 			return nil
 		}
@@ -304,6 +319,15 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 	if err := m.rmsNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, layer); err != nil {
 		return err
+	}
+
+	if lt.moe {
+		if err := m.ffnMoE(lt, layer); err != nil {
+			return err
+		}
+
+		ops.AddInPlace(m.scratch.x, m.scratch.moeAcc)
+		return nil
 	}
 
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
@@ -327,6 +351,63 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	}
 
 	ops.AddInPlace(m.scratch.x, m.scratch.h)
+	return nil
+}
+
+func (m *Model) ffnMoE(lt layerTensors, layer int) error {
+	embd := m.cfg.EmbeddingDim
+	nExp := m.cfg.ExpertCount
+	ffn := m.cfg.expertFFN()
+
+	if err := m.matmulInto(lt.gateInp, nExp, embd, m.scratch.h, m.scratch.router[:nExp], layer); err != nil {
+		return err
+	}
+
+	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, m.cfg.MoENormWeights, m.cfg.ExpertWeightScale)
+
+	clear(m.scratch.moeAcc)
+
+	gateW, err := m.weights.Floats(lt.gateExps)
+	if err != nil {
+		return err
+	}
+
+	upW, err := m.weights.Floats(lt.upExps)
+	if err != nil {
+		return err
+	}
+
+	downW, err := m.weights.Floats(lt.downExps)
+	if err != nil {
+		return err
+	}
+
+	expertElems := ffn * embd
+	gateBuf := m.scratch.gate[:ffn]
+	upBuf := m.scratch.up[:ffn]
+
+	for i, ei := range idxs {
+		gOff := ei * expertElems
+		if err := ops.MatMulVecInto(gateW[gOff:gOff+expertElems], ffn, embd, m.scratch.h, gateBuf); err != nil {
+			return err
+		}
+
+		if err := ops.MatMulVecInto(upW[gOff:gOff+expertElems], ffn, embd, m.scratch.h, upBuf); err != nil {
+			return err
+		}
+
+		ops.SwiGLUInPlace(gateBuf, upBuf)
+
+		if err := ops.MatMulVecInto(downW[gOff:gOff+expertElems], embd, ffn, gateBuf, m.scratch.tmp); err != nil {
+			return err
+		}
+
+		w := weights[i]
+		for j := range embd {
+			m.scratch.moeAcc[j] += m.scratch.tmp[j] * w
+		}
+	}
+
 	return nil
 }
 

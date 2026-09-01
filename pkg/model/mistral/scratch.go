@@ -24,10 +24,7 @@ func newScratch(cfg Config) scratch {
 	qDim := cfg.NumHeads * cfg.HeadDim
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
 	ffn := cfg.maxFFN()
-	nExp := cfg.ExpertCount
-	if nExp < 1 {
-		nExp = 1
-	}
+	nExp := max(cfg.ExpertCount, 1)
 	need := 4*cfg.EmbeddingDim + 2*qDim + 2*kvDim + cfg.ContextLength + 2*ffn + nExp + 2*cfg.VocabSize
 	a := mempool.NewArena(need)
 
