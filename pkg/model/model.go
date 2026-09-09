@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/model/deepseek"
+	"github.com/magomedcoder/gogguf/pkg/model/deepseek2"
 	"github.com/magomedcoder/gogguf/pkg/model/gemma"
 	"github.com/magomedcoder/gogguf/pkg/model/llama"
 	"github.com/magomedcoder/gogguf/pkg/model/mistral"
@@ -63,6 +64,8 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 		return phi3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "deepseek":
 		return deepseek.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+	case "deepseek2":
+		return deepseek2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "llama":
 		if isMixtralModel(r) || isMistralModel(r) {
 			return mistral.LoadLlamaMeta(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)

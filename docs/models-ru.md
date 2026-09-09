@@ -5,7 +5,7 @@
 ## Работает
 
 | Архитектура  | Статус    | Модели / примечания                                      |
-|--------------|-----------|----------------------------------------------------------|
+| ------------ | --------- | -------------------------------------------------------- |
 | Qwen3        | проверено | Qwen3-0.6B, Qwen3-8B, Qwen3-14B                          |
 | Qwen3-MoE    | код       | `qwen3moe`: QK-norm + MoE (30B-A3B, 235B-A22B)           |
 | Qwen2        | код       | `qwen2` через mistral (Distill-Qwen и т.п.)              |
@@ -17,7 +17,8 @@
 | Phi-3        | код       | `phi3` / Phi-3.5: fused QKV+FFN, partial RoPE, LongRoPE  |
 | Phi-2        | код       | `phi2`: LayerNorm, parallel residual, GELU               |
 | Gemma/Gemma2 | код       | `gemma`/`gemma2`: GeGLU; gemma2 softcap/SWA              |
-| DeepSeek     | код       | `deepseek`: dense lead + MoE; не `deepseek2` (MLA)       |
+| DeepSeek     | код       | `deepseek`: dense lead + MoE                             |
+| DeepSeek2    | код       | `deepseek2`: absorbed MLA + YaRN + MoE                   |
 
 Форматы весов: **Q8_0**, **Q4_0**, **Q4_1**, **Q5_0**, **Q5_1**, **Q2_K**, **Q3_K**, **Q4_K**, **Q5_K**, **Q6_K**, **Q8_K**.
 
