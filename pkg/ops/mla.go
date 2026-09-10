@@ -44,26 +44,26 @@ func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHead
 	headScores := scores[:seqLen]
 	ctx := make([]float32, kvLora)
 
-	for h := 0; h < nHeads; h++ {
+	for h := range nHeads {
 		qOff := h * qkDim
-		for t := 0; t < seqLen; t++ {
+		for t := range seqLen {
 			kOff := t * qkDim
 			headScores[t] = dot(q[qOff:qOff+qkDim], k[kOff:kOff+qkDim]) * scale
 		}
 
 		SoftmaxInPlace(headScores)
 
-		for i := 0; i < kvLora; i++ {
+		for i := range kvLora {
 			ctx[i] = dotStride(headScores, v, i, kvLora, seqLen)
 		}
 
 		// wv_b[h]: out[v] = Σ_k W[k + kvLora*v + kvLora*vHead*h] * ctx[k]
 		base := h * kvLora * vHead
 		outOff := h * vHead
-		for vh := 0; vh < vHead; vh++ {
+		for vh := range vHead {
 			var s float32
 			wOff := base + vh*kvLora
-			for i := 0; i < kvLora; i++ {
+			for i := range kvLora {
 				s += wvB[wOff+i] * ctx[i]
 			}
 			dst[outOff+vh] = s
@@ -78,11 +78,11 @@ func MatMulColMajorInto(w []float32, kDim, mDim int, vec, out []float32) error {
 	if len(vec) < kDim || len(out) < mDim || len(w) < kDim*mDim {
 		return fmt.Errorf("ops: MatMulColMajor размеры")
 	}
-	
-	for m := 0; m < mDim; m++ {
+
+	for m := range mDim {
 		var s float32
 		off := m * kDim
-		for k := 0; k < kDim; k++ {
+		for k := range kDim {
 			s += w[off+k] * vec[k]
 		}
 		out[m] = s

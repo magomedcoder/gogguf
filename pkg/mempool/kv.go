@@ -56,24 +56,41 @@ func (c *KV) Len() int {
 
 // Append дописывает K/V одного токена в слой.
 func (c *KV) Append(layer int, k, v []float32) {
-	if layer < 0 || layer >= len(c.layers) {
+	c.AppendN(layer, k, v, 1)
+}
+
+// AppendN дописывает K/V n токенов в слой (k/v: [n*kvDim]).
+func (c *KV) AppendN(layer int, k, v []float32, n int) {
+	if n < 1 || layer < 0 || layer >= len(c.layers) {
 		return
 	}
 
 	l := &c.layers[layer]
-	if l.n >= c.maxSeq {
-		return
-	}
+	for i := range n {
+		if l.n >= c.maxSeq {
+			return
+		}
 
-	off := l.n * c.kvDim
-	copy(l.k[off:off+c.kvDim], k)
-	copy(l.v[off:off+c.kvDim], v)
-	l.n++
+		off := l.n * c.kvDim
+		src := i * c.kvDim
+		copy(l.k[off:off+c.kvDim], k[src:src+c.kvDim])
+		copy(l.v[off:off+c.kvDim], v[src:src+c.kvDim])
+		l.n++
+	}
 }
 
 // Advance отмечает завершение токена.
 func (c *KV) Advance() {
-	c.length++
+	c.AdvanceN(1)
+}
+
+// AdvanceN отмечает завершение n токенов (n_batch prefill).
+func (c *KV) AdvanceN(n int) {
+	if n < 1 {
+		return
+	}
+
+	c.length += n
 }
 
 // KLayer возвращает K слоя [n*kvDim].

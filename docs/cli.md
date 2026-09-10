@@ -38,23 +38,24 @@ Download from Hugging Face (cached under `~/.cache/huggingface/hub`):
 ./build/gogguf run -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --chat -p "Hello" -n 64
 ```
 
-| Flag                | Default | Description                                          |
-|---------------------|---------|------------------------------------------------------|
-| `-m`                | -       | path to `.gguf` file (mutually exclusive with `-hf`) |
-| `-hf` / `--hf-repo` | -       | Hugging Face `owner/repo[:quant]` (download + cache) |
-| `-p`                | -       | prompt text                                          |
-| `-n`                | `128`   | max new tokens                                       |
-| `--temp`            | `0`     | sampling temperature (`0` = greedy)                  |
-| `--top-k`           | `0`     | top-k (`0` = off)                                    |
-| `--top-p`           | `1`     | nucleus sampling (`1` = off)                         |
-| `--min-p`           | `0`     | min-p sampling (`0` = off)                           |
-| `--repeat-penalty`  | `1`     | repetition penalty (`1` = off)                       |
-| `--repeat-last-n`   | `64`    | history window for repeat penalty                    |
-| `--seed`            | `0`     | PRNG seed                                            |
-| `--chat`            | `false` | wrap prompt in ChatML/Qwen template                  |
-| `--thinking`        | `false` | Qwen3 thinking mode (with `--chat`)                  |
-| `-i`                | `false` | interactive REPL (stdin)                             |
-| `-ngl`              | `0`     | matmul N transformer layers on GPU (CUDA build)      |
+| Flag                | Default | Description                                            |
+|---------------------|---------|--------------------------------------------------------|
+| `-m`                | -       | path to `.gguf` file (mutually exclusive with `-hf`)   |
+| `-hf` / `--hf-repo` | -       | Hugging Face `owner/repo[:quant]` (download + cache)   |
+| `-p`                | -       | prompt text                                            |
+| `-n`                | `128`   | max new tokens                                         |
+| `--temp`            | `0`     | sampling temperature (`0` = greedy)                    |
+| `--top-k`           | `0`     | top-k (`0` = off)                                      |
+| `--top-p`           | `1`     | nucleus sampling (`1` = off)                           |
+| `--min-p`           | `0`     | min-p sampling (`0` = off)                             |
+| `--repeat-penalty`  | `1`     | repetition penalty (`1` = off)                         |
+| `--repeat-last-n`   | `64`    | history window for repeat penalty                      |
+| `--seed`            | `0`     | PRNG seed                                              |
+| `--chat`            | `false` | wrap prompt in ChatML/Qwen template                    |
+| `--thinking`        | `false` | Qwen3 thinking mode (with `--chat`)                    |
+| `-i`                | `false` | interactive REPL (stdin)                               |
+| `-ngl`              | `0`     | matmul N transformer layers on GPU (CUDA build)        |
+| `-b` / `--n-batch`  | `1`     | prefill chunk size (Qwen3 CPU; >1 speeds long prefill) |
 
 Without `[:quant]`, prefers `Q4_K_M`, then `Q8_0`, else the first model `.gguf`. Gated/private repos: set `HF_TOKEN`. Alternate Hub mirror: `MODEL_ENDPOINT`.
 
@@ -106,5 +107,6 @@ Or from Hugging Face:
 | `-hf` / `--hf-repo` | -                | Hugging Face `owner/repo[:quant]`                    |
 | `--host`            | `127.0.0.1:8000` | HTTP listen address                                  |
 | `-ngl`              | `0`              | matmul N transformer layers on GPU (CUDA build)      |
+| `-b` / `--n-batch`  | `1`              | prefill chunk size (Qwen3 CPU)                       |
 
 See [HTTP API](api.md) for endpoints.

@@ -44,9 +44,9 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 
 	switch arch {
 	case "qwen3":
-		return qwen3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return qwen3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, opts.NBatch)
 	case "qwen3moe":
-		return qwen3.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return qwen3.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, opts.NBatch)
 	case "qwen2":
 		// DeepSeek-R1-Distill-Qwen и др. distill с arch=qwen2 (без QK-norm)
 		return mistral.LoadQwen2(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)

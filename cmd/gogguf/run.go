@@ -32,6 +32,8 @@ func runRun(args []string) error {
 	thinking := fs.Bool("thinking", false, "Qwen3: включить режим размышления (с --chat)")
 	interactive := fs.Bool("i", false, "интерактивный режим (REPL)")
 	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
+	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill на CPU (Qwen3)")
+	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -46,13 +48,17 @@ func runRun(args []string) error {
 	}
 
 	engine, err := gogguf.Load(path, gogguf.LoadOptions{
-		NGL: *ngl,
+		NGL:    *ngl,
+		NBatch: *nBatch,
 	})
 	if err != nil {
 		return err
 	}
 	if *ngl > 0 {
 		fmt.Fprintf(os.Stderr, "GPU offload: %d слоёв\n", *ngl)
+	}
+	if *nBatch > 1 {
+		fmt.Fprintf(os.Stderr, "n_batch: %d\n", *nBatch)
 	}
 
 	ctx, err := engine.NewContext()

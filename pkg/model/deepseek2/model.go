@@ -61,16 +61,16 @@ func (m *Model) Config() Config {
 	return m.cfg
 }
 
-func (m *Model) ResetCache() { 
-	m.cache.Reset() 
+func (m *Model) ResetCache() {
+	m.cache.Reset()
 }
 
-func (m *Model) Close() error { 
-	return nil 
+func (m *Model) Close() error {
+	return nil
 }
 
-func (m *Model) EmbeddingDim() int { 
-	return m.cfg.EmbeddingDim 
+func (m *Model) EmbeddingDim() int {
+	return m.cfg.EmbeddingDim
 }
 
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
@@ -414,7 +414,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		}
 
 		w := weights[i]
-		for j := 0; j < embd; j++ {
+		for j := range embd {
 			m.scratch.moeAcc[j] += m.scratch.tmp[j] * w
 		}
 	}
@@ -490,6 +490,6 @@ func (m *Model) logitsFromHidden(x []float32) error {
 	if err := ops.RMSNormInto(m.scratch.h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
-	
+
 	return m.matmulInto(m.lmHeadName, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 }

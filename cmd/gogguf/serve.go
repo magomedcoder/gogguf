@@ -20,6 +20,8 @@ func runServe(args []string) error {
 	fs.StringVar(&hfRepo, "hf-repo", "", "алиас -hf")
 	host := fs.String("host", "127.0.0.1:8000", "адрес HTTP-сервера")
 	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
+	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill на CPU (Qwen3)")
+	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -31,7 +33,8 @@ func runServe(args []string) error {
 	}
 
 	engine, err := gogguf.Load(path, gogguf.LoadOptions{
-		NGL: *ngl,
+		NGL:    *ngl,
+		NBatch: *nBatch,
 	})
 	if err != nil {
 		return err
@@ -42,7 +45,11 @@ func runServe(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Fprintf(os.Stderr, "gogguf serve: %s (model: %s)\n", *host, path)
+	fmt.Fprintf(os.Stderr, "gogguf serve: %s (model: %s)", *host, path)
+	if *nBatch > 1 {
+		fmt.Fprintf(os.Stderr, " n_batch=%d", *nBatch)
+	}
+	fmt.Fprintln(os.Stderr)
 
 	return srv.Run(ctx, *host)
 }

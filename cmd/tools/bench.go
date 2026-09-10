@@ -40,6 +40,8 @@ func runBench(args []string) error {
 	prompt := fs.String("p", "Hello", "текст промпта")
 	maxTokens := fs.Int("n", 128, "число decode-токенов для замера")
 	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, -tags cuda)")
+	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 - CPU Qwen3")
+	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
 	ctxLen := fs.Int("c", 0, "макс. длина GPU KV-cache (0 = авто, до 4096)")
 	chat := fs.Bool("chat", false, "обернуть промпт в chat template")
 	thinking := fs.Bool("thinking", false, "Qwen3: режим размышления (с --chat)")
@@ -66,14 +68,15 @@ func runBench(args []string) error {
 		return runBenchCompare(*modelPath, *prompt, *maxTokens, *ngl, *ctxLen, *chat, *thinking, *runs, *warmup, *jsonOut)
 	}
 
-	return runBenchSingle(*modelPath, *prompt, *maxTokens, *ngl, *ctxLen, *chat, *thinking, *runs, *warmup, *jsonOut)
+	return runBenchSingle(*modelPath, *prompt, *maxTokens, *ngl, *nBatch, *ctxLen, *chat, *thinking, *runs, *warmup, *jsonOut)
 }
 
-func runBenchSingle(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat, thinking bool, runs, warmup int, jsonOut bool) error {
+func runBenchSingle(modelPath, prompt string, maxTokens, ngl, nBatch, ctxLen int, chat, thinking bool, runs, warmup int, jsonOut bool) error {
 	loadStart := time.Now()
 	engine, err := gogguf.Load(modelPath, gogguf.LoadOptions{
 		NGL:       ngl,
 		GPUMaxSeq: ctxLen,
+		NBatch:    nBatch,
 	})
 	if err != nil {
 		return err
@@ -99,6 +102,7 @@ func runBenchSingle(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat, 
 		return writeBenchJSON(map[string]any{
 			"model":         modelPath,
 			"ngl":           ngl,
+			"n_batch":       nBatch,
 			"gpu_max_seq":   ctxLen,
 			"load_ms":       loadMS,
 			"runs":          runs,

@@ -20,28 +20,33 @@ type scratch struct {
 	out    []float32
 }
 
-func newScratch(cfg Config) scratch {
+func newScratch(cfg Config, nBatch int) scratch {
+	if nBatch < 1 {
+		nBatch = 1
+	}
+
 	qDim := cfg.NumHeads * cfg.HeadDim
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
 	ffn := cfg.maxFFN()
 	nExp := max(cfg.ExpertCount, 1)
+	embd := cfg.EmbeddingDim
 
-	need := 4*cfg.EmbeddingDim + 2*qDim + 2*kvDim + cfg.ContextLength + 2*ffn + nExp + 2*cfg.VocabSize
+	need := nBatch*(4*embd+2*qDim+2*kvDim+2*ffn) + cfg.ContextLength + nExp + embd + 2*cfg.VocabSize
 	a := mempool.NewArena(need)
 
 	return scratch{
-		x:      a.Alloc(cfg.EmbeddingDim),
-		h:      a.Alloc(cfg.EmbeddingDim),
-		q:      a.Alloc(qDim),
-		k:      a.Alloc(kvDim),
-		v:      a.Alloc(kvDim),
-		attn:   a.Alloc(qDim),
+		x:      a.Alloc(nBatch * embd),
+		h:      a.Alloc(nBatch * embd),
+		q:      a.Alloc(nBatch * qDim),
+		k:      a.Alloc(nBatch * kvDim),
+		v:      a.Alloc(nBatch * kvDim),
+		attn:   a.Alloc(nBatch * qDim),
 		scores: a.Alloc(cfg.ContextLength),
-		gate:   a.Alloc(ffn),
-		up:     a.Alloc(ffn),
+		gate:   a.Alloc(nBatch * ffn),
+		up:     a.Alloc(nBatch * ffn),
 		router: a.Alloc(nExp),
-		moeAcc: a.Alloc(cfg.EmbeddingDim),
-		tmp:    a.Alloc(cfg.EmbeddingDim),
+		moeAcc: a.Alloc(embd),
+		tmp:    a.Alloc(embd),
 		logits: a.Alloc(cfg.VocabSize),
 		out:    a.Alloc(cfg.VocabSize),
 	}
