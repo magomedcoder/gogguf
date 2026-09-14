@@ -2,7 +2,23 @@
 
 [English version](api.md)
 
-Сервер запускается через `gguf serve` (см. [CLI](cli-ru.md)).
+Сервер запускается через `gogguf serve` (см. [CLI](cli-ru.md)).
+
+## Auth и rate limit
+
+| Флаг           | По умолчанию | Описание                                                                     |
+|----------------|--------------|------------------------------------------------------------------------------|
+| `--api-key`    | пусто        | требовать `Authorization: Bearer <key>` или `X-API-Key`; `/v1/health` открыт |
+| `--rate-limit` | `0`          | макс. запросов в минуту на IP (`0` = выкл.); `/v1/health` не считается       |
+
+```bash
+./build/gogguf serve -m model.gguf --api-key secret --rate-limit 60
+
+curl -s 127.0.0.1:8000/v1/models -H "Authorization: Bearer secret"
+curl -s 127.0.0.1:8000/v1/models -H "X-API-Key: secret"
+```
+
+Ошибки: `401` (`authentication_error`) или `429` (`rate_limit_error`) - `{"error":{"message":"...","type":"..."}}`.
 
 ## Эндпоинты
 

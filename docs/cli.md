@@ -57,7 +57,8 @@ Download from Hugging Face (cached under `~/.cache/huggingface/hub`):
 | `-ngl`              | `0`     | matmul N transformer layers on GPU (CUDA build)        |
 | `-b` / `--n-batch`  | `1`     | prefill chunk size (Qwen3 CPU; >1 speeds long prefill) |
 
-Without `[:quant]`, prefers `Q4_K_M`, then `Q8_0`, else the first model `.gguf`. Gated/private repos: set `HF_TOKEN`. Alternate Hub mirror: `MODEL_ENDPOINT`.
+Without `[:quant]`, prefers `Q4_K_M`, then `Q8_0`, else the first model `.gguf`. Gated/private repos: set `HF_TOKEN`.
+Alternate Hub mirror: `MODEL_ENDPOINT`.
 
 For **Qwen3 Instruct** use `--chat`, otherwise the model will respond incorrectly.
 
@@ -108,5 +109,7 @@ Or from Hugging Face:
 | `--host`            | `127.0.0.1:8000` | HTTP listen address                                  |
 | `-ngl`              | `0`              | matmul N transformer layers on GPU (CUDA build)      |
 | `-b` / `--n-batch`  | `1`              | prefill chunk size (Qwen3 CPU)                       |
+| `--api-key`         | empty            | Bearer / X-API-Key auth (`/v1/health` always open)   |
+| `--rate-limit`      | `0`              | requests per minute per IP (`0` = off)               |
 
 See [HTTP API](api.md) for endpoints.

@@ -22,6 +22,8 @@ func runServe(args []string) error {
 	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
 	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill на CPU (Qwen3)")
 	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
+	apiKey := fs.String("api-key", "", "API key (Bearer / X-API-Key); пусто = без auth; /v1/health открыт")
+	rateLimit := fs.Int("rate-limit", 0, "лимит запросов в минуту на IP (0 = без лимита); /v1/health не учитывается")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -40,7 +42,10 @@ func runServe(args []string) error {
 		return err
 	}
 
-	srv := server.New(engine, path)
+	srv := server.New(engine, path, server.Options{
+		APIKey:             *apiKey,
+		RateLimitPerMinute: *rateLimit,
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -49,6 +54,15 @@ func runServe(args []string) error {
 	if *nBatch > 1 {
 		fmt.Fprintf(os.Stderr, " n_batch=%d", *nBatch)
 	}
+
+	if *apiKey != "" {
+		fmt.Fprintf(os.Stderr, " api-key=on")
+	}
+
+	if *rateLimit > 0 {
+		fmt.Fprintf(os.Stderr, " rate-limit=%d/min", *rateLimit)
+	}
+
 	fmt.Fprintln(os.Stderr)
 
 	return srv.Run(ctx, *host)

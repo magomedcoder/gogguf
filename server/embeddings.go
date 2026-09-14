@@ -164,14 +164,3 @@ func parseEmbeddingsInput(raw json.RawMessage) ([]embedInput, error) {
 		return nil, fmt.Errorf("input: неподдерживаемый тип")
 	}
 }
-
-func writeAPIError(w http.ResponseWriter, code int, message, typ string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(apiErrorResponse{
-		Error: apiErrorBody{
-			Message: message,
-			Type:    typ,
-		},
-	})
-}

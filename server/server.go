@@ -10,17 +10,32 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/runtime"
 )
 
+// Options - параметры HTTP-сервера (auth, rate limit)
+type Options struct {
+	APIKey             string // пусто = без auth
+	RateLimitPerMinute int    // 0 = без лимита; токен-бакет на IP
+}
+
 type Server struct {
 	engine    *runtime.Engine
 	modelPath string
+	apiKey    string
+	limiter   *rateLimiter
 	mu        sync.Mutex
 	conv      *runtime.Conversation
 }
 
-func New(engine *runtime.Engine, modelPath string) *Server {
+// New создаёт сервер. opts можно не передавать.
+func New(engine *runtime.Engine, modelPath string, opts ...Options) *Server {
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	return &Server{
 		engine:    engine,
 		modelPath: modelPath,
+		apiKey:    o.APIKey,
+		limiter:   newRateLimiter(o.RateLimitPerMinute),
 	}
 }
 
@@ -31,7 +46,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/reset", s.handleReset)
 	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
 	mux.HandleFunc("/v1/embeddings", s.handleEmbeddings)
-	return mux
+
+	var h http.Handler = mux
+	h = withRateLimit(h, s.limiter)
+	h = withAPIKey(h, s.apiKey)
+	return h
 }
 
 func (s *Server) ListenAndServe(addr string) error {
@@ -149,4 +168,15 @@ type apiErrorBody struct {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeAPIError(w http.ResponseWriter, status int, message, typ string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(apiErrorResponse{
+		Error: apiErrorBody{
+			Message: message,
+			Type:    typ,
+		},
+	})
 }

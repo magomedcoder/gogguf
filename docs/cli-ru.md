@@ -57,7 +57,8 @@
 | `-ngl`              | `0`          | matmul N transformer-слоёв на GPU (CUDA-сборка)        |
 | `-b` / `--n-batch`  | `1`          | размер chunk prefill (Qwen3 CPU; >1 - длинный prefill) |
 
-Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`. Для gated/private: `HF_TOKEN`. Зеркало Hub: `MODEL_ENDPOINT`.
+Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`. Для gated/private: `HF_TOKEN`. Зеркало
+Hub: `MODEL_ENDPOINT`.
 
 Для **Qwen3 Instruct** используйте `--chat`, иначе модель ответит некорректно.
 
@@ -108,5 +109,7 @@ Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 | `--host`            | `127.0.0.1:8000` | адрес HTTP-сервера                              |
 | `-ngl`              | `0`              | matmul N transformer-слоёв на GPU (CUDA-сборка) |
 | `-b` / `--n-batch`  | `1`              | размер chunk prefill (Qwen3 CPU)                |
+| `--api-key`         | пусто            | auth Bearer / X-API-Key (`/v1/health` открыт)   |
+| `--rate-limit`      | `0`              | запросов в минуту на IP (`0` = без лимита)      |
 
 Подробнее об эндпоинтах: [HTTP API](api-ru.md).
