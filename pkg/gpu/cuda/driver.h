@@ -40,6 +40,8 @@ typedef CUresult (*PFN_cuMemAlloc_v2)(CUdeviceptr *dptr, size_t bytesize);
 
 typedef CUresult (*PFN_cuMemFree_v2)(CUdeviceptr dptr);
 
+typedef CUresult (*PFN_cuMemGetInfo_v2)(size_t *free, size_t *total);
+
 typedef CUresult (*PFN_cuMemcpyHtoD_v2)(CUdeviceptr dst, const void *src, size_t bytes);
 
 typedef CUresult (*PFN_cuMemcpyDtoH_v2)(void *dst, CUdeviceptr src, size_t bytes);
@@ -96,6 +98,7 @@ typedef struct {
 	PFN_cuCtxDestroy_v2 cuCtxDestroy;
 	PFN_cuMemAlloc_v2 cuMemAlloc;
 	PFN_cuMemFree_v2 cuMemFree;
+	PFN_cuMemGetInfo_v2 cuMemGetInfo;
 	PFN_cuMemcpyHtoD_v2 cuMemcpyHtoD;
 	PFN_cuMemcpyDtoH_v2 cuMemcpyDtoH;
 	PFN_cuMemcpyDtoD_v2 cuMemcpyDtoD;
@@ -136,6 +139,7 @@ typedef struct gguf_matmul_graph_entry {
 #define GGUF_LAYER_GRAPH_FFN 1
 #define GGUF_LAYER_GRAPH_RESIDUAL 2
 #define GGUF_LAYER_GRAPH_QKV 3
+#define GGUF_LAYER_GRAPH_LOGITS 4
 
 typedef struct gguf_layer_graph_entry {
 	int kind;
@@ -149,14 +153,18 @@ typedef struct gguf_layer_graph_entry {
 	CUdeviceptr d_wv;
 	CUdeviceptr d_q_norm;
 	CUdeviceptr d_k_norm;
+	CUdeviceptr d_attn_norm; // QKV: RMSNorm резидентного residual -> d_vec
+	int rope_mode; // QKV: 0 = NeoX (rope_heads), 1 = Llama NORM (rope_heads_norm)
 	int embd;
 	int attn_dim;
 	int ffn;
 	int n_heads;
 	int n_kv_heads;
 	int head_dim;
-	int skip_attn; // residual: attn уже в d_vec
-	int skip_vec;  // ffn: x уже в d_vec
+	int skip_attn;  // residual: attn уже в d_vec
+	int skip_vec;   // ffn: x уже в d_vec
+	int resid_dev;  // 1 = x уже в d_resid (HtoD не нужен)
+	int keep_resid; // 1 = residual остаётся на устройстве (без DtoH)
 	CUgraphExec exec;
 	struct gguf_layer_graph_entry *next;
 } gguf_layer_graph_entry_t;
@@ -179,14 +187,20 @@ typedef struct {
 	gguf_layer_graph_entry_t *layer_graphs;
 	int skip_vec_htod; // 1 = vec уже на GPU (задаётся из Go)
 	int skip_attn_htod; // 1 = attn уже в d_vec (QKV residency)
+	int resid_on_device; // 1 = d_resid содержит актуальный hidden (HtoD x не нужен)
+	int keep_resid_device; // 1 = не копировать residual обратно на host
+	int resid_len; // длина валидного residual в d_resid
 } gguf_matmul_pool_t;
 
-// gguf_cuda_init загружает libcuda.so и создаёт контекст на GPU 0
+// gguf_cuda_init загружает libcuda.so и создаёт контекст на GPU с ordinal device (нумерация после CUDA_VISIBLE_DEVICES; 0 = первое видимое устройство)
 // cc_out: compute capability (major*10+minor), например 120 для sm_120
-int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, char *name, size_t name_len, char *errbuf, size_t errbuf_len, int *cc_out);
+int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int device, char *name, size_t name_len, char *errbuf, size_t errbuf_len, int *cc_out);
 
 // gguf_cuda_shutdown уничтожает контекст
 void gguf_cuda_shutdown(cuda_driver_t *drv, CUcontext ctx);
+
+// gguf_cuda_mem_info возвращает свободную/общую видеопамять контекста (cuMemGetInfo)
+int gguf_cuda_mem_info(cuda_driver_t *drv, CUcontext ctx, size_t *free_out, size_t *total_out);
 
 // gguf_cuda_last_error возвращает текст последней CUDA-ошибки (если доступен)
 const char *gguf_cuda_last_error(cuda_driver_t *drv, CUresult err);
@@ -249,7 +263,10 @@ int gguf_cuda_matmul_vec_q6_k_device(cuda_driver_t *drv, CUcontext ctx, CUfuncti
 int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
 
 // gguf_cuda_attn_ffn_residual_device: WO + residual + RMSNorm + FFN + residual (CUDA Graph)
-// 2*HtoD + 1*DtoH; если pool->skip_attn_htod - attn уже в d_vec (1*HtoD x + 1*DtoH)
+// 2*HtoD + 1*DtoH; если pool->skip_attn_htod - attn уже в d_vec (1*HtoD x + 1*DtoH).
+// pool->resid_on_device: x уже в d_resid (HtoD не нужен, x может быть NULL);
+// pool->keep_resid_device: результат остаётся в d_resid (DtoH нет, x_out может быть NULL).
+// resid_dirty (может быть NULL): 1 = d_resid успел измениться до ошибки.
 int gguf_cuda_attn_ffn_residual_device(
     cuda_driver_t *drv,
     CUcontext ctx,
@@ -269,6 +286,28 @@ int gguf_cuda_attn_ffn_residual_device(
     int embd,
     int attn_dim,
     int ffn,
+    float eps,
+    int *resid_dirty
+);
+
+// gguf_cuda_hidden_upload кладёт hidden state в d_resid (один HtoD на токен)
+int gguf_cuda_hidden_upload(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, const float *x, int n);
+
+// gguf_cuda_hidden_download копирует резидентный hidden state из d_resid на host
+int gguf_cuda_hidden_download(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, float *dst, int n);
+
+// gguf_cuda_logits_from_device: RMSNorm(d_resid) + lm_head matmul на GPU, DtoH только logits
+int gguf_cuda_logits_from_device(
+    cuda_driver_t *drv,
+    CUcontext ctx,
+    CUfunction fn_matmul,
+    CUfunction fn_rmsnorm,
+    gguf_matmul_pool_t *pool,
+    CUdeviceptr d_out_norm,
+    CUdeviceptr d_head,
+    float *logits,
+    int vocab,
+    int embd,
     float eps
 );
 
@@ -339,6 +378,9 @@ void gguf_cuda_kv_free(cuda_driver_t *drv, gguf_kv_cache_t *cache);
 // gguf_cuda_kv_append копирует K/V одного токена в позицию pos
 int gguf_cuda_kv_append(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int pos, const float *k, const float *v);
 
+// gguf_cuda_kv_append_n копирует K/V n токенов начиная с позиции pos (batch prefill)
+int gguf_cuda_kv_append_n(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int pos, const float *k, const float *v, int n);
+
 // gguf_cuda_kv_attention attention с K/V уже на GPU
 int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, gguf_kv_cache_t *cache, gguf_attn_pool_t *pool, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim);
 
@@ -350,6 +392,10 @@ void gguf_cuda_attn_pool_free(cuda_driver_t *drv, gguf_attn_pool_t *pool);
 
 // gguf_cuda_qkv_rope_attn_device: h->QKV->head RMSNorm->RoPE (CUDA Graph) -> KV append->attn
 // После успеха attn лежит в matmul_pool.d_vec и skip_attn_htod=1 для residual.
+// Если pool->resid_on_device и d_attn_norm != 0, h считается на GPU как RMSNorm(d_resid)
+// и host-буфер h не читается (может быть NULL).
+// d_q_norm / d_k_norm == 0 - слой без QK-norm (Llama / Mistral).
+// rope_mode различает graph cache для fn_rope: 0 = NeoX, 1 = Llama NORM.
 int gguf_cuda_qkv_rope_attn_device(
     cuda_driver_t *drv,
     CUcontext ctx,
@@ -367,6 +413,7 @@ int gguf_cuda_qkv_rope_attn_device(
     CUdeviceptr d_wv,
     CUdeviceptr d_q_norm,
     CUdeviceptr d_k_norm,
+    CUdeviceptr d_attn_norm,
     const float *h,
     const float *cos_tbl,
     const float *sin_tbl,
@@ -380,6 +427,7 @@ int gguf_cuda_qkv_rope_attn_device(
     int layer,
     int kv_pos,
     int seq_len,
+    int rope_mode,
     float eps
 );
 

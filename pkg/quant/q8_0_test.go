@@ -14,10 +14,14 @@ func TestFP16ToFP32(t *testing.T) {
 		{0x0000, 0},
 		{0x3c00, 1.0},
 		{0xbc00, -1.0},
+		// subnormal: раньше ошибочно давал *32 (сброс exp=1 после нормализации)
+		{0x0001, math.Float32frombits(0x33800000)}, // 2^(-24)
+		{0x8023, -2.086162567138672e-06},
+		{0x0400, 6.103515625e-05}, // 2^(-14), минимальный normal fp16
 	}
 	for _, tt := range tests {
 		got := FP16ToFP32(tt.h)
-		if math.Abs(float64(got-tt.want)) > 1e-5 {
+		if got != tt.want && math.Abs(float64(got-tt.want)) > 1e-12 {
 			t.Errorf("FP16ToFP32(0x%04x) = %v, want %v", tt.h, got, tt.want)
 		}
 	}

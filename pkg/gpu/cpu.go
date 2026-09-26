@@ -1,14 +1,24 @@
 package gpu
 
 import (
+	"fmt"
+
+	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 // CPUBackend выполняет matmul на CPU через pkg/ops
 type CPUBackend struct{}
 
+var _ Backend = CPUBackend{}
+
 func (CPUBackend) Name() string {
 	return "CPU"
+}
+
+// VRAMInfo: у CPU-backend нет видеопамяти
+func (CPUBackend) VRAMInfo() (used, total uint64, err error) {
+	return 0, 0, nil
 }
 
 func (CPUBackend) MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, error) {
@@ -212,6 +222,138 @@ func (CPUBackend) QKVRoPEAttentionQ8_0Cached(_, _, _, _, _ string, qRaw, kRaw, v
 	return nil
 }
 
+// matMulQuantInto - CPU-эквивалент квантованного matmul для fused-путей
+func matMulQuantInto(t format.GGML, raw []byte, rows, cols int, vec, out []float32) error {
+	switch t {
+	case format.GgmlQ8_0:
+		return ops.MatMulVecQ8_0Into(raw, rows, cols, vec, out)
+	case format.GgmlQ4_0:
+		return ops.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
+	case format.GgmlQ4_K:
+		return ops.MatMulVecQ4_KInto(raw, rows, cols, vec, out)
+	case format.GgmlQ5_K:
+		return ops.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
+	case format.GgmlQ6_K:
+		return ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
+	default:
+		return fmt.Errorf("gpu: тип %s не поддерживается fused-путём", t)
+	}
+}
+
+func (CPUBackend) FFNSwiGLUQuantCached(t format.GGML, _, _, _ string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
+	gate := make([]float32, ffn)
+	if err := matMulQuantInto(t, gateRaw, ffn, embd, x, gate); err != nil {
+		return err
+	}
+
+	up := make([]float32, ffn)
+	if err := matMulQuantInto(t, upRaw, ffn, embd, x, up); err != nil {
+		return err
+	}
+
+	ops.SwiGLUInPlace(gate, up)
+
+	return matMulQuantInto(t, downRaw, embd, ffn, gate, out)
+}
+
+func (CPUBackend) FFNGeGLUQuantCached(t format.GGML, _, _, _ string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
+	gate := make([]float32, ffn)
+	if err := matMulQuantInto(t, gateRaw, ffn, embd, x, gate); err != nil {
+		return err
+	}
+
+	up := make([]float32, ffn)
+	if err := matMulQuantInto(t, upRaw, ffn, embd, x, up); err != nil {
+		return err
+	}
+
+	ops.GeGLUInPlace(gate, up)
+
+	return matMulQuantInto(t, downRaw, embd, ffn, gate, out)
+}
+
+func (CPUBackend) AttnFFNResidualQuantCached(t format.GGML, _, _, _, _, _ string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	h := make([]float32, embd)
+	if err := matMulQuantInto(t, woRaw, embd, attnDim, attn, h); err != nil {
+		return err
+	}
+
+	ops.AddInPlace(x, h)
+
+	if err := ops.RMSNormInto(h, x, ffnNorm, eps); err != nil {
+		return err
+	}
+
+	if err := (CPUBackend{}).FFNSwiGLUQuantCached(t, "", "", "", gateRaw, upRaw, downRaw, h, h, embd, ffn); err != nil {
+		return err
+	}
+
+	ops.AddInPlace(x, h)
+
+	return nil
+}
+
+// QKVRoPEAttentionQuantCached: CPU-эквивалент QKV+QK-norm (RoPE и attention остаются за вызывающим). qNorm/kNorm пустые - слой без QK-norm.
+func (CPUBackend) QKVRoPEAttentionQuantCached(t format.GGML, _ RoPEMode, _, _, _, _, _, _ string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, _, h, _, _, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, _, _, _ int, eps float32) error {
+	q := make([]float32, nHeads*headDim)
+	if err := matMulQuantInto(t, qRaw, nHeads*headDim, embd, h, q); err != nil {
+		return err
+	}
+
+	k := make([]float32, nKVHeads*headDim)
+	if err := matMulQuantInto(t, kRaw, nKVHeads*headDim, embd, h, k); err != nil {
+		return err
+	}
+
+	if err := matMulQuantInto(t, vRaw, nKVHeads*headDim, embd, h, vOut); err != nil {
+		return err
+	}
+
+	if len(qNorm) > 0 {
+		for hi := range nHeads {
+			off := hi * headDim
+			if err := ops.RMSNormInto(q[off:off+headDim], q[off:off+headDim], qNorm, eps); err != nil {
+				return err
+			}
+		}
+	}
+
+	if len(kNorm) > 0 {
+		for hi := range nKVHeads {
+			off := hi * headDim
+			if err := ops.RMSNormInto(k[off:off+headDim], k[off:off+headDim], kNorm, eps); err != nil {
+				return err
+			}
+		}
+	}
+
+	copy(kOut, k)
+	copy(attn, q)
+
+	return nil
+}
+
+// HiddenResident: CPU-backend держит hidden в обычной памяти - residency не нужна
+func (CPUBackend) HiddenResident() bool {
+	return false
+}
+
+func (CPUBackend) HiddenActive() bool {
+	return false
+}
+
+func (CPUBackend) HiddenUpload([]float32) error {
+	return ErrHiddenUnavailable
+}
+
+func (CPUBackend) HiddenDownload([]float32) error {
+	return ErrHiddenUnavailable
+}
+
+func (CPUBackend) LogitsFromDevice(format.GGML, string, []float32, string, []byte, []float32, []float32, int, int, float32) error {
+	return ErrHiddenUnavailable
+}
+
 func (CPUBackend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim)
 }
@@ -223,6 +365,10 @@ func (CPUBackend) KVCacheInit(int, int, int, int, int) error {
 func (CPUBackend) KVCacheReset() {}
 
 func (CPUBackend) KVCacheAppend(int, int, []float32, []float32) error {
+	return nil
+}
+
+func (CPUBackend) KVCacheAppendN(int, int, []float32, []float32, int) error {
 	return nil
 }
 

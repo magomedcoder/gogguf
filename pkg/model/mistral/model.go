@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/model/moe"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
@@ -24,6 +25,17 @@ type Model struct {
 	outNorm      []float32
 	lmHeadName   string
 	debug        *DebugHooks
+
+	fused      *gpuresid.Runner   // fused GPU-пути слоя (§5)
+	fusedDims  gpuresid.Dims      // размерности для fused-путей
+	gpuLayers  []gpuresid.Tensors // имена весов слоя для fused-путей
+	layerQuant []bool             // слой целиком в поддерживаемом fused-кванте
+	moeGPU     bool               // эксперты MoE считаются на GPU (§6)
+
+	residency   bool // слои умеют держать hidden state на устройстве
+	residDevice bool // hidden state сейчас на устройстве, host-буфер x устарел
+	logitsOnGPU bool // out_norm + lm_head считаются на GPU
+	gpuKVStale  bool // GPU KV-cache неполный: attention только на CPU
 }
 
 // Load создаёт Mistral из весов (префикс mistral.*)
@@ -89,6 +101,9 @@ func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int, parse f
 		return nil, err
 	}
 
+	m.initFused()
+	m.initResidency()
+
 	return m, nil
 }
 
@@ -111,6 +126,8 @@ func (m *Model) Config() Config {
 // ResetCache сбрасывает KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
+	m.residDevice = false
+	m.gpuKVStale = false
 	if m.gpu != nil {
 		m.gpu.KVCacheReset()
 	}
@@ -177,6 +194,11 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 		}
 	}
 
+	// Embed читает hidden на host: при residency сначала забираем его с устройства
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return nil, err
+	}
+
 	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return nil, err
 	}
@@ -194,6 +216,9 @@ func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 	if debug && m.debug != nil && m.debug.OnEmbed != nil {
 		m.debug.OnEmbed(m.scratch.x)
 	}
+
+	// §5: единственный HtoD hidden state за токен, дальше слои работают на устройстве
+	m.uploadHidden()
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
 		if err := m.forwardBlock(layer, pos); err != nil {
@@ -268,37 +293,70 @@ func (m *Model) embedToken(tokenID int) error {
 func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
+	onGPU := m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
+	usedQKVResidency := false
+
+	// §5: слой целиком на устройстве - attn_norm, QKV, attention, WO, FFN и оба residual
+	if m.residDevice {
+		err := m.forwardBlockDevice(layer, pos, ln, m.scratch.k, m.scratch.v, m.scratch.attn)
+		if err == nil {
+			return nil
+		}
+
+		if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {
+			return rerr
+		}
+	}
 
 	if err := m.rmsNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, layer); err != nil {
 		return err
 	}
 
-	if err := m.matmulInto(lt.attnQ, m.cfg.NumHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.q, layer); err != nil {
-		return err
+	// fused QKV считает attention по полному GPU KV-cache: SWA-окно и stale-кеш ему не подходят
+	if onGPU && gpuresid.QKVResidencyEnabled() && !m.gpuKVStale && m.gpuAttnFull(m.cache.Len()+1) {
+		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
+			m.cache.Append(layer, m.scratch.k, m.scratch.v)
+			usedQKVResidency = true
+		}
 	}
 
-	if err := m.matmulInto(lt.attnK, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.k, layer); err != nil {
-		return err
+	if !usedQKVResidency {
+		if err := m.matmulInto(lt.attnQ, m.cfg.NumHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.q, layer); err != nil {
+			return err
+		}
+
+		if err := m.matmulInto(lt.attnK, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.k, layer); err != nil {
+			return err
+		}
+
+		if err := m.matmulInto(lt.attnV, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.v, layer); err != nil {
+			return err
+		}
+
+		m.applyRoPEHeads(m.scratch.q, m.cfg.NumHeads, pos, layer)
+		m.applyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, pos, layer)
+
+		kvPos := m.cache.Len()
+		m.cache.Append(layer, m.scratch.k, m.scratch.v)
+		if onGPU && !m.gpuKVStale {
+			if err := m.gpu.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v); err != nil {
+				m.gpuKVStale = true
+			}
+		}
+
+		seqLen := m.cache.Len() + 1
+		k, v := m.attentionKV(layer, seqLen)
+
+		if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, k, v, m.scratch.scores, seqLen, layer); err != nil {
+			return err
+		}
 	}
 
-	if err := m.matmulInto(lt.attnV, m.cfg.NumKVHeads*m.cfg.HeadDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.v, layer); err != nil {
-		return err
-	}
-
-	m.applyRoPEHeads(m.scratch.q, m.cfg.NumHeads, pos, layer)
-	m.applyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, pos, layer)
-
-	kvPos := m.cache.Len()
-	m.cache.Append(layer, m.scratch.k, m.scratch.v)
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		_ = m.gpu.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
-	}
-
-	seqLen := m.cache.Len() + 1
-	k, v := m.attentionKV(layer, seqLen)
-
-	if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, k, v, m.scratch.scores, seqLen, layer); err != nil {
-		return err
+	// WO+RMSNorm+FFN residency: MoE-слой сюда не идёт, его FFN считают эксперты
+	if !lt.moe && onGPU && gpuresid.AttnFFNResidencyEnabled() {
+		if err := m.attnFFNGPU(layer, ln, m.scratch.x, m.scratch.attn); err == nil {
+			return nil
+		}
 	}
 
 	if err := m.matmulInto(lt.attnOut, m.cfg.EmbeddingDim, m.cfg.NumHeads*m.cfg.HeadDim, m.scratch.attn, m.scratch.h, layer); err != nil {
@@ -319,8 +377,8 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return nil
 	}
 
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		if err := m.ffnGPU(lt, m.scratch.h, m.scratch.h); err == nil {
+	if onGPU {
+		if err := m.ffnGPU(layer, m.scratch.h, m.scratch.h); err == nil {
 			ops.AddInPlace(m.scratch.x, m.scratch.h)
 			return nil
 		}
@@ -355,6 +413,16 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, m.cfg.MoENormWeights, m.cfg.ExpertWeightScale)
 
 	clear(m.scratch.moeAcc)
+
+	// §6: выбранные эксперты - fused FFN на GPU по срезу raw-весов эксперта
+	if m.moeGPU && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.moeExpertsGPU(lt, idxs, weights, ffn); err == nil {
+			return m.sharedExpert(lt, layer)
+		}
+
+		m.moeGPU = false
+		clear(m.scratch.moeAcc)
+	}
 
 	gateW, err := m.weights.Floats(lt.gateExps)
 	if err != nil {
@@ -396,24 +464,59 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		}
 	}
 
-	if lt.gateShexp != "" {
-		shared := m.cfg.SharedFFN
-		if shared <= 0 {
-			shared = m.cfg.FFNHidden
+	return m.sharedExpert(lt, layer)
+}
+
+// moeExpertsGPU считает выбранных экспертов fused-FFN на GPU и копит взвешенную сумму
+func (m *Model) moeExpertsGPU(lt layerTensors, idxs []int, weights []float32, ffn int) error {
+	embd := m.cfg.EmbeddingDim
+	for i, ei := range idxs {
+		if err := m.fused.ExpertFFN(lt.gateExps, lt.upExps, lt.downExps, ei, m.scratch.h, m.scratch.tmp, embd, ffn); err != nil {
+			return err
 		}
 
+		w := weights[i]
+		for j := range embd {
+			m.scratch.moeAcc[j] += m.scratch.tmp[j] * w
+		}
+	}
+
+	return nil
+}
+
+// sharedExpert добавляет общий эксперт (DeepSeek / Qwen2-MoE) к сумме экспертов
+func (m *Model) sharedExpert(lt layerTensors, layer int) error {
+	if lt.gateShexp == "" {
+		return nil
+	}
+
+	embd := m.cfg.EmbeddingDim
+	shared := m.cfg.SharedFFN
+	if shared <= 0 {
+		shared = m.cfg.FFNHidden
+	}
+
+	gateScale := float32(1)
+	if lt.gateInpShexp != "" {
+		var gateInp [1]float32
+		if err := m.matmulInto(lt.gateInpShexp, 1, embd, m.scratch.h, gateInp[:], layer); err != nil {
+			return err
+		}
+
+		gateScale = siluDiv(gateInp[0])
+	}
+
+	// §6: общий эксперт идёт тем же fused FFN на том же resident-буфере весов
+	done := false
+	if m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.fused.FFNNamed(lt.gateShexp, lt.upShexp, lt.downShexp, m.scratch.h, m.scratch.tmp, embd, shared); err == nil {
+			done = true
+		}
+	}
+
+	if !done {
 		sg := m.scratch.gate[:shared]
 		su := m.scratch.up[:shared]
-
-		gateScale := float32(1)
-		if lt.gateInpShexp != "" {
-			var gateInp [1]float32
-			if err := m.matmulInto(lt.gateInpShexp, 1, embd, m.scratch.h, gateInp[:], layer); err != nil {
-				return err
-			}
-
-			gateScale = siluDiv(gateInp[0])
-		}
 
 		if err := m.matmulInto(lt.gateShexp, shared, embd, m.scratch.h, sg, layer); err != nil {
 			return err
@@ -428,13 +531,13 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		if err := m.matmulInto(lt.downShexp, embd, shared, sg, m.scratch.tmp, layer); err != nil {
 			return err
 		}
-
-		if gateScale != 1 {
-			ops.ScaleInPlace(m.scratch.tmp, gateScale)
-		}
-
-		ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
 	}
+
+	if gateScale != 1 {
+		ops.ScaleInPlace(m.scratch.tmp, gateScale)
+	}
+
+	ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
 
 	return nil
 }
@@ -446,48 +549,8 @@ func siluDiv(x float32) float32 {
 	return ops.SiLU(x) / x
 }
 
-func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {
-	info, err := m.weights.Info(lt.ffnGate)
-	if err != nil {
-		return err
-	}
-
-	embd, ffn := m.cfg.EmbeddingDim, m.cfg.FFNHidden
-	if info.Type == format.GgmlQ8_0 {
-		gateRaw, err := m.weights.Raw(lt.ffnGate)
-		if err != nil {
-			return err
-		}
-
-		upRaw, err := m.weights.Raw(lt.ffnUp)
-		if err != nil {
-			return err
-		}
-
-		downRaw, err := m.weights.Raw(lt.ffnDown)
-		if err != nil {
-			return err
-		}
-
-		return m.gpu.FFNSwiGLUQ8_0Cached(lt.ffnGate, lt.ffnUp, lt.ffnDown, gateRaw, upRaw, downRaw, x, out, embd, ffn)
-	}
-
-	gateW, err := m.weights.Floats(lt.ffnGate)
-	if err != nil {
-		return err
-	}
-
-	upW, err := m.weights.Floats(lt.ffnUp)
-	if err != nil {
-		return err
-	}
-
-	downW, err := m.weights.Floats(lt.ffnDown)
-	if err != nil {
-		return err
-	}
-
-	return m.gpu.FFNSwiGLUCached(lt.ffnGate, lt.ffnUp, lt.ffnDown, gateW, upW, downW, x, out, embd, ffn)
+func (m *Model) ffnGPU(layer int, x, out []float32) error {
+	return m.fused.FFN(m.gpuLayers[layer], m.fusedDims, x, out)
 }
 
 // attentionKV возвращает K/V для attention с учётом sliding window
@@ -622,10 +685,20 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logitsFinish() error {
-	if err := m.logitsFromHidden(m.scratch.x); err != nil {
+	// §2: hidden на устройстве - out_norm + lm_head тоже на GPU, на host уходят только logits
+	if m.residDevice && m.logitsOnGPU {
+		if err := m.logitsDevice(); err == nil {
+			return nil
+		}
+
+		m.logitsOnGPU = false
+	}
+
+	if err := m.syncHiddenFromDevice(); err != nil {
 		return err
 	}
-	return nil
+
+	return m.logitsFromHidden(m.scratch.x)
 }
 
 func (m *Model) logitsFromHidden(x []float32) error {
@@ -704,7 +777,8 @@ func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, laye
 	}
 
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		if effectiveLen == seqLen {
+		// gpuKVStale: часть токенов не попала в GPU KV-cache - attention только по CPU-зеркалу
+		if effectiveLen == seqLen && !m.gpuKVStale {
 			if err := m.gpu.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 				return nil
 			}

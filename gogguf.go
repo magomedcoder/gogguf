@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/gpu"
 	"github.com/magomedcoder/gogguf/pkg/runtime"
 	"github.com/magomedcoder/gogguf/pkg/sampler"
 )
@@ -57,6 +58,11 @@ func Load(path string, opts LoadOptions) (*Engine, error) {
 // LoadMapped загружает модель через mmap (zero-copy веса)
 func LoadMapped(path string, opts LoadOptions) (*Engine, error) {
 	return runtime.LoadMapped(path, opts)
+}
+
+// ParseGPUDevices разбирает флаги -dev ("1" / "0,1") и -tensor-split ("0.6,0.4") в список устройств и пропорции слоёв для LoadOptions
+func ParseGPUDevices(devices, tensorSplit string) ([]int, []float64, error) {
+	return gpu.ParseDevices(devices, tensorSplit)
 }
 
 // NewSampler возвращает функцию выбора следующего токена (greedy, temperature, top-k, top-p)

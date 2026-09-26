@@ -9,13 +9,27 @@ package cuda
 */
 import "C"
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"unsafe"
 
+	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
+
+// errUploadOOM - cuMemAlloc вернул код -1 при загрузке весов на устройство
+var errUploadOOM = errors.New("не хватило VRAM")
+
+// uploadFail форматирует ошибку upload; код -1 помечает как нехватку VRAM
+func uploadFail(kind, name string, rc C.int) error {
+	if rc == -1 {
+		return fmt.Errorf("cuda: upload %s %q: %w", kind, name, errUploadOOM)
+	}
+
+	return fmt.Errorf("cuda: upload %s %q: код %d", kind, name, int(rc))
+}
 
 type gpuMatrix struct {
 	ptr  C.CUdeviceptr
@@ -33,6 +47,7 @@ type gpuQ8Matrix struct {
 // Backend - CUDA через Driver API (libcuda.so), без cublas/cudart
 type Backend struct {
 	name        string
+	device      int
 	drv         C.cuda_driver_t
 	lib         unsafe.Pointer
 	ctx         C.CUcontext
@@ -48,6 +63,7 @@ type Backend struct {
 	fnRoPE      C.CUfunction
 	fnRoPENorm  C.CUfunction
 	fnSwiGLU    C.CUfunction
+	fnGeGLU     C.CUfunction
 	fnAttnQK    C.CUfunction
 	fnAttnV     C.CUfunction
 	fnSoftmax   C.CUfunction
@@ -56,6 +72,7 @@ type Backend struct {
 	hasRoPE     bool
 	hasRoPENorm bool
 	hasSwiGLU   bool
+	hasGeGLU    bool
 	hasAttn     bool
 	hasSoftmax  bool
 	hasAdd      bool
@@ -78,11 +95,25 @@ type Backend struct {
 	matmulPool  C.gguf_matmul_pool_t
 	lastVecAddr uintptr
 	lastVecLen  int
+
+	// hiddenResident: hidden state лежит в matmulPool.d_resid между слоями
+	hiddenResident bool
 }
 
-// Open инициализирует GPU 0 и загружает kernels
+// Open инициализирует первое видимое устройство (GPU 0) и загружает kernels
 func Open() (*Backend, error) {
+	return OpenDevice(0)
+}
+
+// OpenDevice инициализирует устройство с ordinal device и загружает kernels.
+// Нумерация - после фильтра CUDA_VISIBLE_DEVICES, как в llama.cpp
+func OpenDevice(device int) (*Backend, error) {
+	if device < 0 {
+		return nil, fmt.Errorf("cuda: device=%d: ordinal должен быть >= 0", device)
+	}
+
 	b := &Backend{
+		device:      device,
 		matrices:    make(map[string]gpuMatrix),
 		matricesQ8:  make(map[string]gpuQ8Matrix),
 		matricesQ4:  make(map[string]gpuQ8Matrix),
@@ -94,17 +125,17 @@ func Open() (*Backend, error) {
 	var nameBuf [256]C.char
 	var initErr [512]C.char
 	var cc C.int
-	rc := C.gguf_cuda_init(&b.drv, &b.lib, &b.ctx, &nameBuf[0], C.size_t(len(nameBuf)), &initErr[0], C.size_t(len(initErr)), &cc)
+	rc := C.gguf_cuda_init(&b.drv, &b.lib, &b.ctx, C.int(device), &nameBuf[0], C.size_t(len(nameBuf)), &initErr[0], C.size_t(len(initErr)), &cc)
 	if rc != 0 {
 		msg := C.GoString(&initErr[0])
 		if msg == "" {
 			msg = C.GoString(&nameBuf[0])
 		}
 
-		return nil, fmt.Errorf("cuda: init: код %d: %s", int(rc), msg)
+		return nil, fmt.Errorf("cuda: init устройства %d: код %d: %s", device, int(rc), msg)
 	}
 
-	b.name = "CUDA:0 " + C.GoString(&nameBuf[0])
+	b.name = fmt.Sprintf("CUDA:%d %s", device, C.GoString(&nameBuf[0]))
 	b.hasGraphs = b.drv.has_graphs != 0
 	gpuCC := int(cc)
 
@@ -186,6 +217,12 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 			}
 			C.free(unsafe.Pointer(cRoPENorm))
 
+			cGeGLU := C.CString("geglu")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cGeGLU, &b.fnGeGLU) == 0 {
+				b.hasGeGLU = true
+			}
+			C.free(unsafe.Pointer(cGeGLU))
+
 			cAttnQK := C.CString("attn_qk")
 			cAttnV := C.CString("attn_v")
 			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnQK, &b.fnAttnQK) == 0 && C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnV, &b.fnAttnV) == 0 {
@@ -216,6 +253,22 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 }
 
 func (b *Backend) Name() string { return b.name }
+
+// Device возвращает ordinal устройства (после CUDA_VISIBLE_DEVICES)
+func (b *Backend) Device() int { return b.device }
+
+// VRAMInfo возвращает занятую и общую видеопамять устройства (cuMemGetInfo)
+func (b *Backend) VRAMInfo() (used, total uint64, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	var free, tot C.size_t
+	if rc := C.gguf_cuda_mem_info(&b.drv, b.ctx, &free, &tot); rc != 0 {
+		return 0, 0, fmt.Errorf("cuda: mem_info: код %d", int(rc))
+	}
+
+	return uint64(tot) - uint64(free), uint64(tot), nil
+}
 
 func (b *Backend) Close() error {
 	b.mu.Lock()
@@ -314,7 +367,7 @@ func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int,
 			C.int(rows), C.int(cols),
 		)
 		if rc != 0 {
-			return nil, fmt.Errorf("cuda: upload matrix %q: код %d", name, int(rc))
+			return nil, uploadFail("matrix", name, rc)
 		}
 
 		gm = gpuMatrix{ptr: ptr, rows: rows, cols: cols}
@@ -365,7 +418,7 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, fmt.Errorf("cuda: upload q8_0 %q: код %d", name, int(rc))
+			return nil, uploadFail("q8_0", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -424,7 +477,7 @@ func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, fmt.Errorf("cuda: upload q4_0 %q: код %d", name, int(rc))
+			return nil, uploadFail("q4_0", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -483,7 +536,7 @@ func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, fmt.Errorf("cuda: upload q4_k %q: код %d", name, int(rc))
+			return nil, uploadFail("q4_k", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -543,7 +596,7 @@ func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, fmt.Errorf("cuda: upload q5_k %q: код %d", name, int(rc))
+			return nil, uploadFail("q5_k", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -602,7 +655,7 @@ func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, fmt.Errorf("cuda: upload q6_k %q: код %d", name, int(rc))
+			return nil, uploadFail("q6_k", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -635,6 +688,44 @@ func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, v
 	return out, nil
 }
 
+// ropeModeNeoX / ropeModeNorm - ключ graph cache для выбранного RoPE-kernel
+const (
+	ropeModeNeoX = 0
+	ropeModeNorm = 1
+)
+
+// ropeKernel возвращает kernel RoPE и его ключ для graph cache
+func (b *Backend) ropeKernel(mode ops.RoPEMode) (C.CUfunction, int, error) {
+	switch mode {
+	case ops.RoPENorm:
+		if !b.hasRoPENorm {
+			return nil, 0, fmt.Errorf("cuda: rope_heads_norm kernel недоступен")
+		}
+
+		return b.fnRoPENorm, ropeModeNorm, nil
+	default:
+		return b.fnRoPE, ropeModeNeoX, nil
+	}
+}
+
+// ensureHeadNorm кеширует веса QK-norm; пустое имя - слой без QK-norm (нулевой указатель)
+func (b *Backend) ensureHeadNorm(name string, norm []float32, headDim int) (C.CUdeviceptr, error) {
+	if name == "" || len(norm) == 0 {
+		return 0, nil
+	}
+
+	if len(norm) < headDim {
+		return 0, fmt.Errorf("cuda: %q: len(norm)=%d, head_dim=%d", name, len(norm), headDim)
+	}
+
+	m, err := b.ensureFP32Matrix(name, norm, headDim, 1)
+	if err != nil {
+		return 0, err
+	}
+
+	return m.ptr, nil
+}
+
 func (b *Backend) ensureFP32Matrix(name string, matrix []float32, rows, cols int) (gpuMatrix, error) {
 	gm, ok := b.matrices[name]
 	if ok && gm.rows == rows && gm.cols == cols {
@@ -658,7 +749,7 @@ func (b *Backend) ensureFP32Matrix(name string, matrix []float32, rows, cols int
 		C.int(cols),
 	)
 	if rc != 0 {
-		return gpuMatrix{}, fmt.Errorf("cuda: upload matrix %q: код %d", name, int(rc))
+		return gpuMatrix{}, uploadFail("matrix", name, rc)
 	}
 
 	gm = gpuMatrix{
@@ -667,6 +758,109 @@ func (b *Backend) ensureFP32Matrix(name string, matrix []float32, rows, cols int
 		cols: cols,
 	}
 	b.matrices[name] = gm
+
+	return gm, nil
+}
+
+// quantMatrices возвращает кеш весов и uploader для типа t
+func (b *Backend) quantCache(t format.GGML) (map[string]gpuQ8Matrix, C.CUfunction, error) {
+	switch t {
+	case format.GgmlQ8_0:
+		return b.matricesQ8, b.fnQ8, nil
+	case format.GgmlQ4_0:
+		if !b.hasQ4 {
+			return nil, nil, fmt.Errorf("cuda: q4_0 kernel недоступен")
+		}
+		return b.matricesQ4, b.fnQ4, nil
+	case format.GgmlQ4_K:
+		if !b.hasQ4K {
+			return nil, nil, fmt.Errorf("cuda: q4_k kernel недоступен")
+		}
+		return b.matricesQ4K, b.fnQ4K, nil
+	case format.GgmlQ5_K:
+		if !b.hasQ5K {
+			return nil, nil, fmt.Errorf("cuda: q5_k kernel недоступен")
+		}
+		return b.matricesQ5K, b.fnQ5K, nil
+	case format.GgmlQ6_K:
+		if !b.hasQ6K {
+			return nil, nil, fmt.Errorf("cuda: q6_k kernel недоступен")
+		}
+		return b.matricesQ6K, b.fnQ6K, nil
+	default:
+		return nil, nil, fmt.Errorf("cuda: тип %s не поддерживается fused-путём", t)
+	}
+}
+
+func (b *Backend) uploadQuant(t format.GGML, ptr *C.CUdeviceptr, raw []byte) C.int {
+	switch t {
+	case format.GgmlQ8_0:
+		return C.gguf_cuda_upload_q8_0(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case format.GgmlQ4_0:
+		return C.gguf_cuda_upload_q4_0(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case format.GgmlQ4_K:
+		return C.gguf_cuda_upload_q4_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case format.GgmlQ5_K:
+		return C.gguf_cuda_upload_q5_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case format.GgmlQ6_K:
+		return C.gguf_cuda_upload_q6_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	default:
+		return -1
+	}
+}
+
+func validateQuantMatMul(t format.GGML, raw []byte, rows, cols int, vec []float32) error {
+	switch t {
+	case format.GgmlQ8_0:
+		return validateQ8MatMul(raw, rows, cols, vec)
+	case format.GgmlQ4_0:
+		return validateQ4MatMul(raw, rows, cols, vec)
+	case format.GgmlQ4_K:
+		return validateQ4KMatMul(raw, rows, cols, vec)
+	case format.GgmlQ5_K:
+		return validateQ5KMatMul(raw, rows, cols, vec)
+	case format.GgmlQ6_K:
+		return validateQ6KMatMul(raw, rows, cols, vec)
+	default:
+		return fmt.Errorf("cuda: тип %s не поддерживается fused-путём", t)
+	}
+}
+
+// ensureQuantMatrix кеширует квантованные веса на устройстве (Q8_0/Q4_0/Q4_K/Q5_K/Q6_K)
+func (b *Backend) ensureQuantMatrix(t format.GGML, name string, raw []byte, rows, cols int) (gpuQ8Matrix, error) {
+	cache, _, err := b.quantCache(t)
+	if err != nil {
+		return gpuQ8Matrix{}, err
+	}
+
+	gm, ok := cache[name]
+	if ok && gm.rows == rows && gm.cols == cols && gm.bytes == len(raw) {
+		return gm, nil
+	}
+
+	if ok {
+		C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
+		C.gguf_cuda_free(&b.drv, gm.ptr)
+		b.lastVecAddr = 0
+		b.lastVecLen = 0
+	}
+
+	if len(raw) == 0 {
+		return gpuQ8Matrix{}, fmt.Errorf("cuda: %q: пустые веса", name)
+	}
+
+	var ptr C.CUdeviceptr
+	if rc := b.uploadQuant(t, &ptr, raw); rc != 0 {
+		return gpuQ8Matrix{}, uploadFail(t.String(), name, rc)
+	}
+
+	gm = gpuQ8Matrix{
+		ptr:   ptr,
+		rows:  rows,
+		cols:  cols,
+		bytes: len(raw),
+	}
+	cache[name] = gm
 
 	return gm, nil
 }
@@ -693,7 +887,7 @@ func (b *Backend) ensureQ8Matrix(name string, raw []byte, rows, cols int) (gpuQ8
 		C.size_t(len(raw)),
 	)
 	if rc != 0 {
-		return gpuQ8Matrix{}, fmt.Errorf("cuda: upload q8_0 %q: код %d", name, int(rc))
+		return gpuQ8Matrix{}, uploadFail("q8_0", name, rc)
 	}
 
 	gm = gpuQ8Matrix{
@@ -850,6 +1044,9 @@ func (b *Backend) AttnFFNResidualCached(woName, ffnNormName, gateName, upName, d
 		return err
 	}
 
+	// Путь по host-буферам: residency (если была) сбрасываем, иначе x был бы проигнорирован
+	b.clearResidencyLocked()
+
 	rc := C.gguf_cuda_attn_ffn_residual_device(
 		&b.drv,
 		b.ctx,
@@ -870,6 +1067,7 @@ func (b *Backend) AttnFFNResidualCached(woName, ffnNormName, gateName, upName, d
 		C.int(attnDim),
 		C.int(ffn),
 		C.float(eps),
+		nil,
 	)
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
@@ -918,6 +1116,9 @@ func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upNam
 		return err
 	}
 
+	// Путь по host-буферам: residency (если была) сбрасываем
+	b.clearResidencyLocked()
+
 	rc := C.gguf_cuda_attn_ffn_residual_device(
 		&b.drv,
 		b.ctx,
@@ -937,6 +1138,7 @@ func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upNam
 		C.int(attnDim),
 		C.int(ffn),
 		C.float(eps),
+		nil,
 	)
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
@@ -1009,6 +1211,7 @@ func (b *Backend) QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormNa
 		vM.ptr,
 		qNormM.ptr,
 		kNormM.ptr,
+		0,
 		(*C.float)(unsafe.Pointer(&h[0])),
 		(*C.float)(unsafe.Pointer(&cos[0])),
 		(*C.float)(unsafe.Pointer(&sin[0])),
@@ -1022,6 +1225,7 @@ func (b *Backend) QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormNa
 		C.int(layer),
 		C.int(kvPos),
 		C.int(seqLen),
+		C.int(ropeModeNeoX),
 		C.float(eps),
 	)
 	b.lastVecAddr = 0
@@ -1095,6 +1299,7 @@ func (b *Backend) QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNo
 		vM.ptr,
 		qNormM.ptr,
 		kNormM.ptr,
+		0,
 		(*C.float)(unsafe.Pointer(&h[0])),
 		(*C.float)(unsafe.Pointer(&cos[0])),
 		(*C.float)(unsafe.Pointer(&sin[0])),
@@ -1108,6 +1313,7 @@ func (b *Backend) QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNo
 		C.int(layer),
 		C.int(kvPos),
 		C.int(seqLen),
+		C.int(ropeModeNeoX),
 		C.float(eps),
 	)
 	b.lastVecAddr = 0
@@ -1117,6 +1323,439 @@ func (b *Backend) QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNo
 	}
 
 	return nil
+}
+
+// FFNSwiGLUQuantCached: FFN SwiGLU нативно для Q8_0/Q4_0/Q4_K/Q5_K/Q6_K (без host Floats)
+func (b *Backend) FFNSwiGLUQuantCached(t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
+	if !b.hasSwiGLU {
+		return fmt.Errorf("cuda: SwiGLU kernel недоступен")
+	}
+
+	return b.ffnGatedQuantCached(b.fnSwiGLU, "swiglu", t, gateName, upName, downName, gateRaw, upRaw, downRaw, x, out, embd, ffn)
+}
+
+// FFNGeGLUQuantCached: FFN GeGLU (Gemma) нативно для тех же квантов
+func (b *Backend) FFNGeGLUQuantCached(t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
+	if !b.hasGeGLU {
+		return fmt.Errorf("cuda: GeGLU kernel недоступен")
+	}
+
+	return b.ffnGatedQuantCached(b.fnGeGLU, "geglu", t, gateName, upName, downName, gateRaw, upRaw, downRaw, x, out, embd, ffn)
+}
+
+// ffnGatedQuantCached - gate/up matmul + активация fnAct + down на устройстве
+func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
+	if len(x) < embd || len(out) < embd {
+		return fmt.Errorf("cuda: ffn %s: короткий x/out", act)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	_, fnMatmul, err := b.quantCache(t)
+	if err != nil {
+		return err
+	}
+
+	gateM, err := b.ensureQuantMatrix(t, gateName, gateRaw, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	upM, err := b.ensureQuantMatrix(t, upName, upRaw, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	downM, err := b.ensureQuantMatrix(t, downName, downRaw, embd, ffn)
+	if err != nil {
+		return err
+	}
+
+	b.prepareVecUpload(x)
+	rc := C.gguf_cuda_ffn_swiglu_device(
+		&b.drv,
+		b.ctx,
+		fnMatmul,
+		fnAct,
+		&b.matmulPool,
+		gateM.ptr,
+		upM.ptr,
+		downM.ptr,
+		(*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&out[0])),
+		C.int(embd),
+		C.int(ffn),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: ffn_%s %s: код %d", act, t, int(rc))
+	}
+
+	return nil
+}
+
+// AttnFFNResidualQuantCached: WO+residual+RMSNorm+FFN+residual нативно для квантов.
+// При активной residency x не грузится на GPU и результат остаётся в d_resid.
+func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
+		return fmt.Errorf("cuda: attn+ffn residual kernels недоступны")
+	}
+
+	if len(ffnNorm) < embd {
+		return fmt.Errorf("cuda: AttnFFNResidualQuantCached: короткий ffn_norm")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// x == nil - явный запрос residency: читаем и оставляем residual на устройстве.
+	// Иначе источник истины - host-буфер x, и residency сбрасывается.
+	resident := b.hiddenResident && len(x) == 0
+	if !resident {
+		if len(x) < embd {
+			return fmt.Errorf("cuda: AttnFFNResidualQuantCached: короткий x")
+		}
+
+		b.clearResidencyLocked()
+	}
+
+	_, fnMatmul, err := b.quantCache(t)
+	if err != nil {
+		return err
+	}
+
+	woM, err := b.ensureQuantMatrix(t, woName, woRaw, embd, attnDim)
+	if err != nil {
+		return err
+	}
+
+	normM, err := b.ensureFP32Matrix(ffnNormName, ffnNorm, embd, 1)
+	if err != nil {
+		return err
+	}
+
+	gateM, err := b.ensureQuantMatrix(t, gateName, gateRaw, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	upM, err := b.ensureQuantMatrix(t, upName, upRaw, ffn, embd)
+	if err != nil {
+		return err
+	}
+
+	downM, err := b.ensureQuantMatrix(t, downName, downRaw, embd, ffn)
+	if err != nil {
+		return err
+	}
+
+	var xPtr *C.float
+	if len(x) >= embd {
+		xPtr = (*C.float)(unsafe.Pointer(&x[0]))
+	}
+
+	var attnPtr *C.float
+	if len(attn) > 0 {
+		attnPtr = (*C.float)(unsafe.Pointer(&attn[0]))
+	}
+
+	var dirty C.int
+	rc := C.gguf_cuda_attn_ffn_residual_device(
+		&b.drv,
+		b.ctx,
+		fnMatmul,
+		b.fnRMS,
+		b.fnSwiGLU,
+		b.fnAdd,
+		&b.matmulPool,
+		woM.ptr,
+		normM.ptr,
+		gateM.ptr,
+		upM.ptr,
+		downM.ptr,
+		xPtr,
+		attnPtr,
+		xPtr,
+		C.int(embd),
+		C.int(attnDim),
+		C.int(ffn),
+		C.float(eps),
+		&dirty,
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		// d_resid успел измениться: актуального hidden нет ни на host, ни на GPU.
+		// HiddenActive()=false подскажет вызывающему, что откат на host невозможен.
+		if resident && dirty != 0 {
+			b.clearResidencyLocked()
+		}
+
+		return fmt.Errorf("cuda: attn_ffn_residual %s: код %d", t, int(rc))
+	}
+
+	return nil
+}
+
+// QKVRoPEAttentionQuantCached: QKV+RoPE+attn нативно для квантов.
+// При активной residency h считается на GPU как RMSNorm(d_resid, attnNorm).
+// mode выбирает kernel RoPE (NeoX для Qwen/Mistral, NORM для Llama); пустые qNormName/kNormName - слой без QK-norm.
+func (b *Backend) QKVRoPEAttentionQuantCached(t format.GGML, mode ops.RoPEMode, qName, kName, vName, qNormName, kNormName, attnNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, attnNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
+	if !b.hasAttn || !b.hasRoPE || !b.hasRMS {
+		return fmt.Errorf("cuda: qkv+rope+attn kernels недоступны")
+	}
+
+	fnRoPE, ropeMode, err := b.ropeKernel(mode)
+	if err != nil {
+		return err
+	}
+
+	if len(cos) < headDim/2 || len(sin) < headDim/2 || len(attn) < nHeads*headDim || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
+		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: короткие буферы")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache не инициализирован")
+	}
+
+	// h == nil - hidden берётся из резидентного residual через RMSNorm на устройстве
+	resident := b.hiddenResident && len(h) == 0
+	if !resident && len(h) < embd {
+		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: короткий h")
+	}
+
+	if resident && len(attnNorm) < embd {
+		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: короткий attn_norm")
+	}
+
+	_, fnMatmul, err := b.quantCache(t)
+	if err != nil {
+		return err
+	}
+
+	qM, err := b.ensureQuantMatrix(t, qName, qRaw, nHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	kM, err := b.ensureQuantMatrix(t, kName, kRaw, nKVHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	vM, err := b.ensureQuantMatrix(t, vName, vRaw, nKVHeads*headDim, embd)
+	if err != nil {
+		return err
+	}
+
+	// QK-norm есть не у всех архитектур: пустое имя - нулевой указатель, kernel норму пропустит
+	qNormPtr, err := b.ensureHeadNorm(qNormName, qNorm, headDim)
+	if err != nil {
+		return err
+	}
+
+	kNormPtr, err := b.ensureHeadNorm(kNormName, kNorm, headDim)
+	if err != nil {
+		return err
+	}
+
+	var attnNormPtr C.CUdeviceptr
+	if resident {
+		attnNormM, err := b.ensureFP32Matrix(attnNormName, attnNorm, embd, 1)
+		if err != nil {
+			return err
+		}
+		attnNormPtr = attnNormM.ptr
+	}
+
+	fnSM := b.fnSoftmax
+	if !b.hasSoftmax {
+		fnSM = nil
+	}
+
+	var hPtr *C.float
+	if len(h) >= embd {
+		hPtr = (*C.float)(unsafe.Pointer(&h[0]))
+	}
+
+	rc := C.gguf_cuda_qkv_rope_attn_device(
+		&b.drv,
+		b.ctx,
+		fnMatmul,
+		b.fnRMS,
+		fnRoPE,
+		b.fnAttnQK,
+		b.fnAttnV,
+		fnSM,
+		&b.matmulPool,
+		&b.attnPool,
+		&b.kvCache,
+		qM.ptr,
+		kM.ptr,
+		vM.ptr,
+		qNormPtr,
+		kNormPtr,
+		attnNormPtr,
+		hPtr,
+		(*C.float)(unsafe.Pointer(&cos[0])),
+		(*C.float)(unsafe.Pointer(&sin[0])),
+		(*C.float)(unsafe.Pointer(&attn[0])),
+		(*C.float)(unsafe.Pointer(&kOut[0])),
+		(*C.float)(unsafe.Pointer(&vOut[0])),
+		C.int(embd),
+		C.int(nHeads),
+		C.int(nKVHeads),
+		C.int(headDim),
+		C.int(layer),
+		C.int(kvPos),
+		C.int(seqLen),
+		C.int(ropeMode),
+		C.float(eps),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: qkv_rope_attn %s: код %d", t, int(rc))
+	}
+
+	return nil
+}
+
+// HiddenResident: CUDA держит residual в d_resid между слоями
+func (b *Backend) HiddenResident() bool {
+	return b.hasRMS && b.hasAdd && b.hasSwiGLU && b.hasAttn
+}
+
+// HiddenActive: в d_resid лежит актуальный hidden state
+func (b *Backend) HiddenActive() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.hiddenResident
+}
+
+// HiddenUpload включает residency: один HtoD hidden state на токен
+func (b *Backend) HiddenUpload(x []float32) error {
+	if len(x) == 0 {
+		return fmt.Errorf("cuda: HiddenUpload: пустой x")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	rc := C.gguf_cuda_hidden_upload(&b.drv, b.ctx, &b.matmulPool, (*C.float)(unsafe.Pointer(&x[0])), C.int(len(x)))
+	if rc != 0 {
+		b.hiddenResident = false
+		return fmt.Errorf("cuda: hidden_upload: код %d", int(rc))
+	}
+
+	b.matmulPool.keep_resid_device = 1
+	b.hiddenResident = true
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+
+	return nil
+}
+
+// HiddenDownload забирает residual с устройства и выключает residency
+func (b *Backend) HiddenDownload(dst []float32) error {
+	if len(dst) == 0 {
+		return fmt.Errorf("cuda: HiddenDownload: пустой dst")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.hiddenResident {
+		return fmt.Errorf("cuda: HiddenDownload: residency не активна")
+	}
+
+	rc := C.gguf_cuda_hidden_download(&b.drv, b.ctx, &b.matmulPool, (*C.float)(unsafe.Pointer(&dst[0])), C.int(len(dst)))
+	b.clearResidencyLocked()
+	if rc != 0 {
+		return fmt.Errorf("cuda: hidden_download: код %d", int(rc))
+	}
+
+	return nil
+}
+
+// LogitsFromDevice: out_norm + lm_head на GPU поверх резидентного hidden; DtoH только logits
+func (b *Backend) LogitsFromDevice(t format.GGML, normName string, norm []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error {
+	if !b.hasRMS {
+		return fmt.Errorf("cuda: rmsnorm kernel недоступен")
+	}
+
+	if len(norm) < embd || len(logits) < vocab {
+		return fmt.Errorf("cuda: LogitsFromDevice: короткие буферы")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.hiddenResident {
+		return fmt.Errorf("cuda: LogitsFromDevice: residency не активна")
+	}
+
+	normM, err := b.ensureFP32Matrix(normName, norm, embd, 1)
+	if err != nil {
+		return err
+	}
+
+	var headPtr C.CUdeviceptr
+	fnMatmul := b.fn
+	if t == format.GgmlFloat32 || t == format.GgmlFloat16 {
+		headM, err := b.ensureFP32Matrix(headName, headF32, vocab, embd)
+		if err != nil {
+			return err
+		}
+		headPtr = headM.ptr
+	} else {
+		var fn C.CUfunction
+		if _, fn, err = b.quantCache(t); err != nil {
+			return err
+		}
+
+		headM, err := b.ensureQuantMatrix(t, headName, headRaw, vocab, embd)
+		if err != nil {
+			return err
+		}
+		headPtr = headM.ptr
+		fnMatmul = fn
+	}
+
+	rc := C.gguf_cuda_logits_from_device(
+		&b.drv,
+		b.ctx,
+		fnMatmul,
+		b.fnRMS,
+		&b.matmulPool,
+		normM.ptr,
+		headPtr,
+		(*C.float)(unsafe.Pointer(&logits[0])),
+		C.int(vocab),
+		C.int(embd),
+		C.float(eps),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: logits_from_device: код %d", int(rc))
+	}
+
+	return nil
+}
+
+// clearResidencyLocked выключает device residency (вызывать под b.mu)
+func (b *Backend) clearResidencyLocked() {
+	b.hiddenResident = false
+	b.matmulPool.resid_on_device = 0
+	b.matmulPool.keep_resid_device = 0
+	b.matmulPool.resid_len = 0
 }
 
 // prepareVecUpload помечает пропуск HtoD, если тот же host-vec уже на GPU (Q/K/V из одного h)
@@ -1346,6 +1985,43 @@ func (b *Backend) KVCacheAppend(layer, pos int, k, v []float32) error {
 	)
 	if rc != 0 {
 		return fmt.Errorf("cuda: kv_append layer=%d pos=%d: код %d", layer, pos, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) KVCacheAppendN(layer, pos int, k, v []float32, n int) error {
+	if n <= 0 {
+		return fmt.Errorf("cuda: KVCacheAppendN: n=%d", n)
+	}
+
+	if len(k) == 0 || len(v) == 0 {
+		return fmt.Errorf("cuda: KVCacheAppendN: пустой k/v")
+	}
+
+	if len(k)%n != 0 || len(v)%n != 0 {
+		return fmt.Errorf("cuda: KVCacheAppendN: len(k)=%d len(v)=%d не кратны n=%d", len(k), len(v), n)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache не инициализирован")
+	}
+
+	rc := C.gguf_cuda_kv_append_n(
+		&b.drv,
+		b.ctx,
+		&b.kvCache,
+		C.int(layer),
+		C.int(pos),
+		(*C.float)(unsafe.Pointer(&k[0])),
+		(*C.float)(unsafe.Pointer(&v[0])),
+		C.int(n),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: kv_append_n layer=%d pos=%d n=%d: код %d", layer, pos, n, int(rc))
 	}
 
 	return nil

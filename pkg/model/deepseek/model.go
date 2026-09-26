@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/model/moe"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
@@ -18,6 +19,8 @@ type Model struct {
 	gpu          gpu.Backend
 	ngl          int
 	gpuMaxSeq    int
+	fused        *gpuresid.Runner // fused GPU-пути: FFN, эксперты MoE (§6)
+	moeGPU       []bool           // слой умеет считать экспертов на GPU
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
@@ -69,7 +72,30 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 		return nil, err
 	}
 
+	m.initFused()
+
 	return m, nil
+}
+
+// initFused готовит GPU-пути слоя (§6). DeepSeek v1: RoPE NORM, эксперты через ExpertFFN
+func (m *Model) initFused() {
+	if m.gpu == nil || m.ngl <= 0 {
+		return
+	}
+
+	m.fused = gpuresid.New(m.weights, m.gpu, gpu.RoPENorm)
+	m.moeGPU = make([]bool, m.cfg.NumLayers)
+	for i, lt := range m.layerTensors {
+		if !lt.moe {
+			continue
+		}
+
+		m.moeGPU[i] = m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps)
+	}
+}
+
+func (m *Model) layerOnGPU(layer int) bool {
+	return m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 }
 
 func (m *Model) initGPUKVCache() error {
@@ -103,6 +129,7 @@ func (m *Model) Close() error {
 	}
 	err := m.gpu.Close()
 	m.gpu = nil
+	m.fused = nil
 	return err
 }
 
@@ -265,6 +292,13 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return nil
 	}
 
+	if m.layerOnGPU(layer) {
+		if err := m.fused.FFNNamed(lt.ffnGate, lt.ffnUp, lt.ffnDown, m.scratch.h, m.scratch.h, m.cfg.EmbeddingDim, m.cfg.FFNHidden); err == nil {
+			ops.AddInPlace(m.scratch.x, m.scratch.h)
+			return nil
+		}
+	}
+
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.ffnGPU(lt, m.scratch.h, m.scratch.h); err == nil {
 			ops.AddInPlace(m.scratch.x, m.scratch.h)
@@ -294,6 +328,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	nExp := m.cfg.ExpertCount
 	ffn := m.cfg.ExpertFFN
 
+	// §6: router matmul на GPU через MatMulInto (тот же кеш квантов)
 	if err := m.matmulInto(lt.gateInp, nExp, embd, m.scratch.h, m.scratch.router[:nExp], layer); err != nil {
 		return err
 	}
@@ -301,6 +336,11 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, false, m.cfg.ExpertWeightScale)
 
 	clear(m.scratch.moeAcc)
+
+	// §6: выбранные эксперты - fused FFN на GPU по срезу raw-весов
+	if m.moeExpertsGPU(lt, layer, idxs, weights) {
+		return m.sharedExpert(lt, layer)
+	}
 
 	gateW, err := m.weights.Floats(lt.gateExps)
 	if err != nil {
@@ -344,25 +384,64 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		}
 	}
 
-	if m.cfg.ExpertShared > 0 && lt.gateShexp != "" {
-		shared := m.cfg.sharedFFN()
-		sg := m.scratch.gate[:shared]
-		su := m.scratch.up[:shared]
-		if err := m.matmulInto(lt.gateShexp, shared, embd, m.scratch.h, sg, layer); err != nil {
-			return err
-		}
+	return m.sharedExpert(lt, layer)
+}
 
-		if err := m.matmulInto(lt.upShexp, shared, embd, m.scratch.h, su, layer); err != nil {
-			return err
-		}
-
-		ops.SwiGLUInPlace(sg, su)
-		if err := m.matmulInto(lt.downShexp, embd, shared, sg, m.scratch.tmp, layer); err != nil {
-			return err
-		}
-
-		ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+// moeExpertsGPU считает выбранных экспертов на GPU и аккумулирует их в moeAcc.
+// false - слой на GPU не идёт (нет offload или тип весов вне fused-путей)
+func (m *Model) moeExpertsGPU(lt layerTensors, layer int, idxs []int, weights []float32) bool {
+	if !m.layerOnGPU(layer) || layer >= len(m.moeGPU) || !m.moeGPU[layer] {
+		return false
 	}
+
+	embd := m.cfg.EmbeddingDim
+	ffn := m.cfg.ExpertFFN
+	for i, ei := range idxs {
+		if err := m.fused.ExpertFFN(lt.gateExps, lt.upExps, lt.downExps, ei, m.scratch.h, m.scratch.tmp, embd, ffn); err != nil {
+			clear(m.scratch.moeAcc)
+			return false
+		}
+
+		w := weights[i]
+		for j := range embd {
+			m.scratch.moeAcc[j] += m.scratch.tmp[j] * w
+		}
+	}
+
+	return true
+}
+
+// sharedExpert добавляет общий эксперт слоя в moeAcc (если он есть)
+func (m *Model) sharedExpert(lt layerTensors, layer int) error {
+	if m.cfg.ExpertShared <= 0 || lt.gateShexp == "" {
+		return nil
+	}
+
+	embd := m.cfg.EmbeddingDim
+	shared := m.cfg.sharedFFN()
+	if m.layerOnGPU(layer) {
+		if err := m.fused.FFNNamed(lt.gateShexp, lt.upShexp, lt.downShexp, m.scratch.h, m.scratch.tmp, embd, shared); err == nil {
+			ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+			return nil
+		}
+	}
+
+	sg := m.scratch.gate[:shared]
+	su := m.scratch.up[:shared]
+	if err := m.matmulInto(lt.gateShexp, shared, embd, m.scratch.h, sg, layer); err != nil {
+		return err
+	}
+
+	if err := m.matmulInto(lt.upShexp, shared, embd, m.scratch.h, su, layer); err != nil {
+		return err
+	}
+
+	ops.SwiGLUInPlace(sg, su)
+	if err := m.matmulInto(lt.downShexp, embd, shared, sg, m.scratch.tmp, layer); err != nil {
+		return err
+	}
+
+	ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
 
 	return nil
 }
@@ -412,6 +491,12 @@ func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {
 }
 
 func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, layer int) error {
+	if m.layerOnGPU(layer) {
+		if err := m.fused.MatMulInto(name, rows, cols, vec, out); err == nil {
+			return nil
+		}
+	}
+
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		got, err := m.matmulGPU(name, rows, cols, vec)
 		if err != nil {

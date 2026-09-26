@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
@@ -24,6 +25,7 @@ type Model struct {
 	lmHeadName       string
 	ropeFactorsShort []float32
 	ropeFactorsLong  []float32
+	fused            *gpuresid.Runner // fused GPU-FFN слоя (§5)
 }
 
 // Load создаёт Phi-3 из весов GGUF
@@ -75,6 +77,11 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 
 	if err := m.initGPUKVCache(); err != nil {
 		return nil, err
+	}
+
+	// fused FFN доступен только слоям с раздельными ffn_gate/ffn_up: слитый ffn_up [embd, 2*ffn] потребовал бы отдельного kernel
+	if g != nil && ngl > 0 {
+		m.fused = gpuresid.New(w, g, gpu.RoPENeoX)
 	}
 
 	return m, nil
@@ -337,6 +344,13 @@ func (m *Model) ffn(lt layerTensors, layer int) error {
 		ops.SwiGLUInPlace(m.scratch.gate, m.scratch.up)
 
 		return m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, ffn, m.scratch.gate, m.scratch.h, layer)
+	}
+
+	// §5: раздельные gate/up идут одним fused SwiGLU-вызовом на GPU
+	if m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.fused.FFNNamed(lt.ffnGate, lt.ffnUp, lt.ffnDown, m.scratch.h, m.scratch.h, m.cfg.EmbeddingDim, ffn); err == nil {
+			return nil
+		}
 	}
 
 	if err := m.matmulInto(lt.ffnGate, ffn, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.gate, layer); err != nil {

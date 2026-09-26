@@ -725,8 +725,10 @@ Q6K_EXIT:
 
 const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel + matmulQ4Kernel + matmulQ4KKernel + matmulQ5KKernel + matmulQ6KKernel
 
+// opsKernelsBody - RMSNorm, RoPE, SwiGLU, attention, softmax, add.
+// Комментарии внутри PTX только ASCII: ptxas отвергает не-ASCII символы.
 const opsKernelsBody = `
-// rmsnorm: 1 block - sum на tid0, apply параллельно (stride)
+// rmsnorm: 1 block - sum on tid0, apply in parallel (stride)
 .visible .entry rmsnorm(
     .param .u64 param_x,
     .param .u64 param_weight,
@@ -977,6 +979,74 @@ SG_EXIT:
     ret;
 }
 
+// geglu: gelu(gate)*up -> gate (Gemma / Phi FFN)
+// tanh-approx GELU: 0.5*g*(1+tanh(0.7978845608*(g+0.044715*g^3)));
+// tanh(z) = 1 - 2/(exp(2z)+1), exp via ex2.approx (no tanh.approx before sm_75)
+.visible .entry geglu(
+    .param .u64 param_gate,
+    .param .u64 param_up,
+    .param .u32 param_n
+)
+{
+    .reg .pred      %p<1>;
+    .reg .b32       %r<8>;
+    .reg .b64       %rd<8>;
+    .reg .f32       %f<20>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_n];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra GG_EXIT;
+
+    ld.param.u64    %rd1, [param_gate];
+    ld.param.u64    %rd2, [param_up];
+
+    mul.wide.u32    %rd3, %r4, 4;
+    add.u64         %rd4, %rd1, %rd3;
+    ld.global.f32   %f1, [%rd4];
+
+    add.u64         %rd5, %rd2, %rd3;
+    ld.global.f32   %f2, [%rd5];
+
+    // inner = 0.7978845608 * (g + 0.044715*g^3)
+    mul.f32         %f3, %f1, %f1;
+    mul.f32         %f3, %f3, %f1;
+    mov.f32         %f4, 0f3D372713;
+    mul.f32         %f3, %f3, %f4;
+    add.f32         %f3, %f3, %f1;
+    mov.f32         %f5, 0f3F4C422A;
+    mul.f32         %f3, %f3, %f5;
+
+    // e = exp(2*inner) = ex2(2*inner*log2(e))
+    add.f32         %f6, %f3, %f3;
+    mov.f32         %f7, 0f3FB8AA3B;
+    mul.f32         %f6, %f6, %f7;
+    ex2.approx.f32  %f8, %f6;
+
+    // tanh = 1 - 2/(e+1)
+    mov.f32         %f9, 0f3F800000;
+    add.f32         %f10, %f8, %f9;
+    mov.f32         %f11, 0f40000000;
+    div.rn.f32      %f12, %f11, %f10;
+    sub.f32         %f13, %f9, %f12;
+
+    // gelu(g) = 0.5*g*(1+tanh)
+    add.f32         %f14, %f13, %f9;
+    mul.f32         %f15, %f1, %f14;
+    mov.f32         %f16, 0f3F000000;
+    mul.f32         %f15, %f15, %f16;
+
+    mul.f32         %f17, %f15, %f2;
+    st.global.f32   [%rd4], %f17;
+
+GG_EXIT:
+    ret;
+}
+
 .visible .entry attn_qk(
     .param .u64 param_q,
     .param .u64 param_k,
@@ -1115,7 +1185,7 @@ AV_EXIT:
     ret;
 }
 
-// softmax - однопоточный softmax in-place для буфера scores (decode: seq короткий)
+// softmax - single-thread in-place softmax over scores (decode: short seq)
 .visible .entry softmax(
     .param .u64 param_x,
     .param .u32 param_n

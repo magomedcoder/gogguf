@@ -56,6 +56,8 @@
 | `-i`                | `false`      | интерактивный режим (REPL)                             |
 | `-ngl`              | `0`          | matmul N transformer-слоёв на GPU (CUDA-сборка)        |
 | `-b` / `--n-batch`  | `1`          | размер chunk prefill (Qwen3 CPU; >1 - длинный prefill) |
+| `-dev`              | пусто        | GPU для offload: `1` или `0,1` (split слоёв)           |
+| `-tensor-split`     | пусто        | пропорции слоёв по устройствам `-dev`, напр. `0.6,0.4` |
 
 Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`. Для gated/private: `HF_TOKEN`. Зеркало
 Hub: `MODEL_ENDPOINT`.
@@ -109,6 +111,8 @@ Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 | `--host`            | `127.0.0.1:8000` | адрес HTTP-сервера                              |
 | `-ngl`              | `0`              | matmul N transformer-слоёв на GPU (CUDA-сборка) |
 | `-b` / `--n-batch`  | `1`              | размер chunk prefill (Qwen3 CPU)                |
+| `-dev`              | пусто            | GPU для offload: `1` или `0,1` (split слоёв)    |
+| `-tensor-split`     | пусто            | пропорции слоёв по устройствам `-dev`           |
 | `--api-key`         | пусто            | auth Bearer / X-API-Key (`/v1/health` открыт)   |
 | `--rate-limit`      | `0`              | запросов в минуту на IP (`0` = без лимита)      |
 

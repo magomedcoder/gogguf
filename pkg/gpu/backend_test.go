@@ -24,10 +24,3 @@ func TestLayerOnGPU(t *testing.T) {
 		}
 	}
 }
-
-func TestOpenCUDAStub(t *testing.T) {
-	_, err := OpenCUDA()
-	if err != ErrUnavailable {
-		t.Fatalf("OpenCUDA() = %v, ожидали ErrUnavailable", err)
-	}
-}

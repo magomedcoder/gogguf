@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/model/moe"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
@@ -14,6 +15,10 @@ import (
 type Model struct {
 	cfg          Config
 	weights      *weights.Store
+	gpu          gpu.Backend
+	ngl          int
+	fused        *gpuresid.Runner
+	moeGPU       []bool
 	cache        *MLACache
 	scratch      scratch
 	layerNorms   []layerNorms
@@ -22,9 +27,9 @@ type Model struct {
 	lmHeadName   string
 }
 
-// Load создаёт DeepSeek2 из весов (MLA на CPU; GPU offload пока не для MLA-cache)
-func Load(w *weights.Store, _ gpu.Backend, ngl, _ int) (*Model, error) {
-	_ = ngl
+// Load создаёт DeepSeek2 из весов. GPU считает проекции MLA, FFN и экспертов (§7),
+// само MLA-attention остаётся на CPU: его кеш не совпадает по раскладке с GPU KV-cache
+func Load(w *weights.Store, g gpu.Backend, ngl, _ int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
@@ -45,16 +50,48 @@ func Load(w *weights.Store, _ gpu.Backend, ngl, _ int) (*Model, error) {
 		return nil, err
 	}
 
-	return &Model{
+	if ngl > cfg.NumLayers {
+		ngl = cfg.NumLayers
+	}
+
+	m := &Model{
 		cfg:          cfg,
 		weights:      w,
+		gpu:          g,
+		ngl:          ngl,
 		cache:        NewMLACache(cfg),
 		scratch:      newScratch(cfg),
 		layerNorms:   layerNorms,
 		layerTensors: layerTensors,
 		outNorm:      outNorm,
 		lmHeadName:   lmHeadName,
-	}, nil
+	}
+
+	m.initFused()
+
+	return m, nil
+}
+
+// initFused готовит GPU-пути слоя (§7). MLA-attention остаётся на CPU: поглощённые wk_b/wv_b лежат column-major, а кеш MLA - это K=kv_lora+rope, V=kv_lora, чего GPU KV-cache (n_kv_heads * head_dim) не описывает
+func (m *Model) initFused() {
+	if m.gpu == nil || m.ngl <= 0 {
+		return
+	}
+
+	m.fused = gpuresid.New(m.weights, m.gpu, gpu.RoPENeoX)
+	m.moeGPU = make([]bool, m.cfg.NumLayers)
+	for i, lt := range m.layerTensors {
+		if !lt.moe {
+			continue
+		}
+
+		m.moeGPU[i] = m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps)
+	}
+}
+
+// layerOnGPU сообщает, идёт ли слой через GPU
+func (m *Model) layerOnGPU(layer int) bool {
+	return m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 }
 
 func (m *Model) Config() Config {
@@ -66,7 +103,15 @@ func (m *Model) ResetCache() {
 }
 
 func (m *Model) Close() error {
-	return nil
+	if m.gpu == nil {
+		return nil
+	}
+
+	err := m.gpu.Close()
+	m.gpu = nil
+	m.fused = nil
+
+	return err
 }
 
 func (m *Model) EmbeddingDim() int {
@@ -204,21 +249,33 @@ func (m *Model) forwardBlock(layer, pos int) error {
 		return nil
 	}
 
-	if err := m.matmulInto(lt.ffnGate, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.gate); err != nil {
-		return err
-	}
-
-	if err := m.matmulInto(lt.ffnUp, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.up); err != nil {
-		return err
-	}
-
-	ops.SwiGLUInPlace(m.scratch.gate[:m.cfg.FFNHidden], m.scratch.up[:m.cfg.FFNHidden])
-	if err := m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate[:m.cfg.FFNHidden], m.scratch.tmp); err != nil {
+	if err := m.ffnDense(lt, layer); err != nil {
 		return err
 	}
 
 	ops.AddInPlace(m.scratch.x, m.scratch.tmp)
 	return nil
+}
+
+// ffnDense - плотный FFN слоя; на GPU идёт одним fused SwiGLU-вызовом (§7)
+func (m *Model) ffnDense(lt layerTensors, layer int) error {
+	if m.layerOnGPU(layer) {
+		if err := m.fused.FFNNamed(lt.ffnGate, lt.ffnUp, lt.ffnDown, m.scratch.h, m.scratch.tmp, m.cfg.EmbeddingDim, m.cfg.FFNHidden); err == nil {
+			return nil
+		}
+	}
+
+	if err := m.matmulInto(lt.ffnGate, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.gate, layer); err != nil {
+		return err
+	}
+
+	if err := m.matmulInto(lt.ffnUp, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.up, layer); err != nil {
+		return err
+	}
+
+	ops.SwiGLUInPlace(m.scratch.gate[:m.cfg.FFNHidden], m.scratch.up[:m.cfg.FFNHidden])
+
+	return m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate[:m.cfg.FFNHidden], m.scratch.tmp, layer)
 }
 
 func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
@@ -227,11 +284,11 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 
 	// проекция Q
 	if lt.liteQ {
-		if err := m.matmulInto(lt.q, cfg.NumHeads*headK, cfg.EmbeddingDim, m.scratch.h, m.scratch.qFull); err != nil {
+		if err := m.matmulInto(lt.q, cfg.NumHeads*headK, cfg.EmbeddingDim, m.scratch.h, m.scratch.qFull, layer); err != nil {
 			return err
 		}
 	} else {
-		if err := m.matmulInto(lt.qA, cfg.QLoraRank, cfg.EmbeddingDim, m.scratch.h, m.scratch.qLora[:cfg.QLoraRank]); err != nil {
+		if err := m.matmulInto(lt.qA, cfg.QLoraRank, cfg.EmbeddingDim, m.scratch.h, m.scratch.qLora[:cfg.QLoraRank], layer); err != nil {
 			return err
 		}
 
@@ -242,13 +299,13 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		}
 
 		copy(m.scratch.qLora[:cfg.QLoraRank], tmpQ)
-		if err := m.matmulInto(lt.qB, cfg.NumHeads*headK, cfg.QLoraRank, m.scratch.qLora[:cfg.QLoraRank], m.scratch.qFull); err != nil {
+		if err := m.matmulInto(lt.qB, cfg.NumHeads*headK, cfg.QLoraRank, m.scratch.qLora[:cfg.QLoraRank], m.scratch.qFull, layer); err != nil {
 			return err
 		}
 	}
 
 	// сжатие KV + k_pe
-	if err := m.matmulInto(lt.kvAMQA, cfg.qkDim(), cfg.EmbeddingDim, m.scratch.h, m.scratch.kvPe); err != nil {
+	if err := m.matmulInto(lt.kvAMQA, cfg.qkDim(), cfg.EmbeddingDim, m.scratch.h, m.scratch.kvPe, layer); err != nil {
 		return err
 	}
 
@@ -315,7 +372,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		return err
 	}
 
-	return m.matmulInto(lt.attnOut, cfg.EmbeddingDim, cfg.NumHeads*cfg.VHeadDim, m.scratch.attn, m.scratch.tmp)
+	return m.matmulInto(lt.attnOut, cfg.EmbeddingDim, cfg.NumHeads*cfg.VHeadDim, m.scratch.attn, m.scratch.tmp, layer)
 }
 
 func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
@@ -360,12 +417,11 @@ func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
 }
 
 func (m *Model) ffnMoE(lt layerTensors, layer int) error {
-	_ = layer
 	embd := m.cfg.EmbeddingDim
 	nExp := m.cfg.ExpertCount
 	ffn := m.cfg.ExpertFFN
 
-	if err := m.matmulInto(lt.gateInp, nExp, embd, m.scratch.h, m.scratch.router[:nExp]); err != nil {
+	if err := m.matmulInto(lt.gateInp, nExp, embd, m.scratch.h, m.scratch.router[:nExp], layer); err != nil {
 		return err
 	}
 
@@ -379,6 +435,11 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 
 	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, m.cfg.ExpertWeightsNorm, m.cfg.ExpertWeightScale)
 	clear(m.scratch.moeAcc)
+
+	// §6: выбранные эксперты считаются на GPU по срезу своего тензора, без деквантизации всей матрицы экспертов на host
+	if m.moeExpertsGPU(lt, layer, idxs, weights) {
+		return m.sharedExpert(lt, layer)
+	}
 
 	gateW, err := m.weights.Floats(lt.gateExps)
 	if err != nil {
@@ -419,30 +480,76 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		}
 	}
 
-	if lt.gateShexp != "" {
-		shared := m.cfg.sharedFFN()
-		sg := m.scratch.gate[:shared]
-		su := m.scratch.up[:shared]
-		if err := m.matmulInto(lt.gateShexp, shared, embd, m.scratch.h, sg); err != nil {
-			return err
-		}
+	return m.sharedExpert(lt, layer)
+}
 
-		if err := m.matmulInto(lt.upShexp, shared, embd, m.scratch.h, su); err != nil {
-			return err
-		}
-
-		ops.SwiGLUInPlace(sg, su)
-		if err := m.matmulInto(lt.downShexp, embd, shared, sg, m.scratch.tmp); err != nil {
-			return err
-		}
-
-		ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+// moeExpertsGPU считает выбранных экспертов на GPU и аккумулирует их в moeAcc.
+// false - слой на GPU не идёт (нет offload или тип весов вне fused-путей)
+func (m *Model) moeExpertsGPU(lt layerTensors, layer int, idxs []int, weights []float32) bool {
+	if !m.layerOnGPU(layer) || layer >= len(m.moeGPU) || !m.moeGPU[layer] {
+		return false
 	}
+
+	embd := m.cfg.EmbeddingDim
+	ffn := m.cfg.ExpertFFN
+	for i, ei := range idxs {
+		if err := m.fused.ExpertFFN(lt.gateExps, lt.upExps, lt.downExps, ei, m.scratch.h, m.scratch.tmp, embd, ffn); err != nil {
+			// частично посчитанный moeAcc не годится: сбрасываем и уходим на CPU
+			clear(m.scratch.moeAcc)
+			return false
+		}
+
+		w := weights[i]
+		for j := range embd {
+			m.scratch.moeAcc[j] += m.scratch.tmp[j] * w
+		}
+	}
+
+	return true
+}
+
+// sharedExpert добавляет в moeAcc общий эксперт слоя (если он есть)
+func (m *Model) sharedExpert(lt layerTensors, layer int) error {
+	if lt.gateShexp == "" {
+		return nil
+	}
+
+	embd := m.cfg.EmbeddingDim
+	shared := m.cfg.sharedFFN()
+	if m.layerOnGPU(layer) {
+		if err := m.fused.FFNNamed(lt.gateShexp, lt.upShexp, lt.downShexp, m.scratch.h, m.scratch.tmp, embd, shared); err == nil {
+			ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+			return nil
+		}
+	}
+
+	sg := m.scratch.gate[:shared]
+	su := m.scratch.up[:shared]
+	if err := m.matmulInto(lt.gateShexp, shared, embd, m.scratch.h, sg, layer); err != nil {
+		return err
+	}
+
+	if err := m.matmulInto(lt.upShexp, shared, embd, m.scratch.h, su, layer); err != nil {
+		return err
+	}
+
+	ops.SwiGLUInPlace(sg, su)
+	if err := m.matmulInto(lt.downShexp, embd, shared, sg, m.scratch.tmp, layer); err != nil {
+		return err
+	}
+
+	ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
 
 	return nil
 }
 
-func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32) error {
+func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, layer int) error {
+	if m.layerOnGPU(layer) {
+		if err := m.fused.MatMulInto(name, rows, cols, vec, out); err == nil {
+			return nil
+		}
+	}
+
 	raw, err := m.weights.Raw(name)
 	if err != nil {
 		return err
@@ -491,5 +598,5 @@ func (m *Model) logitsFromHidden(x []float32) error {
 		return err
 	}
 
-	return m.matmulInto(m.lmHeadName, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	return m.matmulInto(m.lmHeadName, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits, m.cfg.NumLayers-1)
 }

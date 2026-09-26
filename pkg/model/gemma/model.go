@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
@@ -22,6 +23,10 @@ type Model struct {
 	layerTensors []layerTensors
 	outNorm      []float32
 	lmHeadName   string
+
+	fused     *gpuresid.Runner   // fused GPU-пути слоя (§5)
+	fusedDims gpuresid.Dims      // размерности для fused FFN
+	gpuLayers []gpuresid.Tensors // имена весов слоя для fused-путей
 }
 
 // LoadGemma создаёт Gemma 1
@@ -71,7 +76,35 @@ func load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int, parse func(*forma
 		return nil, err
 	}
 
+	m.initFused()
+
 	return m, nil
+}
+
+// initFused готовит fused GPU-FFN слоя (§5). Gemma: GeGLU вместо SwiGLU; residency пока не включается - её блокируют post-norm, softcap и SWA
+func (m *Model) initFused() {
+	if m.gpu == nil {
+		return
+	}
+
+	m.fused = gpuresid.New(m.weights, m.gpu, gpu.RoPENeoX)
+	m.fusedDims = gpuresid.Dims{
+		Embd:     m.cfg.EmbeddingDim,
+		NHeads:   m.cfg.NumHeads,
+		NKVHeads: m.cfg.NumKVHeads,
+		HeadDim:  m.cfg.HeadDim,
+		FFN:      m.cfg.FFNHidden,
+		Eps:      m.cfg.RMSNormEps,
+	}
+
+	m.gpuLayers = make([]gpuresid.Tensors, m.cfg.NumLayers)
+	for i, lt := range m.layerTensors {
+		m.gpuLayers[i] = gpuresid.Tensors{
+			FFNGate: lt.ffnGate,
+			FFNUp:   lt.ffnUp,
+			FFNDown: lt.ffnDown,
+		}
+	}
 }
 
 func (m *Model) initGPUKVCache() error {
@@ -279,16 +312,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	if err := m.matmulInto(lt.ffnGate, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.gate, layer); err != nil {
-		return err
-	}
-
-	if err := m.matmulInto(lt.ffnUp, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.up, layer); err != nil {
-		return err
-	}
-	ops.GeGLUInPlace(m.scratch.gate, m.scratch.up)
-
-	if err := m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate, m.scratch.h, layer); err != nil {
+	if err := m.ffnInto(layer, lt, m.scratch.h, m.scratch.h); err != nil {
 		return err
 	}
 
@@ -299,6 +323,26 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	}
 	ops.AddInPlace(m.scratch.x, m.scratch.h)
 	return nil
+}
+
+// ffnInto: gate/up + GeGLU + down. На GPU - одним fused-вызовом (§5), иначе по частям
+func (m *Model) ffnInto(layer int, lt layerTensors, x, out []float32) error {
+	if m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.fused.FFNGeGLU(m.gpuLayers[layer], m.fusedDims, x, out); err == nil {
+			return nil
+		}
+	}
+
+	if err := m.matmulInto(lt.ffnGate, m.cfg.FFNHidden, m.cfg.EmbeddingDim, x, m.scratch.gate, layer); err != nil {
+		return err
+	}
+
+	if err := m.matmulInto(lt.ffnUp, m.cfg.FFNHidden, m.cfg.EmbeddingDim, x, m.scratch.up, layer); err != nil {
+		return err
+	}
+	ops.GeGLUInPlace(m.scratch.gate, m.scratch.up)
+
+	return m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate, out, layer)
 }
 
 func (m *Model) attentionKV(layer, seqLen int) (k, v []float32, attnSeq int) {

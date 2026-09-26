@@ -4,15 +4,21 @@ import (
 	"fmt"
 
 	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/gpu"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 // forwardBatch - true multi-token prefill (n_batch): один проход слоёв на chunk.
-// GPU residency для B>1 пока не используется (CPU-путь).
+// Matmul чанка считается на CPU (batched GEMM), K/V зеркалятся в GPU KV-cache, поэтому decode после prefill продолжает идти по GPU-пути (§4).
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
 	b := len(tokenIDs)
 	if b == 0 {
 		return fmt.Errorf("qwen3: пустой batch")
+	}
+
+	// host-буферы batch-пути: резидентный hidden с устройства больше не нужен
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return err
 	}
 
 	if b > m.nBatch {
@@ -98,6 +104,14 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 
 	pastLen := m.cache.Len()
 	m.cache.AppendN(layer, k, v, batch)
+
+	// §4: зеркалим K/V чанка в GPU KV-cache, иначе decode после batch-prefill увидит неполный кеш.
+	// Не получилось - GPU attention отключаем до ResetCache.
+	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
+		if err := m.gpu.KVCacheAppendN(layer, pastLen, k, v, batch); err != nil {
+			m.gpuKVStale = true
+		}
+	}
 
 	if err := ops.AttentionScoresBatchCausalInto(
 		attn, q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores,

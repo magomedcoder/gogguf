@@ -32,10 +32,17 @@ func runRun(args []string) error {
 	thinking := fs.Bool("thinking", false, "Qwen3: включить режим размышления (с --chat)")
 	interactive := fs.Bool("i", false, "интерактивный режим (REPL)")
 	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
-	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill на CPU (Qwen3)")
+	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill (Qwen3, работает и с -ngl)")
 	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
+	dev := fs.String("dev", "", "GPU для offload: \"1\" или \"0,1\" (multi-GPU split слоёв)")
+	tensorSplit := fs.String("tensor-split", "", "пропорции слоёв по устройствам с -dev 0,1, например 0.6,0.4")
 
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	devices, tsplit, err := gogguf.ParseGPUDevices(*dev, *tensorSplit)
+	if err != nil {
 		return err
 	}
 
@@ -48,14 +55,16 @@ func runRun(args []string) error {
 	}
 
 	engine, err := gogguf.Load(path, gogguf.LoadOptions{
-		NGL:    *ngl,
-		NBatch: *nBatch,
+		NGL:         *ngl,
+		NBatch:      *nBatch,
+		GPUDevices:  devices,
+		TensorSplit: tsplit,
 	})
 	if err != nil {
 		return err
 	}
 	if *ngl > 0 {
-		fmt.Fprintf(os.Stderr, "GPU offload: %d слоёв\n", *ngl)
+		fmt.Fprintf(os.Stderr, "GPU offload: %d слоёв на %s\n", *ngl, engine.GPUDescription())
 	}
 	if *nBatch > 1 {
 		fmt.Fprintf(os.Stderr, "n_batch: %d\n", *nBatch)

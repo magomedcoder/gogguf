@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/gpu"
 	"github.com/magomedcoder/gogguf/pkg/model"
 	"github.com/magomedcoder/gogguf/pkg/tokenizer"
 )
@@ -14,6 +15,7 @@ type Engine struct {
 	tok   *tokenizer.Tokenizer
 	meta  format.Metadata
 	opts  Options
+	gpu   gpu.Backend
 }
 
 // LoadMapped загружает модель через mmap (zero-copy веса)
@@ -35,7 +37,13 @@ func Load(path string, opts Options) (*Engine, error) {
 }
 
 func loadFromReader(r *format.Reader, opts Options) (*Engine, error) {
-	m, err := model.Load(r, opts.modelOpts())
+	// Backend открываем здесь, чтобы Engine знал устройство (имя, VRAM, план слоёв); model.Load вызовет Normalize повторно, но уже с готовым GPU
+	mopts := opts.modelOpts()
+	if err := mopts.Normalize(); err != nil {
+		return nil, err
+	}
+
+	m, err := model.Load(r, mopts)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +58,36 @@ func loadFromReader(r *format.Reader, opts Options) (*Engine, error) {
 		tok:   tok,
 		meta:  r.Metadata,
 		opts:  opts,
+		gpu:   mopts.GPU,
 	}, nil
+}
+
+// GPUBackend возвращает открытый GPU-backend (nil при -ngl 0 или CPU-сборке)
+func (e *Engine) GPUBackend() gpu.Backend {
+	if e == nil {
+		return nil
+	}
+
+	return e.gpu
+}
+
+// GPUDescription описывает устройство offload: имя GPU или план слоёв для multi-GPU.
+// Пустая строка - модель считается на CPU
+func (e *Engine) GPUDescription() string {
+	if e == nil || e.gpu == nil {
+		return ""
+	}
+
+	return gpu.Describe(e.gpu)
+}
+
+// VRAMInfo возвращает занятую/общую видеопамять backend'а (0, 0 без GPU)
+func (e *Engine) VRAMInfo() (used, total uint64, err error) {
+	if e == nil || e.gpu == nil {
+		return 0, 0, nil
+	}
+
+	return e.gpu.VRAMInfo()
 }
 
 func (e *Engine) LoadOptions() Options {
@@ -135,6 +172,7 @@ func (e *Engine) Close() error {
 	}
 	err := e.Model.Close()
 	e.Model = nil
+	e.gpu = nil
 
 	return err
 }

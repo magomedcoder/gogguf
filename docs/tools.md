@@ -33,20 +33,24 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 ./build/tools bench -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 32 --compare -c 2048 --runs 2 --warmup 1
 ```
 
-| Flag        | Default | Description                                          |
-|-------------|---------|------------------------------------------------------|
-| `-m`        | -       | path to `.gguf`                                      |
-| `-p`        | `Hello` | prompt                                               |
-| `-n`        | `128`   | decode token count                                   |
-| `-ngl`      | `0`     | GPU offload (CUDA); with `--compare`, 0 = all layers |
-| `-c`        | `0`     | max GPU KV length (0 = auto, up to 4096)             |
-| `--chat`    | `false` | chat template                                        |
-| `--runs`    | `1`     | runs to average                                      |
-| `--warmup`  | `1`     | warmup runs                                          |
-| `--json`    | `false` | JSON output                                          |
-| `--compare` | `false` | CPU (`ngl=0`) vs GPU (`-ngl`)                        |
+| Flag            | Default | Description                                             |
+|-----------------|---------|---------------------------------------------------------|
+| `-m`            | -       | path to `.gguf`                                         |
+| `-p`            | `Hello` | prompt                                                  |
+| `-n`            | `128`   | decode token count                                      |
+| `-ngl`          | `0`     | GPU offload (CUDA); with `--compare`, 0 = all layers    |
+| `-c`            | `0`     | max GPU KV length (0 = auto, up to 4096)                |
+| `-dev`          | empty   | GPU ordinal(s): `1` or `0,1` (layer split)              |
+| `-tensor-split` | empty   | layer proportions across `-dev` devices, e.g. `0.6,0.4` |
+| `--chat`        | `false` | chat template                                           |
+| `--runs`        | `1`     | runs to average                                         |
+| `--warmup`      | `1`     | warmup runs                                             |
+| `--json`        | `false` | JSON output                                             |
+| `--compare`     | `false` | CPU (`ngl=0`) vs GPU (`-ngl`)                           |
 
 `--compare` prints a prefill/decode tok/s table and whether GPU decode is faster than CPU.
+
+With `-ngl > 0` the report also includes the device and VRAM usage (`cuMemGetInfo`): `VRAM: 812 / 4096 MB` in human output, `vram_used_mb` / `vram_total_mb` with `--json`.
 
 ## `greedy`
 

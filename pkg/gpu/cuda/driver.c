@@ -30,6 +30,7 @@ static int load_driver(cuda_driver_t *drv, void **lib_out) {
 	drv->cuCtxDestroy = (PFN_cuCtxDestroy_v2)load_sym(lib, "cuCtxDestroy_v2");
 	drv->cuMemAlloc = (PFN_cuMemAlloc_v2)load_sym(lib, "cuMemAlloc_v2");
 	drv->cuMemFree = (PFN_cuMemFree_v2)load_sym(lib, "cuMemFree_v2");
+	drv->cuMemGetInfo = (PFN_cuMemGetInfo_v2)load_sym(lib, "cuMemGetInfo_v2");
 	drv->cuMemcpyHtoD = (PFN_cuMemcpyHtoD_v2)load_sym(lib, "cuMemcpyHtoD_v2");
 	drv->cuMemcpyDtoH = (PFN_cuMemcpyDtoH_v2)load_sym(lib, "cuMemcpyDtoH_v2");
 	drv->cuMemcpyDtoD = (PFN_cuMemcpyDtoD_v2)load_sym(lib, "cuMemcpyDtoD_v2");
@@ -70,7 +71,7 @@ static int load_driver(cuda_driver_t *drv, void **lib_out) {
 	return 0;
 }
 
-int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, char *name, size_t name_len, char *errbuf, size_t errbuf_len, int *cc_out) {
+int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int device, char *name, size_t name_len, char *errbuf, size_t errbuf_len, int *cc_out) {
 	void *lib = NULL;
 	memset(drv, 0, sizeof(*drv));
 
@@ -105,9 +106,23 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, char *nam
 		return -4;
 	}
 
-	CUdevice dev = 0;
-	if (drv->cuDeviceGet(&dev, 0) != CUDA_SUCCESS) {
+	// device - ordinal уже после фильтра CUDA_VISIBLE_DEVICES
+	if (device < 0 || device >= count) {
 		dlclose(lib);
+		if (errbuf && errbuf_len > 0) {
+			snprintf(errbuf, errbuf_len, "устройство %d недоступно: видимых GPU %d (проверьте -dev и CUDA_VISIBLE_DEVICES)", device, count);
+		}
+
+		return -8;
+	}
+
+	CUdevice dev = 0;
+	if (drv->cuDeviceGet(&dev, device) != CUDA_SUCCESS) {
+		dlclose(lib);
+		if (errbuf && errbuf_len > 0) {
+			snprintf(errbuf, errbuf_len, "cuDeviceGet(%d) failed", device);
+		}
+
 		return -5;
 	}
 
@@ -171,6 +186,34 @@ void gguf_cuda_shutdown(cuda_driver_t *drv, CUcontext ctx) {
 	}
 }
 
+static int gguf_cuda_set_context(cuda_driver_t *drv, CUcontext ctx);
+
+int gguf_cuda_mem_info(cuda_driver_t *drv, CUcontext ctx, size_t *free_out, size_t *total_out) {
+	if (!drv || !drv->cuMemGetInfo) {
+		return -1;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -2;
+	}
+
+	size_t free_bytes = 0;
+	size_t total_bytes = 0;
+	if (drv->cuMemGetInfo(&free_bytes, &total_bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	if (free_out) {
+		*free_out = free_bytes;
+	}
+
+	if (total_out) {
+		*total_out = total_bytes;
+	}
+
+	return 0;
+}
+
 const char *gguf_cuda_last_error(cuda_driver_t *drv, CUresult err) {
 	static const char *unknown = "unknown CUDA error";
 	const char *msg = unknown;
@@ -195,10 +238,10 @@ static int gguf_cuda_set_context(cuda_driver_t *drv, CUcontext ctx) {
 	return 0;
 }
 
-// Значения CUjit_option из cuda.h
+// Значения CUjit_option из cuda.h (1/2 - THREADS_PER_BLOCK/WALL_TIME, не логи)
 enum {
-	GGUF_JIT_ERROR_LOG_BUFFER = 1,
-	GGUF_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 2,
+	GGUF_JIT_ERROR_LOG_BUFFER = 5,
+	GGUF_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6,
 };
 
 int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
@@ -762,6 +805,35 @@ int gguf_cuda_kv_append(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cach
 	return 0;
 }
 
+// gguf_cuda_kv_append_n: n токенов K/V одним HtoD на буфер (batch prefill)
+int gguf_cuda_kv_append_n(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int pos, const float *k, const float *v, int n) {
+	if (!cache || !cache->layers || layer < 0 || layer >= cache->num_layers || pos < 0 || n <= 0) {
+		return -1;
+	}
+
+	gguf_kv_layer_t *ly = &cache->layers[layer];
+	if (pos + n > ly->max_seq) {
+		return -2;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	size_t off = (size_t)pos * (size_t)ly->kv_dim * sizeof(float);
+	size_t bytes = (size_t)n * (size_t)ly->kv_dim * sizeof(float);
+
+	if (drv->cuMemcpyHtoD(ly->d_k + (CUdeviceptr)off, k, bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	if (drv->cuMemcpyHtoD(ly->d_v + (CUdeviceptr)off, v, bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	return 0;
+}
+
 int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, gguf_kv_cache_t *cache, gguf_attn_pool_t *pool, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim) {
 	if (!cache || !cache->layers || layer < 0 || layer >= cache->num_layers) {
 		return -1;
@@ -1123,6 +1195,9 @@ static int gguf_cuda_matmul_pool_ensure_resid(cuda_driver_t *drv, gguf_matmul_po
 		}
 		pool->d_resid = d_resid;
 		pool->resid_cap = n;
+		// Буфер переехал: старый резидентный hidden больше не валиден
+		pool->resid_on_device = 0;
+		pool->resid_len = 0;
 	}
 
 	pool->h_resid = h_resid;
@@ -1189,9 +1264,9 @@ static void gguf_cuda_capture_abort(cuda_driver_t *drv, gguf_matmul_pool_t *pool
 	}
 }
 
-static gguf_layer_graph_entry_t *gguf_cuda_layer_find_graph(gguf_matmul_pool_t *pool, int kind,	CUdeviceptr d_wo, CUdeviceptr d_ffn_norm, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, int embd, int attn_dim, int ffn, int skip_attn, int skip_vec) {
+static gguf_layer_graph_entry_t *gguf_cuda_layer_find_graph(gguf_matmul_pool_t *pool, int kind,	CUdeviceptr d_wo, CUdeviceptr d_ffn_norm, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, int embd, int attn_dim, int ffn, int skip_attn, int skip_vec, int resid_dev, int keep_resid) {
 	for (gguf_layer_graph_entry_t *e = pool->layer_graphs; e; e = e->next) {
-		if (e->kind == kind && e->d_wo == d_wo && e->d_ffn_norm == d_ffn_norm && e->d_gate_w == d_gate_w && e->d_up_w == d_up_w && e->d_down_w == d_down_w && e->embd == embd && e->attn_dim == attn_dim && e->ffn == ffn && e->skip_attn == skip_attn && e->skip_vec == skip_vec) {
+		if (e->kind == kind && e->d_wo == d_wo && e->d_ffn_norm == d_ffn_norm && e->d_gate_w == d_gate_w && e->d_up_w == d_up_w && e->d_down_w == d_down_w && e->embd == embd && e->attn_dim == attn_dim && e->ffn == ffn && e->skip_attn == skip_attn && e->skip_vec == skip_vec && e->resid_dev == resid_dev && e->keep_resid == keep_resid) {
 			return e;
 		}
 	}
@@ -1199,9 +1274,9 @@ static gguf_layer_graph_entry_t *gguf_cuda_layer_find_graph(gguf_matmul_pool_t *
 	return NULL;
 }
 
-static gguf_layer_graph_entry_t *gguf_cuda_layer_find_qkv_graph(gguf_matmul_pool_t *pool, CUdeviceptr d_wq, CUdeviceptr d_wk, CUdeviceptr d_wv, CUdeviceptr d_q_norm, CUdeviceptr d_k_norm, int embd, int n_heads, int n_kv_heads, int head_dim) {
+static gguf_layer_graph_entry_t *gguf_cuda_layer_find_qkv_graph(gguf_matmul_pool_t *pool, CUdeviceptr d_wq, CUdeviceptr d_wk, CUdeviceptr d_wv, CUdeviceptr d_q_norm, CUdeviceptr d_k_norm, CUdeviceptr d_attn_norm, int embd, int n_heads, int n_kv_heads, int head_dim, int resid_dev, int rope_mode) {
 	for (gguf_layer_graph_entry_t *e = pool->layer_graphs; e; e = e->next) {
-		if (e->kind == GGUF_LAYER_GRAPH_QKV && e->d_wq == d_wq && e->d_wk == d_wk && e->d_wv == d_wv && e->d_q_norm == d_q_norm && e->d_k_norm == d_k_norm && e->embd == embd && e->n_heads == n_heads && e->n_kv_heads == n_kv_heads && e->head_dim == head_dim) {
+		if (e->kind == GGUF_LAYER_GRAPH_QKV && e->d_wq == d_wq && e->d_wk == d_wk && e->d_wv == d_wv && e->d_q_norm == d_q_norm && e->d_k_norm == d_k_norm && e->d_attn_norm == d_attn_norm && e->embd == embd && e->n_heads == n_heads && e->n_kv_heads == n_kv_heads && e->head_dim == head_dim && e->resid_dev == resid_dev && e->rope_mode == rope_mode) {
 			return e;
 		}
 	}
@@ -1268,7 +1343,7 @@ static int gguf_cuda_ffn_capture(cuda_driver_t *drv, CUfunction fn_matmul, CUfun
 	return 0;
 }
 
-static int gguf_cuda_residual_capture(cuda_driver_t *drv, CUfunction fn_matmul, CUfunction fn_rmsnorm, CUfunction fn_swiglu, CUfunction fn_add, gguf_matmul_pool_t *pool, CUdeviceptr d_wo, CUdeviceptr d_ffn_norm, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, int embd, int attn_dim, int ffn, float eps, int skip_attn, CUgraphExec *exec_out) {
+static int gguf_cuda_residual_capture(cuda_driver_t *drv, CUfunction fn_matmul, CUfunction fn_rmsnorm, CUfunction fn_swiglu, CUfunction fn_add, gguf_matmul_pool_t *pool, CUdeviceptr d_wo, CUdeviceptr d_ffn_norm, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, int embd, int attn_dim, int ffn, float eps, int skip_attn, int resid_dev, int keep_resid, CUgraphExec *exec_out) {
 	CUdeviceptr d_resid = pool->d_resid;
 	CUdeviceptr d_attn = pool->d_vec;
 	CUdeviceptr d_tmp = pool->d_out;
@@ -1280,9 +1355,12 @@ static int gguf_cuda_residual_capture(cuda_driver_t *drv, CUfunction fn_matmul, 
 		return -1;
 	}
 
-	if (drv->cuMemcpyHtoDAsync(d_resid, pool->h_resid, embd_bytes, pool->stream) != CUDA_SUCCESS) {
-		gguf_cuda_capture_abort(drv, pool);
-		return -4;
+	// resid_dev: x уже в d_resid с прошлого слоя - HtoD не нужен
+	if (!resid_dev) {
+		if (drv->cuMemcpyHtoDAsync(d_resid, pool->h_resid, embd_bytes, pool->stream) != CUDA_SUCCESS) {
+			gguf_cuda_capture_abort(drv, pool);
+			return -4;
+		}
 	}
 
 	if (!skip_attn) {
@@ -1313,9 +1391,12 @@ static int gguf_cuda_residual_capture(cuda_driver_t *drv, CUfunction fn_matmul, 
 		return -4;
 	}
 
-	if (drv->cuMemcpyDtoHAsync(pool->h_out, d_resid, embd_bytes, pool->stream) != CUDA_SUCCESS) {
-		gguf_cuda_capture_abort(drv, pool);
-		return -4;
+	// keep_resid: residual остаётся на устройстве для следующего слоя
+	if (!keep_resid) {
+		if (drv->cuMemcpyDtoHAsync(pool->h_out, d_resid, embd_bytes, pool->stream) != CUDA_SUCCESS) {
+			gguf_cuda_capture_abort(drv, pool);
+			return -4;
+		}
 	}
 
 	CUgraph graph = NULL;
@@ -1363,7 +1444,7 @@ int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn
 	}
 
 	if (drv->has_graphs && pool->stream) {
-		gguf_layer_graph_entry_t *entry = gguf_cuda_layer_find_graph(pool, GGUF_LAYER_GRAPH_FFN, 0, 0, d_gate_w, d_up_w, d_down_w, embd, 0, ffn, 0, same_vec);
+		gguf_layer_graph_entry_t *entry = gguf_cuda_layer_find_graph(pool, GGUF_LAYER_GRAPH_FFN, 0, 0, d_gate_w, d_up_w, d_down_w, embd, 0, ffn, 0, same_vec, 0, 0);
 		if (!entry) {
 			CUgraphExec exec = NULL;
 			if (gguf_cuda_ffn_capture(drv, fn_matmul, fn_swiglu, pool, d_gate_w, d_up_w, d_down_w, embd, ffn, same_vec, &exec) == 0) {
@@ -1454,8 +1535,24 @@ int gguf_cuda_attn_ffn_residual_device(cuda_driver_t *drv, CUcontext ctx,
 	gguf_matmul_pool_t *pool,
 	CUdeviceptr d_wo, CUdeviceptr d_ffn_norm, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w,
 	const float *x, const float *attn, float *x_out,
-	int embd, int attn_dim, int ffn, float eps) {
-	if (!pool || !fn_matmul || !fn_rmsnorm || !fn_swiglu || !fn_add || !x || !x_out) {
+	int embd, int attn_dim, int ffn, float eps, int *resid_dirty) {
+	if (resid_dirty) {
+		*resid_dirty = 0;
+	}
+
+	if (!pool || !fn_matmul || !fn_rmsnorm || !fn_swiglu || !fn_add) {
+		return -20;
+	}
+
+	int resid_dev = pool->resid_on_device && pool->resid_len == embd;
+	int keep_resid = pool->keep_resid_device;
+
+	// x нужен только когда residual приходит с host; x_out - только когда его возвращаем
+	if (!resid_dev && !x) {
+		return -20;
+	}
+
+	if (!keep_resid && !x_out) {
 		return -20;
 	}
 
@@ -1507,16 +1604,19 @@ int gguf_cuda_attn_ffn_residual_device(cuda_driver_t *drv, CUcontext ctx,
 	int skip_attn = pool->skip_attn_htod;
 	pool->skip_attn_htod = 0;
 
-	memcpy(pool->h_resid, x, embd_bytes);
+	if (!resid_dev) {
+		memcpy(pool->h_resid, x, embd_bytes);
+	}
+
 	if (!skip_attn) {
 		memcpy(pool->h_vec, attn, attn_bytes);
 	}
 
 	if (drv->has_graphs && stream) {
-		gguf_layer_graph_entry_t *entry = gguf_cuda_layer_find_graph(pool, GGUF_LAYER_GRAPH_RESIDUAL, d_wo, d_ffn_norm, d_gate_w, d_up_w, d_down_w, embd, attn_dim, ffn, skip_attn, 0);
+		gguf_layer_graph_entry_t *entry = gguf_cuda_layer_find_graph(pool, GGUF_LAYER_GRAPH_RESIDUAL, d_wo, d_ffn_norm, d_gate_w, d_up_w, d_down_w, embd, attn_dim, ffn, skip_attn, 0, resid_dev, keep_resid);
 		if (!entry) {
 			CUgraphExec exec = NULL;
-			if (gguf_cuda_residual_capture(drv, fn_matmul, fn_rmsnorm, fn_swiglu, fn_add, pool, d_wo, d_ffn_norm, d_gate_w, d_up_w, d_down_w, embd, attn_dim, ffn, eps, skip_attn, &exec) == 0) {
+			if (gguf_cuda_residual_capture(drv, fn_matmul, fn_rmsnorm, fn_swiglu, fn_add, pool, d_wo, d_ffn_norm, d_gate_w, d_up_w, d_down_w, embd, attn_dim, ffn, eps, skip_attn, resid_dev, keep_resid, &exec) == 0) {
 				entry = (gguf_layer_graph_entry_t *)calloc(1, sizeof(*entry));
 				if (!entry) {
 					drv->cuGraphExecDestroy(exec);
@@ -1531,6 +1631,8 @@ int gguf_cuda_attn_ffn_residual_device(cuda_driver_t *drv, CUcontext ctx,
 					entry->attn_dim = attn_dim;
 					entry->ffn = ffn;
 					entry->skip_attn = skip_attn;
+					entry->resid_dev = resid_dev;
+					entry->keep_resid = keep_resid;
 					entry->exec = exec;
 					entry->next = pool->layer_graphs;
 					pool->layer_graphs = entry;
@@ -1543,11 +1645,19 @@ int gguf_cuda_attn_ffn_residual_device(cuda_driver_t *drv, CUcontext ctx,
 				goto residual_fallback;
 			}
 
+			// Граф уже изменил d_resid: откат на host-путь невозможен
+			if (resid_dirty) {
+				*resid_dirty = 1;
+			}
+
 			if (drv->cuStreamSynchronize(stream) != CUDA_SUCCESS) {
 				return -5;
 			}
 
-			memcpy(x_out, pool->h_out, embd_bytes);
+			if (!keep_resid) {
+				memcpy(x_out, pool->h_out, embd_bytes);
+			}
+
 			pool->skip_vec_htod = 0;
 			pool->skip_attn_htod = 0;
 			return 0;
@@ -1556,8 +1666,10 @@ int gguf_cuda_attn_ffn_residual_device(cuda_driver_t *drv, CUcontext ctx,
 
 residual_fallback:
 	{
-		if (drv->cuMemcpyHtoD(pool->d_resid, pool->h_resid, embd_bytes) != CUDA_SUCCESS) {
-			return -3;
+		if (!resid_dev) {
+			if (drv->cuMemcpyHtoD(pool->d_resid, pool->h_resid, embd_bytes) != CUDA_SUCCESS) {
+				return -3;
+			}
 		}
 
 		if (!skip_attn) {
@@ -1573,6 +1685,11 @@ residual_fallback:
 
 		if (gguf_cuda_launch_matmul(drv, fn_matmul, d_wo, d_attn, d_tmp, embd, attn_dim, stream) != 0) {
 			return -3;
+		}
+
+		// Первая мутация d_resid
+		if (resid_dirty) {
+			*resid_dirty = 1;
 		}
 
 		if (gguf_cuda_launch_add(drv, fn_add, d_resid, d_tmp, embd, stream) != 0) {
@@ -1615,8 +1732,10 @@ residual_fallback:
 			}
 		}
 
-		if (drv->cuMemcpyDtoH(x_out, d_resid, embd_bytes) != CUDA_SUCCESS) {
-			return -3;
+		if (!keep_resid) {
+			if (drv->cuMemcpyDtoH(x_out, d_resid, embd_bytes) != CUDA_SUCCESS) {
+				return -3;
+			}
 		}
 
 		pool->skip_vec_htod = 0;
@@ -1624,6 +1743,181 @@ residual_fallback:
 
 		return 0;
 	}
+}
+
+// gguf_cuda_hidden_upload: один HtoD hidden state в d_resid на токен
+int gguf_cuda_hidden_upload(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, const float *x, int n) {
+	if (!drv || !pool || !x || n <= 0) {
+		return -20;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	int rc = gguf_cuda_matmul_pool_ensure_resid(drv, pool, n);
+	if (rc != 0) {
+		return rc;
+	}
+
+	size_t bytes = (size_t)n * sizeof(float);
+	memcpy(pool->h_resid, x, bytes);
+	if (drv->cuMemcpyHtoD(pool->d_resid, pool->h_resid, bytes) != CUDA_SUCCESS) {
+		pool->resid_on_device = 0;
+		pool->resid_len = 0;
+		return -3;
+	}
+
+	pool->resid_on_device = 1;
+	pool->resid_len = n;
+
+	return 0;
+}
+
+// gguf_cuda_hidden_download: DtoH резидентного hidden state (откат на host-путь / отладка)
+int gguf_cuda_hidden_download(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, float *dst, int n) {
+	if (!drv || !pool || !dst || n <= 0) {
+		return -20;
+	}
+
+	if (!pool->resid_on_device || pool->resid_len != n || !pool->d_resid) {
+		return -21;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (pool->stream && drv->cuStreamSynchronize) {
+		if (drv->cuStreamSynchronize(pool->stream) != CUDA_SUCCESS) {
+			return -5;
+		}
+	}
+
+	size_t bytes = (size_t)n * sizeof(float);
+	if (drv->cuMemcpyDtoH(dst, pool->d_resid, bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	return 0;
+}
+
+static int gguf_cuda_logits_capture(cuda_driver_t *drv, CUfunction fn_matmul, CUfunction fn_rmsnorm, gguf_matmul_pool_t *pool, CUdeviceptr d_out_norm, CUdeviceptr d_head, int vocab, int embd, float eps, CUgraphExec *exec_out) {
+	size_t vocab_bytes = (size_t)vocab * sizeof(float);
+
+	if (drv->cuStreamBeginCapture(pool->stream, 0) != CUDA_SUCCESS) {
+		return -1;
+	}
+
+	if (gguf_cuda_launch_rmsnorm(drv, fn_rmsnorm, pool->d_resid, d_out_norm, pool->d_vec, embd, eps, pool->stream) != 0 || gguf_cuda_launch_matmul(drv, fn_matmul, d_head, pool->d_vec, pool->d_out, vocab, embd, pool->stream) != 0) {
+		gguf_cuda_capture_abort(drv, pool);
+		return -4;
+	}
+
+	if (drv->cuMemcpyDtoHAsync(pool->h_out, pool->d_out, vocab_bytes, pool->stream) != CUDA_SUCCESS) {
+		gguf_cuda_capture_abort(drv, pool);
+		return -4;
+	}
+
+	CUgraph graph = NULL;
+	if (drv->cuStreamEndCapture(pool->stream, &graph) != CUDA_SUCCESS || !graph) {
+		return -2;
+	}
+
+	CUgraphExec exec = NULL;
+	if (gguf_cuda_graph_instantiate(drv, graph, &exec) != 0 || !exec) {
+		drv->cuGraphDestroy(graph);
+		return -3;
+	}
+
+	drv->cuGraphDestroy(graph);
+	*exec_out = exec;
+
+	return 0;
+}
+
+// gguf_cuda_logits_from_device: out_norm RMSNorm + lm_head на резидентном hidden; DtoH только logits
+int gguf_cuda_logits_from_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_rmsnorm, gguf_matmul_pool_t *pool, CUdeviceptr d_out_norm, CUdeviceptr d_head, float *logits, int vocab, int embd, float eps) {
+	if (!drv || !pool || !fn_matmul || !fn_rmsnorm || !logits || vocab <= 0 || embd <= 0) {
+		return -20;
+	}
+
+	if (!pool->resid_on_device || pool->resid_len != embd) {
+		return -21;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	int rc = gguf_cuda_matmul_pool_ensure(drv, pool, vocab, embd);
+	if (rc != 0) {
+		return rc;
+	}
+
+	// pool_ensure мог перевыделить d_resid-независимые буферы; residency проверяем снова
+	if (!pool->resid_on_device || pool->resid_len != embd) {
+		return -21;
+	}
+
+	pool->skip_vec_htod = 0;
+	size_t vocab_bytes = (size_t)vocab * sizeof(float);
+	CUstream stream = pool->stream;
+
+	if (drv->has_graphs && stream) {
+		gguf_layer_graph_entry_t *entry = gguf_cuda_layer_find_graph(pool, GGUF_LAYER_GRAPH_LOGITS, d_head, d_out_norm, 0, 0, 0, embd, vocab, 0, 0, 0, 1, 1);
+		if (!entry) {
+			CUgraphExec exec = NULL;
+			if (gguf_cuda_logits_capture(drv, fn_matmul, fn_rmsnorm, pool, d_out_norm, d_head, vocab, embd, eps, &exec) == 0) {
+				entry = (gguf_layer_graph_entry_t *)calloc(1, sizeof(*entry));
+				if (!entry) {
+					drv->cuGraphExecDestroy(exec);
+				} else {
+					entry->kind = GGUF_LAYER_GRAPH_LOGITS;
+					entry->d_wo = d_head;
+					entry->d_ffn_norm = d_out_norm;
+					entry->embd = embd;
+					entry->attn_dim = vocab;
+					entry->resid_dev = 1;
+					entry->keep_resid = 1;
+					entry->exec = exec;
+					entry->next = pool->layer_graphs;
+					pool->layer_graphs = entry;
+				}
+			}
+		}
+
+		if (entry && entry->exec) {
+			if (drv->cuGraphLaunch(entry->exec, stream) == CUDA_SUCCESS) {
+				if (drv->cuStreamSynchronize(stream) != CUDA_SUCCESS) {
+					return -5;
+				}
+
+				memcpy(logits, pool->h_out, vocab_bytes);
+				return 0;
+			}
+		}
+	}
+
+	if (gguf_cuda_launch_rmsnorm(drv, fn_rmsnorm, pool->d_resid, d_out_norm, pool->d_vec, embd, eps, stream) != 0) {
+		return -3;
+	}
+
+	if (gguf_cuda_launch_matmul(drv, fn_matmul, d_head, pool->d_vec, pool->d_out, vocab, embd, stream) != 0) {
+		return -3;
+	}
+
+	if (stream && drv->cuStreamSynchronize) {
+		if (drv->cuStreamSynchronize(stream) != CUDA_SUCCESS) {
+			return -5;
+		}
+	}
+
+	if (drv->cuMemcpyDtoH(logits, pool->d_out, vocab_bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	return 0;
 }
 
 static int gguf_cuda_launch_rope(cuda_driver_t *drv, CUfunction fn, CUdeviceptr d_v, CUdeviceptr d_cos, CUdeviceptr d_sin, int nheads, int head_dim, int half, CUstream stream) {
@@ -1669,7 +1963,7 @@ static int gguf_cuda_kv_append_device(cuda_driver_t *drv, gguf_kv_cache_t *cache
 	return 0;
 }
 
-static int gguf_cuda_qkv_capture(cuda_driver_t *drv, CUfunction fn_matmul, CUfunction fn_rmsnorm, CUfunction fn_rope, gguf_matmul_pool_t *mpool, gguf_attn_pool_t *apool, CUdeviceptr d_wq, CUdeviceptr d_wk, CUdeviceptr d_wv, CUdeviceptr d_q_norm, CUdeviceptr d_k_norm, int embd, int n_heads, int n_kv_heads, int head_dim, float eps, CUgraphExec *exec_out) {
+static int gguf_cuda_qkv_capture(cuda_driver_t *drv, CUfunction fn_matmul, CUfunction fn_rmsnorm, CUfunction fn_rope, gguf_matmul_pool_t *mpool, gguf_attn_pool_t *apool, CUdeviceptr d_wq, CUdeviceptr d_wk, CUdeviceptr d_wv, CUdeviceptr d_q_norm, CUdeviceptr d_k_norm, CUdeviceptr d_attn_norm, int embd, int n_heads, int n_kv_heads, int head_dim, float eps, int resid_dev, CUgraphExec *exec_out) {
 	int q_dim = n_heads * head_dim;
 	int kv_dim = n_kv_heads * head_dim;
 	int half = head_dim / 2;
@@ -1681,7 +1975,13 @@ static int gguf_cuda_qkv_capture(cuda_driver_t *drv, CUfunction fn_matmul, CUfun
 		return -1;
 	}
 
-	if (drv->cuMemcpyHtoDAsync(mpool->d_vec, mpool->h_vec, embd_bytes, stream) != CUDA_SUCCESS) {
+	if (resid_dev) {
+		// h = RMSNorm(d_resid, attn_norm) на устройстве: HtoD hidden не нужен
+		if (gguf_cuda_launch_rmsnorm(drv, fn_rmsnorm, mpool->d_resid, d_attn_norm, mpool->d_vec, embd, eps, stream) != 0) {
+			gguf_cuda_capture_abort(drv, mpool);
+			return -4;
+		}
+	} else if (drv->cuMemcpyHtoDAsync(mpool->d_vec, mpool->h_vec, embd_bytes, stream) != CUDA_SUCCESS) {
 		gguf_cuda_capture_abort(drv, mpool);
 		return -4;
 	}
@@ -1744,12 +2044,18 @@ int gguf_cuda_qkv_rope_attn_device(
 	CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax,
 	gguf_matmul_pool_t *mpool, gguf_attn_pool_t *apool, gguf_kv_cache_t *kv,
 	CUdeviceptr d_wq, CUdeviceptr d_wk, CUdeviceptr d_wv,
-	CUdeviceptr d_q_norm, CUdeviceptr d_k_norm,
+	CUdeviceptr d_q_norm, CUdeviceptr d_k_norm, CUdeviceptr d_attn_norm,
 	const float *h, const float *cos_tbl, const float *sin_tbl,
 	float *attn_out, float *k_out, float *v_out,
 	int embd, int n_heads, int n_kv_heads, int head_dim,
-	int layer, int kv_pos, int seq_len, float eps) {
-	if (!mpool || !apool || !kv || !fn_matmul || !fn_rope || !fn_qk || !fn_v || !h || !cos_tbl || !sin_tbl || !attn_out || !k_out || !v_out) {
+	int layer, int kv_pos, int seq_len, int rope_mode, float eps) {
+	if (!mpool || !apool || !kv || !fn_matmul || !fn_rope || !fn_qk || !fn_v || !cos_tbl || !sin_tbl || !attn_out || !k_out || !v_out) {
+		return -20;
+	}
+
+	// resid_dev: hidden резидентен, h нормализуется на GPU из d_resid
+	int resid_dev = mpool->resid_on_device && mpool->resid_len == embd && d_attn_norm != 0 && fn_rmsnorm;
+	if (!resid_dev && !h) {
 		return -20;
 	}
 
@@ -1781,7 +2087,13 @@ int gguf_cuda_qkv_rope_attn_device(
 		need_rows = kv_dim;
 	}
 
-	int rc = gguf_cuda_matmul_pool_ensure(drv, mpool, need_rows, embd);
+	// d_vec держит и вход RMSNorm (embd), и attn-выход для WO (q_dim): при GQA q_dim > embd, поэтому берём максимум
+	int need_cols = embd;
+	if (q_dim > need_cols) {
+		need_cols = q_dim;
+	}
+
+	int rc = gguf_cuda_matmul_pool_ensure(drv, mpool, need_rows, need_cols);
 	if (rc != 0) {
 		return rc;
 	}
@@ -1792,16 +2104,19 @@ int gguf_cuda_qkv_rope_attn_device(
 	size_t kv_bytes = (size_t)kv_dim * sizeof(float);
 	size_t rope_bytes = (size_t)half * sizeof(float);
 
-	memcpy(mpool->h_vec, h, embd_bytes);
+	if (!resid_dev) {
+		memcpy(mpool->h_vec, h, embd_bytes);
+	}
+
 	memcpy(apool->h_cos, cos_tbl, rope_bytes);
 	memcpy(apool->h_sin, sin_tbl, rope_bytes);
 
 	int used_graph = 0;
 	if (drv->has_graphs && stream) {
-		gguf_layer_graph_entry_t *entry = gguf_cuda_layer_find_qkv_graph(mpool, d_wq, d_wk, d_wv, d_q_norm, d_k_norm, embd, n_heads, n_kv_heads, head_dim);
+		gguf_layer_graph_entry_t *entry = gguf_cuda_layer_find_qkv_graph(mpool, d_wq, d_wk, d_wv, d_q_norm, d_k_norm, d_attn_norm, embd, n_heads, n_kv_heads, head_dim, resid_dev, rope_mode);
 		if (!entry) {
 			CUgraphExec exec = NULL;
-			if (gguf_cuda_qkv_capture(drv, fn_matmul, fn_rmsnorm, fn_rope, mpool, apool, d_wq, d_wk, d_wv, d_q_norm, d_k_norm, embd, n_heads, n_kv_heads, head_dim, eps, &exec) == 0) {
+			if (gguf_cuda_qkv_capture(drv, fn_matmul, fn_rmsnorm, fn_rope, mpool, apool, d_wq, d_wk, d_wv, d_q_norm, d_k_norm, d_attn_norm, embd, n_heads, n_kv_heads, head_dim, eps, resid_dev, &exec) == 0) {
 				entry = (gguf_layer_graph_entry_t *)calloc(1, sizeof(*entry));
 				if (!entry) {
 					drv->cuGraphExecDestroy(exec);
@@ -1812,10 +2127,13 @@ int gguf_cuda_qkv_rope_attn_device(
 					entry->d_wv = d_wv;
 					entry->d_q_norm = d_q_norm;
 					entry->d_k_norm = d_k_norm;
+					entry->d_attn_norm = d_attn_norm;
 					entry->embd = embd;
 					entry->n_heads = n_heads;
 					entry->n_kv_heads = n_kv_heads;
 					entry->head_dim = head_dim;
+					entry->resid_dev = resid_dev;
+					entry->rope_mode = rope_mode;
 					entry->exec = exec;
 					entry->next = mpool->layer_graphs;
 					mpool->layer_graphs = entry;
@@ -1831,7 +2149,11 @@ int gguf_cuda_qkv_rope_attn_device(
 	}
 
 	if (!used_graph) {
-		if (drv->cuMemcpyHtoD(mpool->d_vec, mpool->h_vec, embd_bytes) != CUDA_SUCCESS) {
+		if (resid_dev) {
+			if (gguf_cuda_launch_rmsnorm(drv, fn_rmsnorm, mpool->d_resid, d_attn_norm, mpool->d_vec, embd, eps, stream) != 0) {
+				return -3;
+			}
+		} else if (drv->cuMemcpyHtoD(mpool->d_vec, mpool->h_vec, embd_bytes) != CUDA_SUCCESS) {
 			return -3;
 		}
 

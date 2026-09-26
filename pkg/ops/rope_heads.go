@@ -2,6 +2,27 @@ package ops
 
 const maxRoPEPairs = 128
 
+// RoPEMode - раскладка пар RoPE в голове
+type RoPEMode int
+
+const (
+	// RoPENeoX - пары (i, i+head_dim/2): Qwen / NeoX / Gemma
+	RoPENeoX RoPEMode = iota
+
+	// RoPENorm - пары соседних (2i, 2i+1): Llama
+	RoPENorm
+)
+
+// ApplyRoPEHeadsMode применяет RoPE выбранного режима
+func ApplyRoPEHeadsMode(mode RoPEMode, v []float32, nHeads, headDim, pos int, freqBase float32) {
+	if mode == RoPENorm {
+		ApplyRoPEHeadsNorm(v, nHeads, headDim, pos, freqBase)
+		return
+	}
+
+	ApplyRoPEHeads(v, nHeads, headDim, pos, freqBase)
+}
+
 // MaxRoPEPairs максимальный headDim/2 для batched RoPE на CPU/GPU
 func MaxRoPEPairs() int {
 	return maxRoPEPairs

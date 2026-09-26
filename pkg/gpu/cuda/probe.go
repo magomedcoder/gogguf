@@ -56,7 +56,7 @@ func ProbeLoadPTX(ptx string) error {
 	var nameBuf [256]C.char
 	var initErr [512]C.char
 	var cc C.int
-	if rc := C.gguf_cuda_init(&drv, &lib, &ctx, &nameBuf[0], C.size_t(len(nameBuf)), &initErr[0], C.size_t(len(initErr)), &cc); rc != 0 {
+	if rc := C.gguf_cuda_init(&drv, &lib, &ctx, 0, &nameBuf[0], C.size_t(len(nameBuf)), &initErr[0], C.size_t(len(initErr)), &cc); rc != 0 {
 		return fmt.Errorf("init: %s", C.GoString(&initErr[0]))
 	}
 	defer C.gguf_cuda_shutdown(&drv, ctx)

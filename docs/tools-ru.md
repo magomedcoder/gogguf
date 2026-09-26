@@ -33,20 +33,24 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 ./build/tools bench -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 32 --compare -c 2048 --runs 2 --warmup 1
 ```
 
-| Флаг        | По умолчанию | Описание                                         |
-|-------------|--------------|--------------------------------------------------|
-| `-m`        | -            | путь к `.gguf`                                   |
-| `-p`        | `Привет`     | промпт                                           |
-| `-n`        | `128`        | число decode-токенов                             |
-| `-ngl`      | `0`          | GPU offload (CUDA); при `--compare` 0 = все слои |
-| `-c`        | `0`          | макс. длина GPU KV (0 = авто, до 4096)           |
-| `--chat`    | `false`      | chat template                                    |
-| `--runs`    | `1`          | прогонов для усреднения                          |
-| `--warmup`  | `1`          | прогревочных прогонов                            |
-| `--json`    | `false`      | вывод в JSON                                     |
-| `--compare` | `false`      | CPU (`ngl=0`) vs GPU (`-ngl`)                    |
+| Флаг            | По умолчанию | Описание                                         |
+|-----------------|--------------|--------------------------------------------------|
+| `-m`            | -            | путь к `.gguf`                                   |
+| `-p`            | `Привет`     | промпт                                           |
+| `-n`            | `128`        | число decode-токенов                             |
+| `-ngl`          | `0`          | GPU offload (CUDA); при `--compare` 0 = все слои |
+| `-c`            | `0`          | макс. длина GPU KV (0 = авто, до 4096)           |
+| `-dev`          | пусто        | GPU для offload: `1` или `0,1` (split слоёв)     |
+| `-tensor-split` | пусто        | пропорции слоёв по устройствам `-dev`            |
+| `--chat`        | `false`      | chat template                                    |
+| `--runs`        | `1`          | прогонов для усреднения                          |
+| `--warmup`      | `1`          | прогревочных прогонов                            |
+| `--json`        | `false`      | вывод в JSON                                     |
+| `--compare`     | `false`      | CPU (`ngl=0`) vs GPU (`-ngl`)                    |
 
 `--compare` печатает таблицу prefill/decode tok/s и флаг `GPU decode быстрее CPU`.
+
+При `-ngl > 0` в отчёт попадает устройство и занятая видеопамять (`cuMemGetInfo`): `VRAM: 812 / 4096 MB` в человекочитаемом выводе, `vram_used_mb` / `vram_total_mb` при `--json`.
 
 ## `greedy`
 

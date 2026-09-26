@@ -1,0 +1,37 @@
+package gpu
+
+import (
+	"testing"
+
+	"github.com/magomedcoder/gogguf/pkg/gpu/metal"
+)
+
+// Metal-заглушка обязана реализовывать весь Backend, чтобы её можно было подставить вместо CUDA, когда появятся kernels
+var _ Backend = (*metal.Backend)(nil)
+
+func TestMetalScaffoldCompute(t *testing.T) {
+	var b metal.Backend
+	if b.Name() == "" {
+		t.Fatal("Name() пустой")
+	}
+
+	if _, _, err := b.VRAMInfo(); err != nil {
+		t.Fatalf("VRAMInfo: %v", err)
+	}
+
+	if b.HiddenResident() {
+		t.Fatal("HiddenResident() = true у заглушки")
+	}
+
+	if _, err := b.MatMulVec(nil, 1, 1, nil); err != metal.ErrUnavailable {
+		t.Fatalf("MatMulVec = %v, ожидали ErrUnavailable", err)
+	}
+
+	if err := b.KVCacheInit(1, 1, 1, 1, 1); err != metal.ErrUnavailable {
+		t.Fatalf("KVCacheInit = %v, ожидали ErrUnavailable", err)
+	}
+
+	if err := b.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}

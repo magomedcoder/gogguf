@@ -2,7 +2,8 @@
 
 [Russian version](models-ru.md)
 
-GoGGUF can read any GGUF v2/v3 file (`gogguf info`, `gogguf inspect`, mmap), but **full inference** (forward pass + generation) is implemented only for specific architectures - selected by `general.architecture` in GGUF metadata.
+GoGGUF can read any GGUF v2/v3 file (`gogguf info`, `gogguf inspect`, mmap), but **full inference** (forward pass +
+generation) is implemented only for specific architectures - selected by `general.architecture` in GGUF metadata.
 
 ## Supported today (end-to-end inference)
 
@@ -18,7 +19,8 @@ GoGGUF can read any GGUF v2/v3 file (`gogguf info`, `gogguf inspect`, mmap), but
 | **DeepSeek**  | `deepseek`             | partial   | Dense lead + MoE; not `deepseek2` (MLA)                     |
 | **DeepSeek2** | `deepseek2`            | partial   | Absorbed MLA + YaRN + MoE (V2/V3 Lite+)                     |
 
-\* TheBloke and convert.py often set `general.architecture: llama` - gogguf detects Mistral via `general.name` / sliding window.
+\* TheBloke and convert.py often set `general.architecture: llama` - gogguf detects Mistral via `general.name` / sliding
+window.
 
 \** Mixtral MoE GGUF: `general.architecture: llama` + `llama.expert_count` > 0.
 
@@ -34,7 +36,8 @@ GoGGUF can read any GGUF v2/v3 file (`gogguf info`, `gogguf inspect`, mmap), but
 |------------|--------------|--------------------------------------------------|-------------------------------------------------------------|
 | Qwen3-0.6B | Q8_0         | verified (golden tests, CLI, serve, CUDA `-ngl`) | [Hugging Face](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) |
 
-Other Qwen3 sizes (1.7B, 4B, 8B, ...) with `general.architecture: qwen3` **should work** if weights use a supported quantization (see below). They are not yet covered by automated golden tests.
+Other Qwen3 sizes (1.7B, 4B, 8B, ...) with `general.architecture: qwen3` **should work** if weights use a supported
+quantization (see below). They are not yet covered by automated golden tests.
 
 ### Qwen3 capabilities
 
@@ -48,13 +51,19 @@ Other Qwen3 sizes (1.7B, 4B, 8B, ...) with `general.architecture: qwen3` **shoul
 
 ### Supported weight quantizations
 
-| Type                                  | Status    |
-|---------------------------------------|-----------|
-| Q8_0                                  | supported |
-| Q4_0                                  | supported |
-| Q4_K                                  | supported |
-| Q6_K                                  | supported |
-| Q4_1, Q5_0, Q5_1, Q2_K ... Q5_K, Q8_K | planned   |
+| Type | Status    |
+|------|-----------|
+| Q8_0 | supported |
+| Q4_0 | supported |
+| Q4_1 | supported |
+| Q5_0 | supported |
+| Q5_1 | supported |
+| Q2_K | supported |
+| Q3_K | supported |
+| Q4_K | supported |
+| Q5_K | supported |
+| Q6_K | supported |
+| Q8_K | supported |
 
 ## GGUF read-only (no inference)
 
@@ -82,14 +91,14 @@ Priority per [roadmap.md](roadmap.md):
 
 ### Cross-cutting (not tied to one model)
 
-| Task                                        | Status                                      |
-|---------------------------------------------|---------------------------------------------|
-| CUDA Graphs (matmul)                        | done                                        |
-| CUDA Graphs (layer)                         | planned                                     |
-| Metal (macOS)                               | planned                                     |
-| Multi-GPU (`-dev N`)                        | planned                                     |
-| More quantizations (Q5_K, Q8_K, ...)        | planned                                     |
-| Architecture registry (`pkg/model/<arch>/`) | partial (`qwen3`, `llama`, `mistral`, ...)  |
+| Task                                        | Status                                        |
+|---------------------------------------------|-----------------------------------------------|
+| CUDA Graphs (matmul)                        | done                                          |
+| CUDA Graphs (layer)                         | done (FFN, residual, QKV+RoPE, attn, head)    |
+| Metal (macOS)                               | scaffold only (`pkg/gpu/metal`, no kernels)   |
+| Multi-GPU (`-dev N`)                        | `-dev N` done; layer split `-dev 0,1` partial |
+| More quantizations (Q5_K, Q8_K, ...)        | done                                          |
+| Architecture registry (`pkg/model/<arch>/`) | partial (`qwen3`, `llama`, `mistral`, ...)    |
 
 ## Adding a new architecture
 

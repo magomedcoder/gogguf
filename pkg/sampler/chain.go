@@ -2,6 +2,7 @@ package sampler
 
 import (
 	"math/rand/v2"
+	"slices"
 	"sort"
 )
 
@@ -156,8 +157,8 @@ func sampleMasked(probs []float64, mask []bool, rng *rand.Rand) int {
 		}
 	}
 
-	for i := len(mask) - 1; i >= 0; i-- {
-		if mask[i] {
+	for i, m := range slices.Backward(mask) {
+		if m {
 			return i
 		}
 	}

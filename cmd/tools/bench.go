@@ -16,7 +16,8 @@ const benchUsage = `bench - измерение скорости inference (prefi
 
 Использование:
   tools bench -m модель.gguf -p "промпт" [-n 128] [-ngl 0] [--runs 3] [--warmup 1]
-  tools bench -m модель.gguf -p "промпт" -ngl 28 --compare   # CPU vs GPU
+  tools bench -m модель.gguf -p "промпт" -ngl 28 --compare        # CPU vs GPU
+  tools bench -m модель.gguf -p "промпт" -ngl 28 -dev 1 -json     # GPU 1 + VRAM в JSON
 
 `
 
@@ -40,9 +41,11 @@ func runBench(args []string) error {
 	prompt := fs.String("p", "Hello", "текст промпта")
 	maxTokens := fs.Int("n", 128, "число decode-токенов для замера")
 	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, -tags cuda)")
-	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 - CPU Qwen3")
+	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill (Qwen3, работает и с -ngl)")
 	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
 	ctxLen := fs.Int("c", 0, "макс. длина GPU KV-cache (0 = авто, до 4096)")
+	dev := fs.String("dev", "", "GPU для offload: \"1\" или \"0,1\" (multi-GPU split слоёв)")
+	tensorSplit := fs.String("tensor-split", "", "пропорции слоёв по устройствам с -dev 0,1, например 0.6,0.4")
 	chat := fs.Bool("chat", false, "обернуть промпт в chat template")
 	thinking := fs.Bool("thinking", false, "Qwen3: режим размышления (с --chat)")
 	runs := fs.Int("runs", 1, "число прогонов для усреднения")
@@ -64,19 +67,54 @@ func runBench(args []string) error {
 		return fmt.Errorf("укажите модель через -m")
 	}
 
-	if *compare {
-		return runBenchCompare(*modelPath, *prompt, *maxTokens, *ngl, *ctxLen, *chat, *thinking, *runs, *warmup, *jsonOut)
+	devices, tsplit, err := gogguf.ParseGPUDevices(*dev, *tensorSplit)
+	if err != nil {
+		return err
 	}
 
-	return runBenchSingle(*modelPath, *prompt, *maxTokens, *ngl, *nBatch, *ctxLen, *chat, *thinking, *runs, *warmup, *jsonOut)
+	gpuOpts := benchGPUOptions{devices: devices, tensorSplit: tsplit}
+
+	if *compare {
+		return runBenchCompare(*modelPath, *prompt, *maxTokens, *ngl, *ctxLen, *chat, *thinking, *runs, *warmup, *jsonOut, gpuOpts)
+	}
+
+	return runBenchSingle(*modelPath, *prompt, *maxTokens, *ngl, *nBatch, *ctxLen, *chat, *thinking, *runs, *warmup, *jsonOut, gpuOpts)
 }
 
-func runBenchSingle(modelPath, prompt string, maxTokens, ngl, nBatch, ctxLen int, chat, thinking bool, runs, warmup int, jsonOut bool) error {
+// benchGPUOptions - выбор устройств для offload (-dev / -tensor-split)
+type benchGPUOptions struct {
+	devices     []int
+	tensorSplit []float64
+}
+
+// vramMB - занятая/общая видеопамять backend'а в МБ (0 при CPU-прогоне)
+type vramMB struct {
+	used  float64
+	total float64
+}
+
+// readVRAM снимает состояние видеопамяти после прогона (cuMemGetInfo)
+func readVRAM(engine *gogguf.Engine) vramMB {
+	used, total, err := engine.VRAMInfo()
+	if err != nil || total == 0 {
+		return vramMB{}
+	}
+
+	const mb = 1024 * 1024
+	return vramMB{
+		used:  float64(used) / mb,
+		total: float64(total) / mb,
+	}
+}
+
+func runBenchSingle(modelPath, prompt string, maxTokens, ngl, nBatch, ctxLen int, chat, thinking bool, runs, warmup int, jsonOut bool, gpuOpts benchGPUOptions) error {
 	loadStart := time.Now()
 	engine, err := gogguf.Load(modelPath, gogguf.LoadOptions{
-		NGL:       ngl,
-		GPUMaxSeq: ctxLen,
-		NBatch:    nBatch,
+		NGL:         ngl,
+		GPUMaxSeq:   ctxLen,
+		NBatch:      nBatch,
+		GPUDevices:  gpuOpts.devices,
+		TensorSplit: gpuOpts.tensorSplit,
 	})
 	if err != nil {
 		return err
@@ -98,8 +136,10 @@ func runBenchSingle(modelPath, prompt string, maxTokens, ngl, nBatch, ctxLen int
 		return err
 	}
 
+	vram := readVRAM(engine)
+
 	if jsonOut {
-		return writeBenchJSON(map[string]any{
+		out := map[string]any{
 			"model":         modelPath,
 			"ngl":           ngl,
 			"n_batch":       nBatch,
@@ -116,14 +156,22 @@ func runBenchSingle(modelPath, prompt string, maxTokens, ngl, nBatch, ctxLen int
 			"prefill_tps":   round2(avg.PrefillTPS),
 			"decode_tps":    round2(avg.DecodeTPS),
 			"total_tps":     round2(avg.TotalTPS),
-		})
+		}
+
+		if vram.total > 0 {
+			out["gpu"] = engine.GPUDescription()
+			out["vram_used_mb"] = round2(vram.used)
+			out["vram_total_mb"] = round2(vram.total)
+		}
+
+		return writeBenchJSON(out)
 	}
 
-	printBenchHuman(modelPath, ngl, loadMS, runs, avg)
+	printBenchHuman(modelPath, ngl, loadMS, runs, avg, engine.GPUDescription(), vram)
 	return nil
 }
 
-func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat, thinking bool, runs, warmup int, jsonOut bool) error {
+func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat, thinking bool, runs, warmup int, jsonOut bool, gpuOpts benchGPUOptions) error {
 	if ngl <= 0 {
 		layers, err := modelLayerCount(modelPath)
 		if err != nil {
@@ -156,8 +204,10 @@ func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat,
 	}
 
 	gpuEngine, err := gogguf.Load(modelPath, gogguf.LoadOptions{
-		NGL:       ngl,
-		GPUMaxSeq: ctxLen,
+		NGL:         ngl,
+		GPUMaxSeq:   ctxLen,
+		GPUDevices:  gpuOpts.devices,
+		TensorSplit: gpuOpts.tensorSplit,
 	})
 	if err != nil {
 		return fmt.Errorf("GPU load (ngl=%d): %w", ngl, err)
@@ -181,9 +231,10 @@ func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat,
 	decodeSpeedup := ratio(gpuAvg.DecodeTPS, cpuAvg.DecodeTPS)
 	prefillSpeedup := ratio(gpuAvg.PrefillTPS, cpuAvg.PrefillTPS)
 	gpuFaster := gpuAvg.DecodeTPS > cpuAvg.DecodeTPS
+	vram := readVRAM(gpuEngine)
 
 	if jsonOut {
-		return writeBenchJSON(map[string]any{
+		out := map[string]any{
 			"model":             modelPath,
 			"ngl":               ngl,
 			"runs":              runs,
@@ -193,11 +244,24 @@ func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat,
 			"decode_speedup":    round2(decodeSpeedup),
 			"prefill_speedup":   round2(prefillSpeedup),
 			"gpu_decode_faster": gpuFaster,
-		})
+		}
+
+		if vram.total > 0 {
+			out["gpu_device"] = gpuEngine.GPUDescription()
+			out["vram_used_mb"] = round2(vram.used)
+			out["vram_total_mb"] = round2(vram.total)
+		}
+
+		return writeBenchJSON(out)
 	}
 
 	fmt.Printf("Модель: %s\n", modelPath)
-	fmt.Printf("Сравнение CPU vs GPU (ngl=%d), прогонов=%d, decode=%d tok\n\n", ngl, runs, maxTokens)
+	fmt.Printf("Сравнение CPU vs GPU (ngl=%d), прогонов=%d, decode=%d tok\n", ngl, runs, maxTokens)
+	if vram.total > 0 {
+		fmt.Printf("GPU: %s, VRAM %.0f / %.0f MB\n", gpuEngine.GPUDescription(), vram.used, vram.total)
+	}
+
+	fmt.Println()
 	fmt.Printf("%-10s %12s %12s %12s %12s\n", "", "prefill t/s", "decode t/s", "TTFT ms", "total t/s")
 	fmt.Printf("%-10s %12.1f %12.1f %12.1f %12.1f\n", "CPU", cpuAvg.PrefillTPS, cpuAvg.DecodeTPS, cpuAvg.TTFTMS, cpuAvg.TotalTPS)
 	fmt.Printf("%-10s %12.1f %12.1f %12.1f %12.1f\n", "GPU", gpuAvg.PrefillTPS, gpuAvg.DecodeTPS, gpuAvg.TTFTMS, gpuAvg.TotalTPS)
@@ -286,10 +350,18 @@ func writeBenchJSON(out map[string]any) error {
 	return enc.Encode(out)
 }
 
-func printBenchHuman(modelPath string, ngl int, loadMS float64, runs int, avg benchResult) {
+func printBenchHuman(modelPath string, ngl int, loadMS float64, runs int, avg benchResult, gpuName string, vram vramMB) {
 	fmt.Printf("Модель: %s\n", modelPath)
 	if ngl > 0 {
-		fmt.Printf("GPU offload: %d слоёв\n", ngl)
+		if gpuName != "" {
+			fmt.Printf("GPU offload: %d слоёв на %s\n", ngl, gpuName)
+		} else {
+			fmt.Printf("GPU offload: %d слоёв\n", ngl)
+		}
+	}
+
+	if vram.total > 0 {
+		fmt.Printf("VRAM: %.0f / %.0f MB\n", vram.used, vram.total)
 	}
 
 	fmt.Printf("Загрузка: %.1f ms\n", loadMS)

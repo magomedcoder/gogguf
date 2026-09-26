@@ -13,14 +13,14 @@ func FP16ToFP32(h uint16) float32 {
 		if mant == 0 {
 			return math.Float32frombits(sign)
 		}
-		// subnormal fp16
+		// subnormal fp16 -> нормализуем в float32 (как CUDA fp16_to_fp32 / IEEE)
+		e := uint32(127 - 15 + 1) // bias float32 − bias half + скрытый бит
 		for (mant & 0x400) == 0 {
 			mant <<= 1
-			exp--
+			e--
 		}
 		mant &= 0x3ff
-		exp = 1
-		return math.Float32frombits(sign | (uint32(exp+112) << 23) | (mant << 13))
+		return math.Float32frombits(sign | (e << 23) | (mant << 13))
 	case 31:
 		if mant == 0 {
 			if sign != 0 {
