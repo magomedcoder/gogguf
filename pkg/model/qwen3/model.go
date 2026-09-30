@@ -246,7 +246,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("qwen3: пустой ввод")
 	}
 
-	// n_batch>1: multi-token prefill на CPU-matmul; K/V зеркалятся в GPU KV-cache, поэтому -b работает вместе с -ngl (decode дальше идёт по GPU-пути). MoE/debug - serial.
+	// n_batch>1: multi-token prefill; при -ngl matmul/attn чанка на GPU (loop MatMulVec*Cached + AttentionScoresKV), иначе CPU-GEMM. MoE/debug - serial.
 	useBatch := m.nBatch > 1 && m.cfg.ExpertCount == 0 && m.debug == nil && len(tokenIDs) > 1
 	if useBatch {
 		for i := 0; i < len(tokenIDs); {

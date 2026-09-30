@@ -119,6 +119,46 @@ func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 	}
 }
 
+// §4: GPU loop-B matmul + AttentionScoresKV дают те же logits, что serial GPU prefill
+func TestGPUBatchMatmulAttnParity(t *testing.T) {
+	tokens := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	serial := loadResidentModel(t, 0, 1)
+	want, err := serial.Forward(tokens, 0)
+	if err != nil {
+		serial.Close()
+		skipOOM(t, err)
+		t.Fatal(err)
+	}
+
+	wantCopy := append([]float32(nil), want...)
+	serial.Close()
+
+	batch := loadResidentModel(t, 0, 32)
+	defer batch.Close()
+
+	got, err := batch.Forward(tokens, 0)
+	if err != nil {
+		skipOOM(t, err)
+		t.Fatal(err)
+	}
+
+	if batch.gpuKVStale {
+		t.Fatal("GPU KV stale после успешного batch-prefill")
+	}
+
+	var worst float64
+	for i := range wantCopy {
+		if d := math.Abs(float64(got[i] - wantCopy[i])); d > worst {
+			worst = d
+		}
+	}
+
+	if worst > 0.5 {
+		t.Fatalf("GPU batch vs serial logits: max|diff|=%v", worst)
+	}
+}
+
 // §4: если GPU KV-cache меньше промпта, KVCacheAppendN упирается в max_seq, модель помечает кеш stale и считает attention по CPU-зеркалу - logits не должны разъехаться
 func TestGPUKVStaleFallsBackToCPUAttention(t *testing.T) {
 	tokens := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
