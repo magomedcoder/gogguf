@@ -1,11 +1,11 @@
-// AVX2 scale-mul для RMSNorm: dst[i] = x[i] * scale * weight[i]
+// AVX2 scale-mul for RMSNorm: dst[i] = x[i] * scale * weight[i]
 
 //go:build amd64
 
 #include "textflag.h"
 
 // func rmsnormScaleMulAVX2Asm(dst, x, weight []float32, scale float32, n int)
-// n кратно 8
+// n is a multiple of 8
 TEXT ·rmsnormScaleMulAVX2Asm(SB), NOSPLIT, $0-88
 	MOVQ  dst_base+0(FP), DX
 	MOVQ  x_base+24(FP), SI

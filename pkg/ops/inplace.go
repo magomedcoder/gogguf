@@ -2,17 +2,17 @@ package ops
 
 import "math"
 
-// RMSNormInto записывает RMS-нормализацию в dst
+// RMSNormInto writes RMS normalization to dst
 func RMSNormInto(dst, x, weight []float32, eps float32) error {
 	return rmsnormInto(dst, x, weight, eps)
 }
 
-// AddInPlace добавляет b к a поэлементно
+// AddInPlace adds b to a element-wise
 func AddInPlace(a, b []float32) {
 	addInPlace(a, b)
 }
 
-// ScaleInPlace умножает x на scale in-place
+// ScaleInPlace multiplies x by scale in-place
 func ScaleInPlace(x []float32, scale float32) {
 	vecScaleInPlace(x, scale)
 }
@@ -30,7 +30,7 @@ func SoftcapInPlace(x []float32, softcap float32) {
 	}
 }
 
-// AddBiasInPlace добавляет bias к a (len совпадают)
+// AddBiasInPlace adds bias to a (same length)
 func AddBiasInPlace(a, bias []float32) {
 	if len(bias) == 0 {
 		return
@@ -39,7 +39,7 @@ func AddBiasInPlace(a, bias []float32) {
 	addInPlace(a, bias)
 }
 
-// SwiGLUInPlace вычисляет silu(gate)*up, результат в gate
+// SwiGLUInPlace computes silu(gate)*up, result in gate
 func SwiGLUInPlace(gate, up []float32) {
 	for i := range gate {
 		gate[i] = SiLU(gate[i])

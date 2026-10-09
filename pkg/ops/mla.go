@@ -5,15 +5,15 @@ import (
 	"math"
 )
 
-// AttentionMLAAbsorbedInto - поглощённая MLA (DeepSeek-V2/V3):
+// AttentionMLAAbsorbedInto - absorbed MLA (DeepSeek-V2/V3):
 //
-//	размер Q/K = kvLora + ropeDim (MQA: одна KV-голова);
-//	размер V = kvLora; после softmax wv_b поднимает V до vHead на голову.
+//	Q/K size = kvLora + ropeDim (MQA: one KV head);
+//	V size = kvLora; after softmax wv_b projects V to vHead per head.
 //
 // q: [nHeads*(kvLora+ropeDim)]
-// k: [seqLen*(kvLora+ropeDim)]  (1 KV-голова)
+// k: [seqLen*(kvLora+ropeDim)]  (1 KV head)
 // v: [seqLen*kvLora]
-// wvB: [nHeads][vHead][kvLora] в раскладке ggml {kvLora, vHead, nHeads}
+// wvB: [nHeads][vHead][kvLora] in ggml layout {kvLora, vHead, nHeads}
 // dst: [nHeads*vHead]
 func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHeads, kvLora, ropeDim, vHead int, scale float32) error {
 	qkDim := kvLora + ropeDim
@@ -73,7 +73,7 @@ func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHead
 	return nil
 }
 
-// MatMulColMajorInto: out[m] = Σ_k W[k + kDim*m] * vec[k] (раскладка ggml_mul_mat для wk_b: {kDim, mDim})
+// MatMulColMajorInto: out[m] = Σ_k W[k + kDim*m] * vec[k] (ggml_mul_mat layout for wk_b: {kDim, mDim})
 func MatMulColMajorInto(w []float32, kDim, mDim int, vec, out []float32) error {
 	if len(vec) < kDim || len(out) < mDim || len(w) < kDim*mDim {
 		return fmt.Errorf("ops: MatMulColMajor размеры")

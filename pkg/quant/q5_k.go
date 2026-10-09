@@ -5,10 +5,10 @@ import (
 	"fmt"
 )
 
-// BlockQ5_KSize - размер блока Q5_K в байтах (d+dmin+scales+qh+qs)
+// BlockQ5_KSize - Q5_K block size in bytes (d+dmin+scales+qh+qs)
 const BlockQ5_KSize = 176
 
-// DequantBlockQ5_K деквантизирует один блок Q5_K в 256 float32
+// DequantBlockQ5_K dequantizes one Q5_K block to 256 float32
 func DequantBlockQ5_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ5_KSize {
 		return [QK_K]float32{}, fmt.Errorf("quant: блок Q5_K слишком короткий: %d байт", len(block))
@@ -61,7 +61,7 @@ func bitu(v byte) int {
 	return 0
 }
 
-// DequantQ5_K деквантизирует буфер Q5_K в n float32
+// DequantQ5_K dequantizes Q5_K buffer to n float32
 func DequantQ5_K(data []byte, n int) ([]float32, error) {
 	out := make([]float32, n)
 	if err := DequantQ5_KInto(out, data, n); err != nil {
@@ -71,7 +71,7 @@ func DequantQ5_K(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
-// DequantQ5_KInto деквантизирует буфер Q5_K в dst [n]
+// DequantQ5_KInto dequantizes Q5_K buffer to dst [n]
 func DequantQ5_KInto(dst []float32, data []byte, n int) error {
 	if n < 0 {
 		return fmt.Errorf("quant: n=%d", n)
@@ -102,7 +102,7 @@ func DequantQ5_KInto(dst []float32, data []byte, n int) error {
 	return nil
 }
 
-// DotBlockQ5_K - dot product блока Q5_K на 256 float32
+// DotBlockQ5_K - dot product of Q5_K block with 256 float32
 func DotBlockQ5_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
 		return 0, fmt.Errorf("quant: вектор короче блока Q5_K")

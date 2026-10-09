@@ -5,13 +5,13 @@ import (
 	"fmt"
 )
 
-// QK5_1 - число значений в одном блоке Q5_1
+// QK5_1 - number of values in one Q5_1 block
 const QK5_1 = 32
 
-// BlockQ5_1Size - размер блока Q5_1 (d+m+qh+qs)
+// BlockQ5_1Size - Q5_1 block size (d+m+qh+qs)
 const BlockQ5_1Size = 4 + 4 + QK5_1/2
 
-// DequantBlockQ5_1 деквантизирует один блок Q5_1 в 32 float32
+// DequantBlockQ5_1 dequantizes one Q5_1 block to 32 float32
 // w[j] = d * q + m; q = 5-bit unsigned
 func DequantBlockQ5_1(block []byte) ([QK5_1]float32, error) {
 	if len(block) < BlockQ5_1Size {
@@ -36,7 +36,7 @@ func DequantBlockQ5_1(block []byte) ([QK5_1]float32, error) {
 	return out, nil
 }
 
-// DequantQ5_1 деквантизирует буфер Q5_1 в n float32
+// DequantQ5_1 dequantizes Q5_1 buffer to n float32
 func DequantQ5_1(data []byte, n int) ([]float32, error) {
 	out := make([]float32, n)
 	if err := DequantQ5_1Into(out, data, n); err != nil {
@@ -46,7 +46,7 @@ func DequantQ5_1(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
-// DequantQ5_1Into деквантизирует буфер Q5_1 в dst [n]
+// DequantQ5_1Into dequantizes Q5_1 buffer to dst [n]
 func DequantQ5_1Into(dst []float32, data []byte, n int) error {
 	if n < 0 {
 		return fmt.Errorf("quant: n=%d", n)
@@ -77,7 +77,7 @@ func DequantQ5_1Into(dst []float32, data []byte, n int) error {
 	return nil
 }
 
-// DotBlockQ5_1 - скалярное произведение блока Q5_1 на участок float32-вектора
+// DotBlockQ5_1 - dot product of Q5_1 block with float32 vector slice
 func DotBlockQ5_1(block []byte, x []float32) (float32, error) {
 	w, err := DequantBlockQ5_1(block)
 	if err != nil {

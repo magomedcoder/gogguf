@@ -1,6 +1,6 @@
 package gpu
 
-// CapMaxSeq ограничивает длину GPU KV-cache (0 requested = default 4096)
+// CapMaxSeq caps GPU KV-cache length (0 requested = default 4096)
 func CapMaxSeq(contextLength, requested int) int {
 	if contextLength <= 0 {
 		contextLength = 2048

@@ -1,5 +1,5 @@
-// Package gpuresid - общая обвязка fused GPU-путей слоя (§5-§6): QKV+RoPE+attention, WO+FFN+residual, FFN и эксперты MoE.
-// Архитектуры отличаются только именами весов, размерностями и режимом RoPE, поэтому логика не дублируется по пакетам моделей.
+// Package gpuresid - shared fused GPU layer paths (§5-§6): QKV+RoPE+attention, WO+FFN+residual, FFN, and MoE experts.
+// Architectures differ only in weight names, dimensions, and RoPE mode, so logic is not duplicated across model packages.
 package gpuresid
 
 import (
@@ -11,8 +11,8 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// Tensors - имена весов слоя для fused-путей.
-// QNorm/KNorm пустые - слой без QK-norm (Llama / Mistral)
+// Tensors - layer weight names for fused paths.
+// QNorm/KNorm empty - layer without QK-norm (Llama / Mistral)
 type Tensors struct {
 	AttnQ    string
 	AttnK    string
@@ -27,7 +27,7 @@ type Tensors struct {
 	FFNNorm  string
 }
 
-// Dims - размерности слоя
+// Dims - layer dimensions
 type Dims struct {
 	Embd     int
 	NHeads   int
@@ -38,17 +38,17 @@ type Dims struct {
 	RopeBase float32
 }
 
-// QDim - размер выхода attention (n_heads * head_dim)
+// QDim - attention output size (n_heads * head_dim)
 func (d Dims) QDim() int {
 	return d.NHeads * d.HeadDim
 }
 
-// KVDim - размер K/V одного токена
+// KVDim - K/V size for one token
 func (d Dims) KVDim() int {
 	return d.NKVHeads * d.HeadDim
 }
 
-// Runner выполняет fused-пути слоя на backend
+// Runner runs fused layer paths on the backend
 type Runner struct {
 	w    *weights.Store
 	g    gpu.Backend
@@ -57,13 +57,13 @@ type Runner struct {
 	sin  []float32
 }
 
-// New создаёт runner для модели с заданным режимом RoPE
+// New creates a runner for the model with the given RoPE mode
 func New(w *weights.Store, g gpu.Backend, rope gpu.RoPEMode) *Runner {
 	return &Runner{w: w, g: g, rope: rope}
 }
 
-// QKVAttn: QKV + QK-norm + RoPE + KV append + attention на GPU.
-// h == nil - hidden резидентен на устройстве: attn_norm считается из residual (§1), host-буфер h не читается
+// QKVAttn: QKV + QK-norm + RoPE + KV append + attention on GPU.
+// h == nil - hidden is resident on device: attn_norm from residual (§1), host buffer h is not read
 func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOut, vOut []float32, layer, pos, kvPos, seqLen int) error {
 	info, err := r.w.Info(t.AttnQ)
 	if err != nil {
@@ -79,7 +79,7 @@ func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOu
 	cos, sin := r.cos[:half], r.sin[:half]
 	ops.RoPECosSin(cos, sin, d.HeadDim, pos, d.RopeBase)
 
-	// §3: поддерживаемые кванты идут во fused-путь нативно, без host Floats
+	// §3: supported quants use fused path natively, without host Floats
 	if gpu.FusedQuantSupported(info.Type) {
 		qRaw, kRaw, vRaw, err := r.raw3(t.AttnQ, t.AttnK, t.AttnV)
 		if err != nil {
@@ -93,7 +93,7 @@ func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOu
 		return fmt.Errorf("gpuresid: слой %d: тип %s не поддерживает device residency", layer, info.Type)
 	}
 
-	// FP32-путь есть только для NeoX + QK-norm (Qwen3)
+	// FP32 path exists only for NeoX + QK-norm (Qwen3)
 	if r.rope != gpu.RoPENeoX || t.QNorm == "" || t.KNorm == "" {
 		return fmt.Errorf("gpuresid: слой %d: тип %s не поддерживает fused QKV", layer, info.Type)
 	}
@@ -106,8 +106,8 @@ func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOu
 	return r.g.QKVRoPEAttentionCached(t.AttnQ, t.AttnK, t.AttnV, t.QNorm, t.KNorm, qW, kW, vW, qNorm, kNorm, h, cos, sin, attn, kOut, vOut, d.Embd, d.NHeads, d.NKVHeads, d.HeadDim, layer, kvPos, seqLen, d.Eps)
 }
 
-// AttnFFN: WO + residual + ffn_norm + FFN + residual на GPU.
-// x == nil - residual остаётся на устройстве (§1)
+// AttnFFN: WO + residual + ffn_norm + FFN + residual on GPU.
+// x == nil - residual stays on device (§1)
 func (r *Runner) AttnFFN(t Tensors, d Dims, ffnNorm, x, attn []float32) error {
 	info, err := r.w.Info(t.AttnOut)
 	if err != nil {
@@ -145,17 +145,17 @@ func (r *Runner) AttnFFN(t Tensors, d Dims, ffnNorm, x, attn []float32) error {
 	return r.g.AttnFFNResidualCached(t.AttnOut, t.FFNNorm, t.FFNGate, t.FFNUp, t.FFNDown, woW, ffnNorm, gateW, upW, downW, x, attn, d.Embd, d.QDim(), d.FFN, d.Eps)
 }
 
-// FFN: gate/up/down + SwiGLU на GPU
+// FFN: gate/up/down + SwiGLU on GPU
 func (r *Runner) FFN(t Tensors, d Dims, x, out []float32) error {
 	return r.ffn(false, t.FFNGate, t.FFNUp, t.FFNDown, x, out, d.Embd, d.FFN)
 }
 
-// FFNGeGLU: тот же fused FFN, но с GeGLU-активацией (Gemma)
+// FFNGeGLU: same fused FFN with GeGLU activation (Gemma)
 func (r *Runner) FFNGeGLU(t Tensors, d Dims, x, out []float32) error {
 	return r.ffn(true, t.FFNGate, t.FFNUp, t.FFNDown, x, out, d.Embd, d.FFN)
 }
 
-// FFNNamed - fused SwiGLU-FFN по произвольным именам весов (shared expert MoE)
+// FFNNamed - fused SwiGLU-FFN with arbitrary weight names (shared expert MoE)
 func (r *Runner) FFNNamed(gateName, upName, downName string, x, out []float32, embd, ffn int) error {
 	return r.ffn(false, gateName, upName, downName, x, out, embd, ffn)
 }
@@ -191,7 +191,7 @@ func (r *Runner) ffn(geglu bool, gateName, upName, downName string, x, out []flo
 	return r.g.FFNSwiGLUCached(gateName, upName, downName, gateW, upW, downW, x, out, embd, ffn)
 }
 
-// MatMulInto - одиночный matmul на GPU по имени веса (§7: проекции MLA, router MoE, lm_head). Результат кладётся в out
+// MatMulInto - single matmul on GPU by weight name (§7: MLA projections, MoE router, lm_head). Result is written to out
 func (r *Runner) MatMulInto(name string, rows, cols int, vec, out []float32) error {
 	if len(out) < rows {
 		return fmt.Errorf("gpuresid: %s: короткий out: %d < %d", name, len(out), rows)
@@ -246,8 +246,8 @@ func (r *Runner) matMulQuant(t format.GGML, name string, raw []byte, rows, cols 
 	}
 }
 
-// ExpertFFN: FFN одного эксперта MoE на GPU (§6).
-// Веса экспертов лежат одним тензором [n_exp][rows][cols]; на устройство едет только срез эксперта под именем "<тензор>#<эксперт>", то есть без деквантизации всей матрицы на host
+// ExpertFFN: FFN of one MoE expert on GPU (§6).
+// Expert weights are one tensor [n_exp][rows][cols]; only expert slice goes to device as "<tensor>#<expert>", without dequantizing full matrix on host
 func (r *Runner) ExpertFFN(gateExps, upExps, downExps string, expert int, x, out []float32, embd, ffn int) error {
 	gate, err := r.expertSlice(gateExps, expert, ffn, embd)
 	if err != nil {
@@ -271,7 +271,7 @@ func (r *Runner) ExpertFFN(gateExps, upExps, downExps string, expert int, x, out
 	return r.g.FFNSwiGLUQuantCached(gate.t, gate.name, up.name, down.name, gate.raw, up.raw, down.raw, x, out, embd, ffn)
 }
 
-// MoESupported сообщает, можно ли считать экспертов на GPU без host-деквантизации
+// MoESupported reports whether experts can run on GPU without host dequantization
 func (r *Runner) MoESupported(names ...string) bool {
 	for _, name := range names {
 		info, err := r.w.Info(name)
@@ -283,7 +283,7 @@ func (r *Runner) MoESupported(names ...string) bool {
 	return true
 }
 
-// LogitsDevice: out_norm + lm_head на GPU поверх резидентного hidden (§2)
+// LogitsDevice: out_norm + lm_head on GPU over resident hidden (§2)
 func (r *Runner) LogitsDevice(normName string, norm []float32, headName string, logits []float32, vocab, embd int, eps float32) error {
 	info, err := r.w.Info(headName)
 	if err != nil {
@@ -314,7 +314,7 @@ type expertWeights struct {
 	t    format.GGML
 }
 
-// expertSlice возвращает сырой срез эксперта expert из тензора [n_exp][rows][cols]
+// expertSlice returns raw slice of expert from tensor [n_exp][rows][cols]
 func (r *Runner) expertSlice(name string, expert, rows, cols int) (expertWeights, error) {
 	info, err := r.w.Info(name)
 	if err != nil {
@@ -379,7 +379,7 @@ func (r *Runner) floats3(a, b, c string) (fa, fb, fc []float32, err error) {
 	return fa, fb, fc, nil
 }
 
-// LayerQuant возвращает общий тип matmul-весов слоя или format.GgmlFloat32, если типы разъезжаются (такой слой идёт по FP32/discrete-пути)
+// LayerQuant returns the common matmul weight type for a layer or format.GgmlFloat32 when types differ (that layer uses the FP32/discrete path)
 func LayerQuant(w *weights.Store, names ...string) format.GGML {
 	kind := format.GgmlFloat32
 	for i, name := range names {

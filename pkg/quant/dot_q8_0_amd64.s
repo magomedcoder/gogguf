@@ -1,4 +1,4 @@
-// AVX2 dot product для одного Q8_0-блока (32*int8 * float32)
+// AVX2 dot product for one Q8_0 block (32*int8 * float32)
 
 //go:build amd64
 
@@ -36,7 +36,7 @@ TEXT ·dotBlockQ8_0AVX2Asm(SB), NOSPLIT, $0-28
 
 	VXORPS  Y6, Y6, Y6
 
-	// 4* по 8 элементов
+	// 4x 8 elements each
 	MOVQ    $4, CX
 chunk:
 	VPMOVSXBD 0(SI), X1

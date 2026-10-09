@@ -5,34 +5,34 @@ import (
 	"io"
 )
 
-// Conversation сохраняет KV-cache между multi-turn запросами с инкрементальным prefill
+// Conversation keeps KV-cache across multi-turn requests with incremental prefill.
 type Conversation struct {
 	ctx    *Context
 	tokens []int
 }
 
-// NewConversation создаёт сессию диалога с переиспользованием KV-cache
+// NewConversation creates a dialog session that reuses KV-cache.
 func (c *Context) NewConversation() *Conversation {
 	return &Conversation{ctx: c}
 }
 
-// Reset сбрасывает историю токенов и KV-cache
+// Reset clears token history and KV-cache.
 func (conv *Conversation) Reset() {
 	conv.tokens = conv.tokens[:0]
 	conv.ctx.engine.Model.ResetCache()
 }
 
-// TokenCount возвращает число токенов в cache (промпт + сгенерированные)
+// TokenCount returns token count in cache (prompt + generated).
 func (conv *Conversation) TokenCount() int {
 	return len(conv.tokens)
 }
 
-// StartGeneration выполняет инкрементальный prefill и возвращает сессию decode
+// StartGeneration runs incremental prefill and returns a decode session.
 func (conv *Conversation) StartGeneration(prompt string) (*GenerationSession, error) {
 	return conv.startGeneration(prompt)
 }
 
-// Commit добавляет сгенерированные токены в историю cache
+// Commit appends generated tokens to cache history.
 func (conv *Conversation) Commit(sess *GenerationSession) {
 	conv.tokens = append(conv.tokens, sess.generated...)
 }
@@ -52,7 +52,7 @@ func (conv *Conversation) rollback(tokenLen int) {
 	conv.tokens = saved
 }
 
-// Rollback откатывает cache к предыдущему числу токенов (при ошибке генерации)
+// Rollback restores cache to a previous token count (on generation error).
 func (conv *Conversation) Rollback(tokenLen int) {
 	conv.rollback(tokenLen)
 }
@@ -73,7 +73,7 @@ func (conv *Conversation) Generate(prompt string, params GenerateParams) (string
 	return sess.GeneratedText(), nil
 }
 
-// GenerateStream как Generate, но пишет токены в w по мере decode
+// GenerateStream is like Generate but writes tokens to w as they are decoded.
 func (conv *Conversation) GenerateStream(prompt string, params GenerateParams, w io.Writer) error {
 	params.OnToken = func(id int) bool {
 		_, err := io.WriteString(w, conv.ctx.tok.Decode([]int{id}))

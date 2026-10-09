@@ -1,4 +1,4 @@
-// AVX2 vecMulInPlace и addInPlace
+// AVX2 vecMulInPlace and addInPlace
 
 //go:build amd64
 

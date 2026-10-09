@@ -26,7 +26,7 @@ type LayersMeta struct {
 	NGL       int       `json:"ngl,omitempty"`
 }
 
-// LayersDump - embed + hidden после каждого слоя
+// LayersDump is embed + hidden after each layer.
 type LayersDump struct {
 	Embed  []float32
 	Layers [][]float32 // [num_layers][embd]
@@ -69,7 +69,7 @@ func WriteLayersBin(w io.Writer, dump LayersDump) error {
 	return nil
 }
 
-// ReadLayersBin читает dump от WriteLayersBin
+// ReadLayersBin reads a dump written by WriteLayersBin.
 func ReadLayersBin(r io.Reader) (LayersDump, error) {
 	magic := make([]byte, 8)
 	if _, err := io.ReadFull(r, magic); err != nil {
@@ -107,7 +107,7 @@ func ReadLayersBin(r io.Reader) (LayersDump, error) {
 	return dump, nil
 }
 
-// SaveLayersDump пишет path.bin и path.json
+// SaveLayersDump writes path.bin and path.json.
 func SaveLayersDump(path string, meta LayersMeta, dump LayersDump) error {
 	meta.Magic = layersMagic
 	meta.Embd = len(dump.Embed)
@@ -140,7 +140,7 @@ func SaveLayersDump(path string, meta LayersMeta, dump LayersDump) error {
 	return os.WriteFile(path+".json", append(js, '\n'), 0o644)
 }
 
-// LoadLayersDump читает path.bin (+ json)
+// LoadLayersDump reads path.bin (+ json).
 func LoadLayersDump(path string) (LayersMeta, LayersDump, error) {
 	var meta LayersMeta
 	if data, err := os.ReadFile(path + ".json"); err == nil {
@@ -161,7 +161,7 @@ func LoadLayersDump(path string) (LayersMeta, LayersDump, error) {
 	return meta, dump, err
 }
 
-// DiffLayers сравнивает два dump; tol для OverTol
+// DiffLayers compares two dumps; tol for OverTol.
 func DiffLayers(a, b LayersDump, tol float64) (embed DiffStats, layers []DiffStats, err error) {
 	if len(a.Embed) != len(b.Embed) {
 		return DiffStats{}, nil, fmt.Errorf("debug: embd A=%d B=%d", len(a.Embed), len(b.Embed))

@@ -1,6 +1,6 @@
 package chat
 
-// jinjaContext строит контекст для tokenizer.chat_template
+// jinjaContext builds context for tokenizer.chat_template.
 func jinjaContext(messages []Message, addGenerationPrompt bool, opts Options) map[string]any {
 	msgs := make([]any, len(messages))
 	for i, m := range messages {

@@ -6,10 +6,10 @@ import (
 	"time"
 )
 
-// rateLimiter - простой token bucket на ключ (обычно IP)
+// rateLimiter is a simple token bucket keyed by client (usually IP).
 type rateLimiter struct {
 	mu        sync.Mutex
-	rate      float64 // токенов в секунду
+	rate      float64 // tokens per second
 	burst     float64
 	clients   map[string]*bucket
 	lastSweep time.Time

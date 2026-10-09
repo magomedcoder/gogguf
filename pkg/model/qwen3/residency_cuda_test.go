@@ -13,8 +13,8 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// loadResidentModel грузит Qwen3-0.6B-Q8_0 с полным offload или пропускает тест.
-// gpuMaxSeq=0 - авто-cap GPU KV-cache.
+// loadResidentModel loads Qwen3-0.6B-Q8_0 with full offload or skips the test.
+// gpuMaxSeq=0 - auto-cap GPU KV-cache.
 func loadResidentModel(t *testing.T, gpuMaxSeq, nBatch int) *Model {
 	t.Helper()
 
@@ -59,7 +59,7 @@ func skipOOM(t *testing.T, err error) {
 	}
 }
 
-// §1+§2: при полном offload Q8_0 residency включается, hidden реально живёт на устройстве между слоями, а logits считаются на GPU
+// §1+§2: on full Q8_0 offload residency enables; hidden stays on device between layers; logits computed on GPU
 func TestResidencyEngagedFullOffload(t *testing.T) {
 	m := loadResidentModel(t, 0, 1)
 	defer m.Close()
@@ -77,12 +77,12 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// после прохода всех слоёв hidden всё ещё на устройстве: DtoH не было
+	// after all layers hidden still on device: no DtoH
 	if !m.residDevice || !m.residency {
 		t.Skip("residency откатилась на host (вероятно нехватка VRAM)")
 	}
 
-	// logits берутся из d_resid, host-буфер x при этом не нужен
+	// logits come from d_resid; host buffer x is not needed
 	if err := m.logits(); err != nil {
 		skipOOM(t, err)
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 	}
 }
 
-// §4: batch-prefill с offload не должен ронять GPU KV-cache в stale
+// §4: batch-prefill with offload must not leave GPU KV-cache stale
 func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 	m := loadResidentModel(t, 0, 32)
 	defer m.Close()
@@ -108,7 +108,7 @@ func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 		t.Fatal("GPU KV-cache помечен stale: KVCacheAppendN не сработал")
 	}
 
-	// decode после batch должен снова пойти по резидентному GPU-пути
+	// decode after batch must use the resident GPU path again
 	if err := m.forwardToken(9, len(tokens), false); err != nil {
 		skipOOM(t, err)
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 	}
 }
 
-// §4: GPU loop-B matmul + AttentionScoresKV дают те же logits, что serial GPU prefill
+// §4: GPU loop-B matmul + AttentionScoresKV match serial GPU prefill logits
 func TestGPUBatchMatmulAttnParity(t *testing.T) {
 	tokens := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
@@ -159,7 +159,7 @@ func TestGPUBatchMatmulAttnParity(t *testing.T) {
 	}
 }
 
-// §4: если GPU KV-cache меньше промпта, KVCacheAppendN упирается в max_seq, модель помечает кеш stale и считает attention по CPU-зеркалу - logits не должны разъехаться
+// §4: when GPU KV-cache is shorter than prompt, KVCacheAppendN hits max_seq, model marks cache stale and uses CPU mirror for attention - logits must still match
 func TestGPUKVStaleFallsBackToCPUAttention(t *testing.T) {
 	tokens := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 
@@ -174,7 +174,7 @@ func TestGPUKVStaleFallsBackToCPUAttention(t *testing.T) {
 	want := append([]float32(nil), wantLogits...)
 	full.Close()
 
-	// GPU KV на 4 токена: chunk из 12 не влезает
+	// GPU KV holds 4 tokens: a chunk of 12 does not fit
 	small := loadResidentModel(t, 4, 32)
 	defer small.Close()
 
@@ -199,7 +199,7 @@ func TestGPUKVStaleFallsBackToCPUAttention(t *testing.T) {
 		t.Fatalf("logits после gpuKVStale расходятся: max|diff|=%v", worst)
 	}
 
-	// decode дальше тоже должен остаться корректным (без GPU KV)
+	// further decode must remain correct (without GPU KV)
 	if _, err := small.Forward(tokens[len(tokens)-1:], len(tokens)); err != nil {
 		skipOOM(t, err)
 		t.Fatal(err)

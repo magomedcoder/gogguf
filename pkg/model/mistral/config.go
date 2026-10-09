@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// Config - гиперпараметры Mistral из метаданных GGUF
+// Config - Mistral hyperparameters from GGUF metadata
 type Config struct {
 	ContextLength     int
 	EmbeddingDim      int
@@ -18,32 +18,32 @@ type Config struct {
 	VocabSize         int
 	RMSNormEps        float32
 	RopeFreqBase      float32
-	SlidingWindow     int // 0 = без ограничения (полный KV-cache)
+	SlidingWindow     int // 0 = unlimited (full KV-cache)
 	ExpertCount       int
 	ExpertUsedCount   int
 	ExpertFFN         int // expert_feed_forward_length; 0 -> FFNHidden
 	SharedFFN         int // expert_shared_feed_forward_length; 0 -> none
 	ExpertWeightScale float32
 	MoENormWeights    bool // Mixtral renorm top-k; Qwen2MoE/DeepSeek - false
-	SharedExpertGate  bool // Qwen2MoE: silu(gate_inp)/gate_inp на shared FFN
+	SharedExpertGate  bool // Qwen2MoE: silu(gate_inp)/gate_inp on shared FFN
 }
 
-// ParseConfig читает конфиг из метаданных GGUF (префикс mistral.)
+// ParseConfig reads config from GGUF metadata (mistral. prefix)
 func ParseConfig(r *format.Reader) (Config, error) {
 	return parseConfigWithPrefix(r, "mistral.", 1e-5, 1000000)
 }
 
-// ParseConfigLlama читает конфиг Mistral-модели с префиксом llama.* (TheBloke и convert.py)
+// ParseConfigLlama reads Mistral model config with llama.* prefix (TheBloke and convert.py)
 func ParseConfigLlama(r *format.Reader) (Config, error) {
 	return parseConfigWithPrefix(r, "llama.", 1e-5, 1000000)
 }
 
-// ParseConfigQwen2 читает qwen2.* (DeepSeek distill и др.)
+// ParseConfigQwen2 reads qwen2.* (DeepSeek distill, etc.)
 func ParseConfigQwen2(r *format.Reader) (Config, error) {
 	return parseConfigWithPrefix(r, "qwen2.", 1e-6, 10000)
 }
 
-// ParseConfigQwen2MoE читает qwen2moe.* (MoE + gated shared expert)
+// ParseConfigQwen2MoE reads qwen2moe.* (MoE + gated shared expert)
 func ParseConfigQwen2MoE(r *format.Reader) (Config, error) {
 	cfg, err := parseConfigWithPrefix(r, "qwen2moe.", 1e-6, 10000)
 	if err != nil {

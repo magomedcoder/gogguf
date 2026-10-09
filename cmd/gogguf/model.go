@@ -6,8 +6,8 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/hf"
 )
 
-// resolveModelPath возвращает локальный путь к GGUF из -m или -hf.
-// Ровно один из аргументов должен быть задан.
+// resolveModelPath returns the local GGUF path from -m or -hf.
+// Exactly one of the arguments must be set.
 func resolveModelPath(m, hfRepo string) (string, error) {
 	switch {
 	case m != "" && hfRepo != "":

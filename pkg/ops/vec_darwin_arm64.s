@@ -1,4 +1,4 @@
-// NEON vecMulInPlace и addInPlace
+// NEON vecMulInPlace and addInPlace
 
 //go:build arm64 && darwin
 

@@ -50,7 +50,7 @@ func TestParseConfigLlama2Defaults(t *testing.T) {
 			"llama.block_count":             int32(32),
 			"llama.attention.head_count":    int32(32),
 			"llama.attention.head_count_kv": int32(32),
-			// rope.freq_base отсутствует -> default по vocab (~32k) = 10000
+			// rope.freq_base missing -> default from vocab (~32k) = 10000
 		},
 		Tensors: []format.TensorInfo{
 			{Name: "token_embd.weight", Dimensions: []uint64{4096, 32000}},

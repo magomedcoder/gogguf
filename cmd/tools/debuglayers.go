@@ -31,7 +31,7 @@ type logitMetric struct {
 	Logit float32 `json:"logit"`
 }
 
-// runDebugLayers печатает послойный RMS и итоговые logits
+// runDebugLayers prints per-layer RMS and final logits.
 func runDebugLayers(args []string) error {
 	fs := flag.NewFlagSet("debuglayers", flag.ContinueOnError)
 	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")

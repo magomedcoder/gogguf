@@ -8,14 +8,14 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/tensor"
 )
 
-// Store хранит тензоры модели, загружаемые лениво по имени
+// Store holds model tensors loaded lazily by name.
 type Store struct {
 	reader *format.Reader
 	raw    map[string][]byte
 	floats map[string][]float32
 }
 
-// New создаёт хранилище весов поверх GGUF-reader
+// New creates a weight store backed by a GGUF reader.
 func New(r *format.Reader) *Store {
 	return &Store{
 		reader: r,
@@ -24,12 +24,12 @@ func New(r *format.Reader) *Store {
 	}
 }
 
-// Reader возвращает исходный GGUF-reader
+// Reader returns the underlying GGUF reader.
 func (s *Store) Reader() *format.Reader {
 	return s.reader
 }
 
-// Raw возвращает сырые байты тензора (с кешированием)
+// Raw returns the tensor's raw bytes (cached).
 func (s *Store) Raw(name string) ([]byte, error) {
 	if b, ok := s.raw[name]; ok {
 		return b, nil
@@ -50,12 +50,12 @@ func (s *Store) Raw(name string) ([]byte, error) {
 	return b, nil
 }
 
-// Info возвращает описание тензора
+// Info returns the tensor description.
 func (s *Store) Info(name string) (*format.TensorInfo, error) {
 	return s.reader.TensorInfo(name)
 }
 
-// Floats загружает и деквантизирует тензор (norm weights и т.п.)
+// Floats loads and dequantizes a tensor (norm weights, etc.).
 func (s *Store) Floats(name string) ([]float32, error) {
 	if f, ok := s.floats[name]; ok {
 		return f, nil

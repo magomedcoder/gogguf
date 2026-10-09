@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
-// CPUBackend выполняет matmul на CPU через pkg/ops
+// CPUBackend runs matmul on CPU via pkg/ops
 type CPUBackend struct{}
 
 var _ Backend = CPUBackend{}
@@ -16,7 +16,7 @@ func (CPUBackend) Name() string {
 	return "CPU"
 }
 
-// VRAMInfo: у CPU-backend нет видеопамяти
+// VRAMInfo: CPU backend has no VRAM
 func (CPUBackend) VRAMInfo() (used, total uint64, err error) {
 	return 0, 0, nil
 }
@@ -222,7 +222,7 @@ func (CPUBackend) QKVRoPEAttentionQ8_0Cached(_, _, _, _, _ string, qRaw, kRaw, v
 	return nil
 }
 
-// matMulQuantInto - CPU-эквивалент квантованного matmul для fused-путей
+// matMulQuantInto - CPU equivalent of quantized matmul for fused paths
 func matMulQuantInto(t format.GGML, raw []byte, rows, cols int, vec, out []float32) error {
 	switch t {
 	case format.GgmlQ8_0:
@@ -293,7 +293,7 @@ func (CPUBackend) AttnFFNResidualQuantCached(t format.GGML, _, _, _, _, _ string
 	return nil
 }
 
-// QKVRoPEAttentionQuantCached: CPU-эквивалент QKV+QK-norm (RoPE и attention остаются за вызывающим). qNorm/kNorm пустые - слой без QK-norm.
+// QKVRoPEAttentionQuantCached: CPU equivalent of QKV+QK-norm (RoPE and attention remain caller's job). empty qNorm/kNorm - layer without QK-norm.
 func (CPUBackend) QKVRoPEAttentionQuantCached(t format.GGML, _ RoPEMode, _, _, _, _, _, _ string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, _, h, _, _, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, _, _, _ int, eps float32) error {
 	q := make([]float32, nHeads*headDim)
 	if err := matMulQuantInto(t, qRaw, nHeads*headDim, embd, h, q); err != nil {
@@ -333,7 +333,7 @@ func (CPUBackend) QKVRoPEAttentionQuantCached(t format.GGML, _ RoPEMode, _, _, _
 	return nil
 }
 
-// HiddenResident: CPU-backend держит hidden в обычной памяти - residency не нужна
+// HiddenResident: CPU backend keeps hidden in host memory - residency not needed
 func (CPUBackend) HiddenResident() bool {
 	return false
 }

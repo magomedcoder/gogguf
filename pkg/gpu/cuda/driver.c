@@ -106,7 +106,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 		return -4;
 	}
 
-	// device - ordinal уже после фильтра CUDA_VISIBLE_DEVICES
+	// device - ordinal after CUDA_VISIBLE_DEVICES filter
 	if (device < 0 || device >= count) {
 		dlclose(lib);
 		if (errbuf && errbuf_len > 0) {
@@ -238,7 +238,7 @@ static int gguf_cuda_set_context(cuda_driver_t *drv, CUcontext ctx) {
 	return 0;
 }
 
-// Значения CUjit_option из cuda.h (1/2 - THREADS_PER_BLOCK/WALL_TIME, не логи)
+// CUjit_option values from cuda.h (1/2 - THREADS_PER_BLOCK/WALL_TIME, not logs)
 enum {
 	GGUF_JIT_ERROR_LOG_BUFFER = 5,
 	GGUF_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6,
@@ -469,7 +469,7 @@ static int gguf_cuda_attention_device(cuda_driver_t *drv, CUcontext ctx, CUfunct
 		}
 	}
 
-    // График CUDA: пул + Softmax GPU + поток (путь резидентности QKV)
+    // CUDA graph: pool + GPU Softmax + stream (QKV residency path)
 	if (pooled && pool && fn_softmax && drv->has_graphs && stream) {
 		gguf_attn_graph_entry_t *entry = NULL;
 		for (gguf_attn_graph_entry_t *e = pool->graphs; e; e = e->next) {
@@ -805,7 +805,7 @@ int gguf_cuda_kv_append(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cach
 	return 0;
 }
 
-// gguf_cuda_kv_append_n: n токенов K/V одним HtoD на буфер (batch prefill)
+// gguf_cuda_kv_append_n: n tokens K/V in one HtoD to buffer (batch prefill)
 int gguf_cuda_kv_append_n(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int pos, const float *k, const float *v, int n) {
 	if (!cache || !cache->layers || layer < 0 || layer >= cache->num_layers || pos < 0 || n <= 0) {
 		return -1;
@@ -1195,7 +1195,7 @@ static int gguf_cuda_matmul_pool_ensure_resid(cuda_driver_t *drv, gguf_matmul_po
 		}
 		pool->d_resid = d_resid;
 		pool->resid_cap = n;
-		// Буфер переехал: старый резидентный hidden больше не валиден
+		// Buffer moved: old resident hidden no longer valid
 		pool->resid_on_device = 0;
 		pool->resid_len = 0;
 	}
@@ -1226,7 +1226,7 @@ static int gguf_cuda_launch_rmsnorm(cuda_driver_t *drv, CUfunction fn, CUdevicep
 	params[2] = &d_out;
 	params[3] = &n;
 	params[4] = &eps;
-	// 1 block * 256 threads: shared reduction в PTX
+	// 1 block * 256 threads: shared reduction in PTX
 	if (drv->cuLaunchKernel(fn, 1, 1, 1, 256, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
 		return -3;
 	}
@@ -1355,7 +1355,7 @@ static int gguf_cuda_residual_capture(cuda_driver_t *drv, CUfunction fn_matmul, 
 		return -1;
 	}
 
-	// resid_dev: x уже в d_resid с прошлого слоя - HtoD не нужен
+	// resid_dev: x already in d_resid from previous layer - HtoD not needed
 	if (!resid_dev) {
 		if (drv->cuMemcpyHtoDAsync(d_resid, pool->h_resid, embd_bytes, pool->stream) != CUDA_SUCCESS) {
 			gguf_cuda_capture_abort(drv, pool);
@@ -1391,7 +1391,7 @@ static int gguf_cuda_residual_capture(cuda_driver_t *drv, CUfunction fn_matmul, 
 		return -4;
 	}
 
-	// keep_resid: residual остаётся на устройстве для следующего слоя
+	// keep_resid: residual stays on device for next layer
 	if (!keep_resid) {
 		if (drv->cuMemcpyDtoHAsync(pool->h_out, d_resid, embd_bytes, pool->stream) != CUDA_SUCCESS) {
 			gguf_cuda_capture_abort(drv, pool);
@@ -1547,7 +1547,7 @@ int gguf_cuda_attn_ffn_residual_device(cuda_driver_t *drv, CUcontext ctx,
 	int resid_dev = pool->resid_on_device && pool->resid_len == embd;
 	int keep_resid = pool->keep_resid_device;
 
-	// x нужен только когда residual приходит с host; x_out - только когда его возвращаем
+	// x needed only when residual comes from host; x_out only when returning it
 	if (!resid_dev && !x) {
 		return -20;
 	}
@@ -1645,7 +1645,7 @@ int gguf_cuda_attn_ffn_residual_device(cuda_driver_t *drv, CUcontext ctx,
 				goto residual_fallback;
 			}
 
-			// Граф уже изменил d_resid: откат на host-путь невозможен
+			// Graph already modified d_resid: rollback to host path impossible
 			if (resid_dirty) {
 				*resid_dirty = 1;
 			}
@@ -1687,7 +1687,7 @@ residual_fallback:
 			return -3;
 		}
 
-		// Первая мутация d_resid
+		// First d_resid mutation
 		if (resid_dirty) {
 			*resid_dirty = 1;
 		}
@@ -1745,7 +1745,7 @@ residual_fallback:
 	}
 }
 
-// gguf_cuda_hidden_upload: один HtoD hidden state в d_resid на токен
+// gguf_cuda_hidden_upload: one HtoD hidden state into d_resid per token
 int gguf_cuda_hidden_upload(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, const float *x, int n) {
 	if (!drv || !pool || !x || n <= 0) {
 		return -20;
@@ -1774,7 +1774,7 @@ int gguf_cuda_hidden_upload(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_
 	return 0;
 }
 
-// gguf_cuda_hidden_download: DtoH резидентного hidden state (откат на host-путь / отладка)
+// gguf_cuda_hidden_download: DtoH resident hidden state (rollback to host path / debug)
 int gguf_cuda_hidden_download(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, float *dst, int n) {
 	if (!drv || !pool || !dst || n <= 0) {
 		return -20;
@@ -1836,7 +1836,7 @@ static int gguf_cuda_logits_capture(cuda_driver_t *drv, CUfunction fn_matmul, CU
 	return 0;
 }
 
-// gguf_cuda_logits_from_device: out_norm RMSNorm + lm_head на резидентном hidden; DtoH только logits
+// gguf_cuda_logits_from_device: out_norm RMSNorm + lm_head on resident hidden; DtoH only logits
 int gguf_cuda_logits_from_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_rmsnorm, gguf_matmul_pool_t *pool, CUdeviceptr d_out_norm, CUdeviceptr d_head, float *logits, int vocab, int embd, float eps) {
 	if (!drv || !pool || !fn_matmul || !fn_rmsnorm || !logits || vocab <= 0 || embd <= 0) {
 		return -20;
@@ -1855,7 +1855,7 @@ int gguf_cuda_logits_from_device(cuda_driver_t *drv, CUcontext ctx, CUfunction f
 		return rc;
 	}
 
-	// pool_ensure мог перевыделить d_resid-независимые буферы; residency проверяем снова
+	// pool_ensure may have reallocated d_resid-independent buffers; recheck residency
 	if (!pool->resid_on_device || pool->resid_len != embd) {
 		return -21;
 	}
@@ -1976,7 +1976,7 @@ static int gguf_cuda_qkv_capture(cuda_driver_t *drv, CUfunction fn_matmul, CUfun
 	}
 
 	if (resid_dev) {
-		// h = RMSNorm(d_resid, attn_norm) на устройстве: HtoD hidden не нужен
+		// h = RMSNorm(d_resid, attn_norm) on device: HtoD hidden not needed
 		if (gguf_cuda_launch_rmsnorm(drv, fn_rmsnorm, mpool->d_resid, d_attn_norm, mpool->d_vec, embd, eps, stream) != 0) {
 			gguf_cuda_capture_abort(drv, mpool);
 			return -4;
@@ -2053,7 +2053,7 @@ int gguf_cuda_qkv_rope_attn_device(
 		return -20;
 	}
 
-	// resid_dev: hidden резидентен, h нормализуется на GPU из d_resid
+	// resid_dev: hidden resident, h normalized on GPU from d_resid
 	int resid_dev = mpool->resid_on_device && mpool->resid_len == embd && d_attn_norm != 0 && fn_rmsnorm;
 	if (!resid_dev && !h) {
 		return -20;
@@ -2087,7 +2087,7 @@ int gguf_cuda_qkv_rope_attn_device(
 		need_rows = kv_dim;
 	}
 
-	// d_vec держит и вход RMSNorm (embd), и attn-выход для WO (q_dim): при GQA q_dim > embd, поэтому берём максимум
+	// d_vec holds RMSNorm input (embd) and attn output for WO (q_dim): with GQA q_dim > embd, so take max
 	int need_cols = embd;
 	if (q_dim > need_cols) {
 		need_cols = q_dim;
@@ -2353,7 +2353,7 @@ static int gguf_cuda_matmul_run_pooled(cuda_driver_t *drv, CUcontext ctx, CUfunc
 		memcpy(pool->h_vec, vec, vec_bytes);
 	}
 
-	// full graph: HtoD+kernel+DtoH; kernel-only: kernel+DtoH (vec уже на GPU)
+	// full graph: HtoD+kernel+DtoH; kernel-only: kernel+DtoH (vec already on GPU)
 	if (use_graph && drv->has_graphs && pool->stream) {
 		int kernel_only = same_vec ? 1 : 0;
 		gguf_matmul_graph_entry_t *entry = gguf_cuda_matmul_find_graph(pool, d_matrix, rows, cols, is_q8, kernel_only);
@@ -2644,7 +2644,7 @@ int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_
 		return rc - 10;
 	}
 
-	// одноразовая матрица: пул без capture CUDA Graph
+	// one-off matrix: pool without CUDA Graph capture
 	rc = gguf_cuda_matmul_run_pooled(drv, ctx, fn, pool, d_matrix, vec, out, rows, cols, 0, 0);
 	gguf_cuda_free(drv, d_matrix);
 	return rc;

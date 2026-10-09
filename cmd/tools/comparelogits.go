@@ -8,7 +8,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/debug"
 )
 
-// runCompareLogits сравнивает два dump или CPU vs GPU prefill
+// runCompareLogits compares two dumps or CPU vs GPU prefill.
 func runCompareLogits(args []string) error {
 	fs := flag.NewFlagSet("comparelogits", flag.ContinueOnError)
 	aPath := fs.String("a", "", "префикс/путь dump A (.bin)")

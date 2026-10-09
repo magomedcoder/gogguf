@@ -13,7 +13,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// modelPath ищет Llama-3.2-1B-Instruct-Q8_0.gguf или пропускает тест
+// modelPath finds Llama-3.2-1B-Instruct-Q8_0.gguf or skips the test
 func modelPath(t *testing.T) string {
 	t.Helper()
 
@@ -58,7 +58,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 	return m
 }
 
-// skipOOM пропускает тест при нехватке VRAM (типично GTX 1050 Ti 4ГБ на полном Q8_0)
+// skipOOM skips test on VRAM OOM (typical GTX 1050 Ti 4GB on full Q8_0)
 func skipOOM(t *testing.T, err error) {
 	t.Helper()
 	if gpu.IsOutOfMemory(err) {
@@ -66,8 +66,8 @@ func skipOOM(t *testing.T, err error) {
 	}
 }
 
-// §5: при полном offload Q8_0 residency включается и hidden живёт на устройстве.
-// Если полной модели не хватает VRAM - пробуем меньше слоёв: fused QKV/AttnFFN всё равно должны отработать без отката на host для этих слоёв
+// §5: on full Q8_0 offload residency enables and hidden lives on device.
+// If full model does not fit VRAM - try fewer layers: fused QKV/AttnFFN must still run without host fallback for those layers
 func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 	m := loadModel(t, 999)
 	defer m.Close()
@@ -78,7 +78,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// слой мог молча откатиться на host при OOM upload (recoverHiddenFromDevice)
+		// layer may silently fall back to host on upload OOM (recoverHiddenFromDevice)
 		if !m.residency || !m.residDevice {
 			t.Skip("residency откатилась на host (вероятно нехватка VRAM)")
 		}
@@ -95,7 +95,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 		return
 	}
 
-	// Полный offload не включил residency (квант / env) - проверяем fused на части слоёв
+	// Full offload did not enable residency (quant / env) - test fused on subset of layers
 	m.Close()
 	const partialNGL = 4
 	m = loadModel(t, partialNGL)
@@ -116,7 +116,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 	}
 }
 
-// §5: logits GPU-пути должны совпадать с CPU. Сначала полный offload + residency; при OOM на 4ГБ VRAM - partial ngl без residency (тот же fused QKV/AttnFFN)
+// §5: GPU-path logits must match CPU. Try full offload + residency first; on 4GB VRAM OOM - partial ngl without residency (same fused QKV/AttnFFN)
 func TestLlamaFullOffloadLogitsParity(t *testing.T) {
 	tokens := []int{128000, 9906, 11, 1917, 0, 24248, 757, 922, 22915}
 

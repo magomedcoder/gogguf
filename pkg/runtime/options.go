@@ -2,14 +2,14 @@ package runtime
 
 import "github.com/magomedcoder/gogguf/pkg/model"
 
-// Options задаёт параметры загрузки inference-движка
+// Options configures inference engine load parameters.
 type Options struct {
-	NGL         int       // число transformer-слоёв на GPU (флаг -ngl)
-	GPUMaxSeq   int       // макс. длина GPU KV-cache (0 = авто, до 4096)
-	NBatch      int       // размер chunk prefill (флаг -b / --n-batch; 0/1 = по токену)
-	GPUDevice   int       // ordinal CUDA-устройства (флаг -dev N)
-	GPUDevices  []int     // устройства для layer split (флаг -dev 0,1)
-	TensorSplit []float64 // пропорции слоёв по устройствам (флаг -tensor-split)
+	NGL         int       // number of transformer layers on GPU (flag -ngl)
+	GPUMaxSeq   int       // max GPU KV-cache length (0 = auto, up to 4096)
+	NBatch      int       // prefill chunk size (flag -b / --n-batch; 0/1 = one token at a time)
+	GPUDevice   int       // CUDA device ordinal (flag -dev N)
+	GPUDevices  []int     // devices for layer split (flag -dev 0,1)
+	TensorSplit []float64 // layer proportions per device (flag -tensor-split)
 }
 
 func (o Options) modelOpts() model.Options {

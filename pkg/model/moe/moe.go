@@ -5,9 +5,9 @@ import (
 	"slices"
 )
 
-// TopKSoftmax выбирает top-k экспертов после softmax по router logits.
+// TopKSoftmax selects top-k experts after softmax on router logits.
 // normWeights: true - renorm top-k weights (Mixtral); false - raw softmax probs (DeepSeek V1).
-// wScale умножает веса (expert_weights_scale); 0 и 1 - без масштаба.
+// wScale scales weights (expert_weights_scale); 0 and 1 mean no scaling.
 func TopKSoftmax(logits []float32, k int, normWeights bool, wScale float32) (idxs []int, weights []float32) {
 	n := len(logits)
 	if n == 0 || k <= 0 {

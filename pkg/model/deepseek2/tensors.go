@@ -9,12 +9,12 @@ import (
 type layerNorms struct {
 	attnNorm []float32
 	ffnNorm  []float32
-	qANorm   []float32 // опционально (не lite)
+	qANorm   []float32 // optional (not lite)
 	kvANorm  []float32
 }
 
 type layerTensors struct {
-	// проекция Q
+	// Q projection
 	liteQ bool
 	q     string // attn_q.weight (lite)
 	qA    string
@@ -23,7 +23,7 @@ type layerTensors struct {
 	kvAMQA   string
 	kB       string // attn_k_b.weight (absorbed)
 	vB       string // attn_v_b.weight
-	kvB      string // устаревший attn_kv_b.weight
+	kvB      string // legacy attn_kv_b.weight
 	absorbed bool
 	attnOut  string
 	// FFN
@@ -38,7 +38,7 @@ type layerTensors struct {
 	gateShexp string
 	upShexp   string
 	downShexp string
-	expProbsB string // опциональный bias роутера
+	expProbsB string // optional router bias
 }
 
 func loadNormWeights(w *weights.Store, cfg Config) ([]layerNorms, []float32, error) {
@@ -49,7 +49,7 @@ func loadNormWeights(w *weights.Store, cfg Config) ([]layerNorms, []float32, err
 		if layers[i].attnNorm, err = w.Floats(p + "attn_norm.weight"); err != nil {
 			return nil, nil, fmt.Errorf("deepseek2: %sattn_norm: %w", p, err)
 		}
-		
+
 		if layers[i].ffnNorm, err = w.Floats(p + "ffn_norm.weight"); err != nil {
 			return nil, nil, fmt.Errorf("deepseek2: %sffn_norm: %w", p, err)
 		}

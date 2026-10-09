@@ -19,10 +19,10 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
-// errUploadOOM - cuMemAlloc вернул код -1 при загрузке весов на устройство
+// errUploadOOM - cuMemAlloc returned code -1 when uploading weights to device
 var errUploadOOM = errors.New("не хватило VRAM")
 
-// uploadFail форматирует ошибку upload; код -1 помечает как нехватку VRAM
+// uploadFail formats upload error; code -1 marks VRAM exhaustion
 func uploadFail(kind, name string, rc C.int) error {
 	if rc == -1 {
 		return fmt.Errorf("cuda: upload %s %q: %w", kind, name, errUploadOOM)
@@ -44,7 +44,7 @@ type gpuQ8Matrix struct {
 	bytes int
 }
 
-// Backend - CUDA через Driver API (libcuda.so), без cublas/cudart
+// Backend - CUDA via Driver API (libcuda.so), without cublas/cudart
 type Backend struct {
 	name        string
 	device      int
@@ -96,17 +96,17 @@ type Backend struct {
 	lastVecAddr uintptr
 	lastVecLen  int
 
-	// hiddenResident: hidden state лежит в matmulPool.d_resid между слоями
+	// hiddenResident: hidden state lives in matmulPool.d_resid between layers
 	hiddenResident bool
 }
 
-// Open инициализирует первое видимое устройство (GPU 0) и загружает kernels
+// Open initializes first visible device (GPU 0) and loads kernels
 func Open() (*Backend, error) {
 	return OpenDevice(0)
 }
 
-// OpenDevice инициализирует устройство с ordinal device и загружает kernels.
-// Нумерация - после фильтра CUDA_VISIBLE_DEVICES, как в llama.cpp
+// OpenDevice initializes device with ordinal and loads kernels.
+// Numbering - after CUDA_VISIBLE_DEVICES filter, as in llama.cpp
 func OpenDevice(device int) (*Backend, error) {
 	if device < 0 {
 		return nil, fmt.Errorf("cuda: device=%d: ordinal должен быть >= 0", device)
@@ -254,10 +254,10 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 
 func (b *Backend) Name() string { return b.name }
 
-// Device возвращает ordinal устройства (после CUDA_VISIBLE_DEVICES)
+// Device returns device ordinal (after CUDA_VISIBLE_DEVICES)
 func (b *Backend) Device() int { return b.device }
 
-// VRAMInfo возвращает занятую и общую видеопамять устройства (cuMemGetInfo)
+// VRAMInfo returns used and total device VRAM (cuMemGetInfo)
 func (b *Backend) VRAMInfo() (used, total uint64, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -688,13 +688,13 @@ func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, v
 	return out, nil
 }
 
-// ropeModeNeoX / ropeModeNorm - ключ graph cache для выбранного RoPE-kernel
+// ropeModeNeoX / ropeModeNorm - graph cache key for selected RoPE kernel
 const (
 	ropeModeNeoX = 0
 	ropeModeNorm = 1
 )
 
-// ropeKernel возвращает kernel RoPE и его ключ для graph cache
+// ropeKernel returns RoPE kernel and its graph cache key
 func (b *Backend) ropeKernel(mode ops.RoPEMode) (C.CUfunction, int, error) {
 	switch mode {
 	case ops.RoPENorm:
@@ -708,7 +708,7 @@ func (b *Backend) ropeKernel(mode ops.RoPEMode) (C.CUfunction, int, error) {
 	}
 }
 
-// ensureHeadNorm кеширует веса QK-norm; пустое имя - слой без QK-norm (нулевой указатель)
+// ensureHeadNorm caches QK-norm weights; empty name - layer without QK-norm (null pointer)
 func (b *Backend) ensureHeadNorm(name string, norm []float32, headDim int) (C.CUdeviceptr, error) {
 	if name == "" || len(norm) == 0 {
 		return 0, nil
@@ -762,7 +762,7 @@ func (b *Backend) ensureFP32Matrix(name string, matrix []float32, rows, cols int
 	return gm, nil
 }
 
-// quantMatrices возвращает кеш весов и uploader для типа t
+// quantMatrices returns weight cache and uploader for type t
 func (b *Backend) quantCache(t format.GGML) (map[string]gpuQ8Matrix, C.CUfunction, error) {
 	switch t {
 	case format.GgmlQ8_0:
@@ -826,7 +826,7 @@ func validateQuantMatMul(t format.GGML, raw []byte, rows, cols int, vec []float3
 	}
 }
 
-// ensureQuantMatrix кеширует квантованные веса на устройстве (Q8_0/Q4_0/Q4_K/Q5_K/Q6_K)
+// ensureQuantMatrix caches quantized weights on device (Q8_0/Q4_0/Q4_K/Q5_K/Q6_K)
 func (b *Backend) ensureQuantMatrix(t format.GGML, name string, raw []byte, rows, cols int) (gpuQ8Matrix, error) {
 	cache, _, err := b.quantCache(t)
 	if err != nil {
@@ -1044,7 +1044,7 @@ func (b *Backend) AttnFFNResidualCached(woName, ffnNormName, gateName, upName, d
 		return err
 	}
 
-	// Путь по host-буферам: residency (если была) сбрасываем, иначе x был бы проигнорирован
+	// Host buffer path: clear residency (if any), otherwise x would be ignored
 	b.clearResidencyLocked()
 
 	rc := C.gguf_cuda_attn_ffn_residual_device(
@@ -1116,7 +1116,7 @@ func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upNam
 		return err
 	}
 
-	// Путь по host-буферам: residency (если была) сбрасываем
+	// Host buffer path: clear residency (if any)
 	b.clearResidencyLocked()
 
 	rc := C.gguf_cuda_attn_ffn_residual_device(
@@ -1325,7 +1325,7 @@ func (b *Backend) QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNo
 	return nil
 }
 
-// FFNSwiGLUQuantCached: FFN SwiGLU нативно для Q8_0/Q4_0/Q4_K/Q5_K/Q6_K (без host Floats)
+// FFNSwiGLUQuantCached: FFN SwiGLU natively for Q8_0/Q4_0/Q4_K/Q5_K/Q6_K (no host Floats)
 func (b *Backend) FFNSwiGLUQuantCached(t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
 	if !b.hasSwiGLU {
 		return fmt.Errorf("cuda: SwiGLU kernel недоступен")
@@ -1334,7 +1334,7 @@ func (b *Backend) FFNSwiGLUQuantCached(t format.GGML, gateName, upName, downName
 	return b.ffnGatedQuantCached(b.fnSwiGLU, "swiglu", t, gateName, upName, downName, gateRaw, upRaw, downRaw, x, out, embd, ffn)
 }
 
-// FFNGeGLUQuantCached: FFN GeGLU (Gemma) нативно для тех же квантов
+// FFNGeGLUQuantCached: FFN GeGLU (Gemma) natively for the same quants
 func (b *Backend) FFNGeGLUQuantCached(t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
 	if !b.hasGeGLU {
 		return fmt.Errorf("cuda: GeGLU kernel недоступен")
@@ -1343,7 +1343,7 @@ func (b *Backend) FFNGeGLUQuantCached(t format.GGML, gateName, upName, downName 
 	return b.ffnGatedQuantCached(b.fnGeGLU, "geglu", t, gateName, upName, downName, gateRaw, upRaw, downRaw, x, out, embd, ffn)
 }
 
-// ffnGatedQuantCached - gate/up matmul + активация fnAct + down на устройстве
+// ffnGatedQuantCached - gate/up matmul + fnAct activation + down on device
 func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
 	if len(x) < embd || len(out) < embd {
 		return fmt.Errorf("cuda: ffn %s: короткий x/out", act)
@@ -1396,8 +1396,8 @@ func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t format.G
 	return nil
 }
 
-// AttnFFNResidualQuantCached: WO+residual+RMSNorm+FFN+residual нативно для квантов.
-// При активной residency x не грузится на GPU и результат остаётся в d_resid.
+// AttnFFNResidualQuantCached: WO+residual+RMSNorm+FFN+residual natively for quants.
+// With active residency x not uploaded to GPU and result stays in d_resid.
 func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
 	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
 		return fmt.Errorf("cuda: attn+ffn residual kernels недоступны")
@@ -1410,8 +1410,8 @@ func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName,
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// x == nil - явный запрос residency: читаем и оставляем residual на устройстве.
-	// Иначе источник истины - host-буфер x, и residency сбрасывается.
+	// x == nil - explicit residency request: read and keep residual on device.
+	// Otherwise source of truth is host buffer x, and residency is cleared.
 	resident := b.hiddenResident && len(x) == 0
 	if !resident {
 		if len(x) < embd {
@@ -1487,8 +1487,8 @@ func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName,
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		// d_resid успел измениться: актуального hidden нет ни на host, ни на GPU.
-		// HiddenActive()=false подскажет вызывающему, что откат на host невозможен.
+		// d_resid was modified: no valid hidden on host or GPU.
+		// HiddenActive()=false tells the caller rollback to host is impossible.
 		if resident && dirty != 0 {
 			b.clearResidencyLocked()
 		}
@@ -1499,9 +1499,9 @@ func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName,
 	return nil
 }
 
-// QKVRoPEAttentionQuantCached: QKV+RoPE+attn нативно для квантов.
-// При активной residency h считается на GPU как RMSNorm(d_resid, attnNorm).
-// mode выбирает kernel RoPE (NeoX для Qwen/Mistral, NORM для Llama); пустые qNormName/kNormName - слой без QK-norm.
+// QKVRoPEAttentionQuantCached: QKV+RoPE+attn natively for quants.
+// With active residency h computed on GPU as RMSNorm(d_resid, attnNorm).
+// mode selects RoPE kernel (NeoX for Qwen/Mistral, NORM for Llama); empty qNormName/kNormName - layer without QK-norm.
 func (b *Backend) QKVRoPEAttentionQuantCached(t format.GGML, mode ops.RoPEMode, qName, kName, vName, qNormName, kNormName, attnNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, attnNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
 	if !b.hasAttn || !b.hasRoPE || !b.hasRMS {
 		return fmt.Errorf("cuda: qkv+rope+attn kernels недоступны")
@@ -1523,7 +1523,7 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t format.GGML, mode ops.RoPEMode, 
 		return fmt.Errorf("cuda: kv cache не инициализирован")
 	}
 
-	// h == nil - hidden берётся из резидентного residual через RMSNorm на устройстве
+	// h == nil - hidden from resident residual via RMSNorm on device
 	resident := b.hiddenResident && len(h) == 0
 	if !resident && len(h) < embd {
 		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: короткий h")
@@ -1553,7 +1553,7 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t format.GGML, mode ops.RoPEMode, 
 		return err
 	}
 
-	// QK-norm есть не у всех архитектур: пустое имя - нулевой указатель, kernel норму пропустит
+	// Not all architectures have QK-norm: empty name means null pointer, kernel skips norm
 	qNormPtr, err := b.ensureHeadNorm(qNormName, qNorm, headDim)
 	if err != nil {
 		return err
@@ -1626,12 +1626,12 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t format.GGML, mode ops.RoPEMode, 
 	return nil
 }
 
-// HiddenResident: CUDA держит residual в d_resid между слоями
+// HiddenResident: CUDA keeps residual in d_resid between layers
 func (b *Backend) HiddenResident() bool {
 	return b.hasRMS && b.hasAdd && b.hasSwiGLU && b.hasAttn
 }
 
-// HiddenActive: в d_resid лежит актуальный hidden state
+// HiddenActive: d_resid holds the current hidden state
 func (b *Backend) HiddenActive() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -1639,7 +1639,7 @@ func (b *Backend) HiddenActive() bool {
 	return b.hiddenResident
 }
 
-// HiddenUpload включает residency: один HtoD hidden state на токен
+// HiddenUpload enables residency: one HtoD hidden state per token
 func (b *Backend) HiddenUpload(x []float32) error {
 	if len(x) == 0 {
 		return fmt.Errorf("cuda: HiddenUpload: пустой x")
@@ -1662,7 +1662,7 @@ func (b *Backend) HiddenUpload(x []float32) error {
 	return nil
 }
 
-// HiddenDownload забирает residual с устройства и выключает residency
+// HiddenDownload fetches residual from device and disables residency
 func (b *Backend) HiddenDownload(dst []float32) error {
 	if len(dst) == 0 {
 		return fmt.Errorf("cuda: HiddenDownload: пустой dst")
@@ -1684,7 +1684,7 @@ func (b *Backend) HiddenDownload(dst []float32) error {
 	return nil
 }
 
-// LogitsFromDevice: out_norm + lm_head на GPU поверх резидентного hidden; DtoH только logits
+// LogitsFromDevice: out_norm + lm_head on GPU over resident hidden; DtoH only logits
 func (b *Backend) LogitsFromDevice(t format.GGML, normName string, norm []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error {
 	if !b.hasRMS {
 		return fmt.Errorf("cuda: rmsnorm kernel недоступен")
@@ -1750,7 +1750,7 @@ func (b *Backend) LogitsFromDevice(t format.GGML, normName string, norm []float3
 	return nil
 }
 
-// clearResidencyLocked выключает device residency (вызывать под b.mu)
+// clearResidencyLocked disables device residency (call under b.mu)
 func (b *Backend) clearResidencyLocked() {
 	b.hiddenResident = false
 	b.matmulPool.resid_on_device = 0
@@ -1758,7 +1758,7 @@ func (b *Backend) clearResidencyLocked() {
 	b.matmulPool.resid_len = 0
 }
 
-// prepareVecUpload помечает пропуск HtoD, если тот же host-vec уже на GPU (Q/K/V из одного h)
+// prepareVecUpload marks HtoD skip if same host vec already on GPU (Q/K/V from one h)
 func (b *Backend) prepareVecUpload(vec []float32) {
 	addr := uintptr(unsafe.Pointer(&vec[0]))
 	if addr == b.lastVecAddr && len(vec) == b.lastVecLen {
@@ -1959,7 +1959,7 @@ func (b *Backend) KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error 
 }
 
 func (b *Backend) KVCacheReset() {
-	// Логический сброс: новые Append начнутся с pos=0, старые данные перезаписываются.
+	// Logical reset: new Append starts at pos=0, old data overwritten.
 }
 
 func (b *Backend) KVCacheAppend(layer, pos int, k, v []float32) error {

@@ -1,6 +1,6 @@
 package deepseek2
 
-// MLACache хранит K и V разной ширины (поглощённая MLA: K=lora+rope, V=lora)
+// MLACache stores K and V of different widths (absorbed MLA: K=lora+rope, V=lora)
 type MLACache struct {
 	layers []mlaLayer
 	kDim   int
@@ -25,9 +25,9 @@ func NewMLACache(cfg Config) *MLACache {
 	}
 
 	return &MLACache{
-		layers: layers, 
-		kDim: kDim,
-		vDim: vDim,
+		layers: layers,
+		kDim:   kDim,
+		vDim:   vDim,
 		maxSeq: cfg.ContextLength,
 	}
 }

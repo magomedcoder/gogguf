@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/gpu/metal"
 )
 
-// Metal-заглушка обязана реализовывать весь Backend, чтобы её можно было подставить вместо CUDA, когда появятся kernels
+// Metal stub must implement full Backend so it can replace CUDA when kernels appear
 var _ Backend = (*metal.Backend)(nil)
 
 func TestMetalScaffoldCompute(t *testing.T) {

@@ -13,42 +13,42 @@ import (
 	"unsafe"
 )
 
-// KernelsPTXForTarget экспортирует PTX matmul (диагностика)
+// KernelsPTXForTarget exports PTX matmul (diagnostics)
 func KernelsPTXForTarget(target int) string {
 	return kernelsPTXForTarget(target)
 }
 
-// MatmulVecPTXForTarget только matmul_vec
+// MatmulVecPTXForTarget matmul_vec only
 func MatmulVecPTXForTarget(target int) string {
 	return ptxHeaderForTarget(target) + matmulVecKernel
 }
 
-// MatmulQ8PTXForTarget только matmul_vec_q8_0
+// MatmulQ8PTXForTarget matmul_vec_q8_0 only
 func MatmulQ8PTXForTarget(target int) string {
 	return ptxHeaderForTarget(target) + matmulQ8Kernel
 }
 
-// MatmulQ4PTXForTarget только matmul_vec_q4_0
+// MatmulQ4PTXForTarget matmul_vec_q4_0 only
 func MatmulQ4PTXForTarget(target int) string {
 	return ptxHeaderForTarget(target) + matmulQ4Kernel
 }
 
-// MatmulQ4KPTXForTarget только matmul_vec_q4_k
+// MatmulQ4KPTXForTarget matmul_vec_q4_k only
 func MatmulQ4KPTXForTarget(target int) string {
 	return ptxHeaderForTarget(target) + matmulQ4KKernel
 }
 
-// MatmulQ5KPTXForTarget только matmul_vec_q5_k
+// MatmulQ5KPTXForTarget matmul_vec_q5_k only
 func MatmulQ5KPTXForTarget(target int) string {
 	return ptxHeaderForTarget(target) + matmulQ5KKernel
 }
 
-// MatmulQ6KPTXForTarget только matmul_vec_q6_k
+// MatmulQ6KPTXForTarget matmul_vec_q6_k only
 func MatmulQ6KPTXForTarget(target int) string {
 	return ptxHeaderForTarget(target) + matmulQ6KKernel
 }
 
-// ProbeLoadPTX пробует загрузить PTX на GPU 0
+// ProbeLoadPTX tries to load PTX on GPU 0
 func ProbeLoadPTX(ptx string) error {
 	var drv C.cuda_driver_t
 	var lib unsafe.Pointer

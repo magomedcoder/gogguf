@@ -6,16 +6,16 @@ import (
 	"sort"
 )
 
-// Config - параметры sampling
+// Config - sampling parameters
 type Config struct {
 	Temp float32 // 0 = greedy
-	TopK int     // 0 = выключено
-	TopP float32 // 1.0 = выключено
-	MinP float32 // 0 = выключено
+	TopK int     // 0 = disabled
+	TopP float32 // 1.0 = disabled
+	MinP float32 // 0 = disabled
 	Seed uint64
 }
 
-// New создаёт sampler по конфигурации
+// New creates sampler from configuration
 func New(cfg Config) Func {
 	if cfg.Temp <= 0 && cfg.TopK <= 0 && (cfg.TopP <= 0 || cfg.TopP >= 1) {
 		return Greedy

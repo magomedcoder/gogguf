@@ -2,12 +2,12 @@ package ops
 
 import "math"
 
-// RoPECosSin заполняет cos/sin таблицы для ApplyRoPEHeads (len >= headDim/2)
+// RoPECosSin fills cos/sin tables for ApplyRoPEHeads (len >= headDim/2)
 func RoPECosSin(cos, sin []float32, headDim, pos int, freqBase float32) {
 	RoPECosSinScaled(cos, sin, headDim, pos, freqBase, RoPEScale{})
 }
 
-// RoPECosSinScaled как RoPECosSin с LongRoPE / freq_scale / attn_factor
+// RoPECosSinScaled like RoPECosSin with LongRoPE / freq_scale / attn_factor
 func RoPECosSinScaled(cos, sin []float32, nRot, pos int, freqBase float32, scale RoPEScale) {
 	half := nRot / 2
 	if len(cos) < half || len(sin) < half {

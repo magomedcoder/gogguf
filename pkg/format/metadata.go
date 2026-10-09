@@ -2,33 +2,33 @@ package format
 
 import "fmt"
 
-// Metadata - контейнер метаданных в файле GGUF
-// Значения сопоставляются соответствующим типам Go
+// Metadata - metadata container in GGUF file
+// Values map to corresponding Go types
 type Metadata map[string]any
 
-// Int возвращает значение метаданных с указанным именем как int
-// Если значение нельзя представить как int, возвращается ошибка
+// Int returns metadata value with given name as int
+// If value cannot be represented as int, returns error
 func (m Metadata) Int(name string) (int, error) {
 	return MetaValueNumber[int](m, name)
 }
 
-// Any возвращает значение метаданных с указанным именем как interface{}
+// Any returns metadata value with given name as interface{}
 func (m Metadata) Any(name string) (any, error) {
 	return MetaValue[any](m, name)
 }
 
-// String возвращает значение метаданных с указанным именем как string
-// Если значение не является строкой, возвращается ошибка
+// String returns metadata value with given name as string
+// If value is not a string, returns error
 func (m Metadata) String(name string) (string, error) {
 	return MetaValue[string](m, name)
 }
 
-// StringArray возвращает массив строк из метаданных
+// StringArray returns string array from metadata
 func (m Metadata) StringArray(name string) ([]string, error) {
 	return MetaValue[[]string](m, name)
 }
 
-// IntOptional возвращает int из метаданных или defaultVal, если ключ отсутствует
+// IntOptional returns int from metadata or defaultVal if key missing
 func (m Metadata) IntOptional(name string, defaultVal int) int {
 	v, err := m.Int(name)
 	if err != nil {
@@ -38,8 +38,8 @@ func (m Metadata) IntOptional(name string, defaultVal int) int {
 	return v
 }
 
-// MetaValue возвращает значение метаданных с указанным именем как тип T
-// Если значение не является T, возвращается ошибка
+// MetaValue returns metadata value with given name as type T
+// If value is not T, returns error
 func MetaValue[T any](metadata Metadata, name string) (T, error) {
 	var zero T
 	v, found := metadata[name]
@@ -54,10 +54,10 @@ func MetaValue[T any](metadata Metadata, name string) (T, error) {
 	return v.(T), nil
 }
 
-// MetaValueNumber возвращает значение метаданных с указанным именем как число
-// Если значение не является числом, возвращается ошибка
-// Число приводится к типу T
-// Полезно, если точный тип числа не важен
+// MetaValueNumber returns metadata value with given name as number
+// If value is not a number, returns error
+// Number is converted to type T
+// Useful when exact numeric type does not matter
 func MetaValueNumber[T ~int | ~uint8 | ~int8 | ~uint16 | ~int16 | ~uint32 | ~int32 | ~uint64 | ~int64 | ~float32 | ~float64](metadata Metadata, name string) (T, error) {
 	v, found := metadata[name]
 	if !found {

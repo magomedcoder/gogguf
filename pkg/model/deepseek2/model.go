@@ -11,7 +11,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// Model - DeepSeek-V2/V3: поглощённая MLA + смесь экспертов
+// Model - DeepSeek-V2/V3: absorbed MLA + mixture of experts
 type Model struct {
 	cfg          Config
 	weights      *weights.Store
@@ -27,8 +27,8 @@ type Model struct {
 	lmHeadName   string
 }
 
-// Load создаёт DeepSeek2 из весов. GPU считает проекции MLA, FFN и экспертов (§7),
-// само MLA-attention остаётся на CPU: его кеш не совпадает по раскладке с GPU KV-cache
+// Load creates DeepSeek2 from weights. GPU runs MLA projections, FFN, and experts (§7),
+// MLA attention itself stays on CPU: its cache layout differs from GPU KV-cache
 func Load(w *weights.Store, g gpu.Backend, ngl, _ int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
@@ -72,7 +72,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl, _ int) (*Model, error) {
 	return m, nil
 }
 
-// initFused готовит GPU-пути слоя (§7). MLA-attention остаётся на CPU: поглощённые wk_b/wv_b лежат column-major, а кеш MLA - это K=kv_lora+rope, V=kv_lora, чего GPU KV-cache (n_kv_heads * head_dim) не описывает
+// initFused sets up GPU layer paths (§7). MLA attention stays on CPU: absorbed wk_b/wv_b are column-major, MLA cache is K=kv_lora+rope, V=kv_lora, which GPU KV-cache (n_kv_heads * head_dim) does not represent
 func (m *Model) initFused() {
 	if m.gpu == nil || m.ngl <= 0 {
 		return
@@ -89,7 +89,7 @@ func (m *Model) initFused() {
 	}
 }
 
-// layerOnGPU сообщает, идёт ли слой через GPU
+// layerOnGPU reports whether the layer runs on GPU
 func (m *Model) layerOnGPU(layer int) bool {
 	return m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 }
@@ -234,7 +234,7 @@ func (m *Model) forwardBlock(layer, pos int) error {
 		return err
 	}
 
-	ops.AddInPlace(m.scratch.x, m.scratch.tmp) // выход attn лежит в tmp после wo
+	ops.AddInPlace(m.scratch.x, m.scratch.tmp) // attn output is in tmp after wo
 
 	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
@@ -257,7 +257,7 @@ func (m *Model) forwardBlock(layer, pos int) error {
 	return nil
 }
 
-// ffnDense - плотный FFN слоя; на GPU идёт одним fused SwiGLU-вызовом (§7)
+// ffnDense - dense layer FFN; on GPU one fused SwiGLU call (§7)
 func (m *Model) ffnDense(lt layerTensors, layer int) error {
 	if m.layerOnGPU(layer) {
 		if err := m.fused.FFNNamed(lt.ffnGate, lt.ffnUp, lt.ffnDown, m.scratch.h, m.scratch.tmp, m.cfg.EmbeddingDim, m.cfg.FFNHidden); err == nil {
@@ -282,7 +282,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 	cfg := m.cfg
 	headK := cfg.QKNopeDim + cfg.RopeDim
 
-	// проекция Q
+	// Q projection
 	if lt.liteQ {
 		if err := m.matmulInto(lt.q, cfg.NumHeads*headK, cfg.EmbeddingDim, m.scratch.h, m.scratch.qFull, layer); err != nil {
 			return err
@@ -292,7 +292,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 			return err
 		}
 
-		// qLora -> tmp[:qLora] -> qLora (не in-place)
+		// qLora -> tmp[:qLora] -> qLora (not in-place)
 		tmpQ := m.scratch.tmp[:cfg.QLoraRank]
 		if err := ops.RMSNormInto(tmpQ, m.scratch.qLora[:cfg.QLoraRank], ln.qANorm, cfg.RMSNormEps); err != nil {
 			return err
@@ -304,7 +304,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		}
 	}
 
-	// сжатие KV + k_pe
+	// KV compression + k_pe
 	if err := m.matmulInto(lt.kvAMQA, cfg.qkDim(), cfg.EmbeddingDim, m.scratch.h, m.scratch.kvPe, layer); err != nil {
 		return err
 	}
@@ -321,7 +321,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		return m.mlaAttnLegacy(layer, pos, lt)
 	}
 
-	// поглощение q_nope через wk_b; RoPE на q_pe; Q = concat(q_absorbed, q_pe)
+	// absorb q_nope via wk_b; RoPE on q_pe; Q = concat(q_absorbed, q_pe)
 	kBW, err := m.weights.Floats(lt.kB)
 	if err != nil {
 		return err
@@ -339,7 +339,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		qPe := append([]float32(nil), src[cfg.QKNopeDim:]...)
 		ops.ApplyRoPEPartialScaled(qPe, pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
 
-		// голова wk_b: {qk_nope, kv_lora}
+		// wk_b head: {qk_nope, kv_lora}
 		wOff := h * cfg.QKNopeDim * cfg.KVLoraRank
 		dstAbs := m.scratch.qAbs[h*qk : h*qk+cfg.KVLoraRank]
 		if err := ops.MatMulColMajorInto(kBW[wOff:wOff+cfg.QKNopeDim*cfg.KVLoraRank], cfg.QKNopeDim, cfg.KVLoraRank, qNope, dstAbs); err != nil {
@@ -349,7 +349,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		copy(m.scratch.qAbs[h*qk+cfg.KVLoraRank:h*qk+qk], qPe)
 	}
 
-	// в кеш: K = concat(kv_cmpr, k_pe), V = kv_cmpr
+	// to cache: K = concat(kv_cmpr, k_pe), V = kv_cmpr
 	copy(m.scratch.kCache[:cfg.KVLoraRank], m.scratch.vCache)
 	copy(m.scratch.kCache[cfg.KVLoraRank:], kPe)
 	m.cache.Append(layer, m.scratch.kCache, m.scratch.vCache)
@@ -383,32 +383,32 @@ func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
 		return err
 	}
 
-	// kv_b: {kv_lora, n_head*(qk_nope+v_head)} - развернуть каждую голову
+	// kv_b: {kv_lora, n_head*(qk_nope+v_head)} - expand each head
 	perHead := cfg.QKNopeDim + cfg.VHeadDim
 	kFull := make([]float32, cfg.NumHeads*headK)
 	vFull := make([]float32, cfg.NumHeads*cfg.VHeadDim)
 
 	for h := 0; h < cfg.NumHeads; h++ {
 		wOff := h * cfg.KVLoraRank * perHead
-		// ggml mul_mat: out[perHead] из W[kv_lora, perHead]
+		// ggml mul_mat: out[perHead] from W[kv_lora, perHead]
 		out := make([]float32, perHead)
 		if err := ops.MatMulColMajorInto(kvBW[wOff:wOff+cfg.KVLoraRank*perHead], cfg.KVLoraRank, perHead, m.scratch.vCache, out); err != nil {
 			return err
 		}
 
 		copy(kFull[h*headK:h*headK+cfg.QKNopeDim], out[:cfg.QKNopeDim])
-		// тиражирование k_pe по головам
+		// broadcast k_pe across heads
 		copy(kFull[h*headK+cfg.QKNopeDim:h*headK+headK], m.scratch.kvPe[cfg.KVLoraRank:])
 		copy(vFull[h*cfg.VHeadDim:(h+1)*cfg.VHeadDim], out[cfg.QKNopeDim:])
 	}
 
-	// RoPE на хвосте Q
+	// RoPE on the Q tail
 	q := append([]float32(nil), m.scratch.qFull...)
 	for h := 0; h < cfg.NumHeads; h++ {
 		ops.ApplyRoPEPartialScaled(q[h*headK+cfg.QKNopeDim:h*headK+headK], pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
 	}
 
-	// Устаревший путь без поглощённой MLA пока не реализован (нужен отдельный кеш MHA).
+	// Legacy path without absorbed MLA is not implemented (needs separate MHA cache).
 	_ = q
 	_ = kFull
 	_ = vFull
@@ -436,7 +436,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, m.cfg.ExpertWeightsNorm, m.cfg.ExpertWeightScale)
 	clear(m.scratch.moeAcc)
 
-	// §6: выбранные эксперты считаются на GPU по срезу своего тензора, без деквантизации всей матрицы экспертов на host
+	// §6: selected experts run on GPU via tensor slice, without dequantizing full expert matrix on host
 	if m.moeExpertsGPU(lt, layer, idxs, weights) {
 		return m.sharedExpert(lt, layer)
 	}
@@ -483,8 +483,8 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	return m.sharedExpert(lt, layer)
 }
 
-// moeExpertsGPU считает выбранных экспертов на GPU и аккумулирует их в moeAcc.
-// false - слой на GPU не идёт (нет offload или тип весов вне fused-путей)
+// moeExpertsGPU runs selected experts on GPU and accumulates them in moeAcc.
+// false - layer does not run on GPU (no offload or weight type outside fused paths)
 func (m *Model) moeExpertsGPU(lt layerTensors, layer int, idxs []int, weights []float32) bool {
 	if !m.layerOnGPU(layer) || layer >= len(m.moeGPU) || !m.moeGPU[layer] {
 		return false
@@ -494,7 +494,7 @@ func (m *Model) moeExpertsGPU(lt layerTensors, layer int, idxs []int, weights []
 	ffn := m.cfg.ExpertFFN
 	for i, ei := range idxs {
 		if err := m.fused.ExpertFFN(lt.gateExps, lt.upExps, lt.downExps, ei, m.scratch.h, m.scratch.tmp, embd, ffn); err != nil {
-			// частично посчитанный moeAcc не годится: сбрасываем и уходим на CPU
+			// partially computed moeAcc is invalid: reset and fall back to CPU
 			clear(m.scratch.moeAcc)
 			return false
 		}
@@ -508,7 +508,7 @@ func (m *Model) moeExpertsGPU(lt layerTensors, layer int, idxs []int, weights []
 	return true
 }
 
-// sharedExpert добавляет в moeAcc общий эксперт слоя (если он есть)
+// sharedExpert adds the layer shared expert to moeAcc (if present)
 func (m *Model) sharedExpert(lt layerTensors, layer int) error {
 	if lt.gateShexp == "" {
 		return nil

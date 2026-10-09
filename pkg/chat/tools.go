@@ -6,40 +6,40 @@ import (
 	"strings"
 )
 
-// Tool - описание инструмента в стиле OpenAI
+// Tool describes a tool in OpenAI style.
 type Tool struct {
 	Type     string       `json:"type"`
 	Function ToolFunction `json:"function"`
 }
 
-// ToolFunction - схема функции инструмента
+// ToolFunction is the schema for a tool function.
 type ToolFunction struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Parameters  any    `json:"parameters,omitempty"`
 }
 
-// ToolCall - вызов инструмента в ответе assistant
+// ToolCall is a tool invocation in an assistant reply.
 type ToolCall struct {
 	ID       string       `json:"id,omitempty"`
 	Type     string       `json:"type"`
 	Function FunctionCall `json:"function"`
 }
 
-// FunctionCall - имя и аргументы (json-строка, как в OpenAI API)
+// FunctionCall holds name and arguments (JSON string, as in OpenAI API).
 type FunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
 
-// ToolChoiceAuto / ToolChoiceNone / ToolChoiceRequired - стандартные значения tool_choice
+// ToolChoiceAuto / ToolChoiceNone / ToolChoiceRequired are standard tool_choice values.
 const (
 	ToolChoiceAuto     = "auto"
 	ToolChoiceNone     = "none"
 	ToolChoiceRequired = "required"
 )
 
-// NormalizeToolChoice приводит tool_choice к значению для Jinja (string или object)
+// NormalizeToolChoice converts tool_choice to a Jinja value (string or object).
 func NormalizeToolChoice(choice any) any {
 	if choice == nil {
 		return ToolChoiceAuto
@@ -56,7 +56,7 @@ func NormalizeToolChoice(choice any) any {
 	}
 }
 
-// HasTools возвращает true, если в Options заданы инструменты
+// HasTools reports whether Options defines tools.
 func HasTools(opts Options) bool {
 	return len(opts.Tools) > 0
 }

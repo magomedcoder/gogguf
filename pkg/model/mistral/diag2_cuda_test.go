@@ -14,7 +14,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// диагностика: сколько блоков на строку ломает q4_k kernel
+// diagnostics: how many blocks per row break q4_k kernel
 func TestDiagQ4KBlocks(t *testing.T) {
 	r, err := format.OpenFile(modelPath(t))
 	if err != nil {
@@ -38,7 +38,7 @@ func TestDiagQ4KBlocks(t *testing.T) {
 		rows := 2
 		sub := make([]byte, 0, rows*blocks*quant.BlockQ4_KSize)
 		for row := 0; row < rows; row++ {
-			// строки исходной матрицы имеют 16 блоков; берём первые blocks
+			// source matrix rows have 16 blocks; take first blocks
 			off := row * 16 * quant.BlockQ4_KSize
 			sub = append(sub, raw[off:off+blocks*quant.BlockQ4_KSize]...)
 		}

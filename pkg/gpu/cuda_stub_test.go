@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Без тега cuda OpenCUDA всегда возвращает ErrUnavailable
+// Without cuda tag OpenCUDA always returns ErrUnavailable
 func TestOpenCUDAStub(t *testing.T) {
 	_, err := OpenCUDA()
 	if err != ErrUnavailable {
@@ -15,7 +15,7 @@ func TestOpenCUDAStub(t *testing.T) {
 	}
 }
 
-// Выбор устройства и multi-GPU без тега cuda тоже недоступны, но некорректный ordinal отсекается до драйвера
+// Device selection and multi-GPU without cuda tag also unavailable, but invalid ordinal rejected before driver
 func TestOpenCUDADeviceStub(t *testing.T) {
 	if _, err := OpenCUDADevice(1); err != ErrUnavailable {
 		t.Fatalf("OpenCUDADevice(1) = %v, ожидали ErrUnavailable", err)

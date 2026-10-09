@@ -2,7 +2,7 @@ package format
 
 import "io"
 
-// TensorInfo представляет тензор в файле GGUF
+// TensorInfo represents tensor in GGUF file
 type TensorInfo struct {
 	reader *Reader
 
@@ -12,7 +12,7 @@ type TensorInfo struct {
 	Offset     uint64
 }
 
-// RawView возвращает zero-copy срез данных тензора, если источник - mmap или []byte
+// RawView returns zero-copy tensor data slice when source is mmap or []byte
 func (t *TensorInfo) RawView() ([]byte, bool) {
 	start := t.reader.tensorOffset + int64(t.Offset)
 	size := t.Size()
@@ -28,8 +28,8 @@ type dataReader interface {
 	Slice(off, size int64) []byte
 }
 
-// Reader возвращает io.Reader для чтения данных тензора
-// Читатель ограничен размером данных тензора и не меняет позицию исходного файла
+// Reader returns io.Reader for reading tensor data
+// Reader is limited to tensor data size and does not change source file position
 func (t *TensorInfo) Reader() (io.Reader, error) {
 	start := t.reader.tensorOffset + int64(t.Offset)
 	size := t.Size()
@@ -42,12 +42,12 @@ func (t *TensorInfo) Reader() (io.Reader, error) {
 	return io.NewSectionReader(ra, start, size), nil
 }
 
-// Size возвращает размер данных тензора в байтах
+// Size returns tensor data size in bytes
 func (t *TensorInfo) Size() int64 {
 	return t.Type.dataSize(t.Dimensions)
 }
 
-// ValuesCount возвращает число элементов тензора
+// ValuesCount returns number of tensor elements
 func (t *TensorInfo) ValuesCount() int64 {
 	n := uint64(1)
 	for _, d := range t.Dimensions {

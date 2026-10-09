@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// MultiBackend поверх одного реального CUDA-устройства: план слоёв, KV, hidden и VRAM должны работать так же, как без обёртки (список из одной карты)
+// MultiBackend over one real CUDA device: layer plan, KV, hidden and VRAM should behave like without wrapper (single-card list)
 func TestMultiBackendOverRealCUDADevice(t *testing.T) {
 	dev, err := OpenCUDADevice(0)
 	if err != nil {

@@ -6,19 +6,19 @@ import (
 )
 
 var (
-	// ErrUnavailable CUDA не собран или драйвер недоступен
+	// ErrUnavailable CUDA not built or driver unavailable
 	ErrUnavailable = errors.New("gpu: CUDA недоступна")
-	// ErrInvalidNGL некорректное число слоёв для offload
+	// ErrInvalidNGL invalid layer count for offload
 	ErrInvalidNGL = errors.New("gpu: ngl должен быть >= 0")
-	// ErrInvalidDevice некорректный ordinal устройства (-dev)
+	// ErrInvalidDevice invalid device ordinal (-dev)
 	ErrInvalidDevice = errors.New("gpu: номер устройства должен быть >= 0")
-	// ErrMetalUnavailable Metal-backend не собран или доступен только как заглушка
+	// ErrMetalUnavailable Metal backend not built or only available as stub
 	ErrMetalUnavailable = errors.New("gpu: Metal недоступен (нужны macOS и сборка -tags metal)")
-	// ErrOutOfMemory не хватило VRAM при upload весов / буферов на устройство
+	// ErrOutOfMemory not enough VRAM when uploading weights/buffers to device
 	ErrOutOfMemory = errors.New("gpu: не хватило VRAM")
 )
 
-// IsOutOfMemory сообщает, что ошибка похожа на исчерпание VRAM при upload
+// IsOutOfMemory reports whether the error looks like VRAM exhaustion on upload
 func IsOutOfMemory(err error) bool {
 	if err == nil {
 		return false
@@ -33,6 +33,6 @@ func IsOutOfMemory(err error) bool {
 		return true
 	}
 
-	// CUDA Driver: cuMemAlloc при upload historically возвращает код -1
+	// CUDA Driver: cuMemAlloc on upload historically returns code -1
 	return strings.Contains(msg, "upload") && strings.Contains(msg, "код -1")
 }

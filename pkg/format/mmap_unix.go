@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-// OpenFileMapped открывает GGUF через mmap для zero-copy доступа к весам
+// OpenFileMapped opens GGUF via mmap for zero-copy weight access
 func OpenFileMapped(path string) (*MappedReader, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -42,7 +42,7 @@ func OpenFileMapped(path string) (*MappedReader, error) {
 	}, nil
 }
 
-// Close снимает mmap и закрывает файл
+// Close unmaps and closes file
 func (m *MappedReader) Close() error {
 	if m.data != nil {
 		_ = syscall.Munmap(m.data)

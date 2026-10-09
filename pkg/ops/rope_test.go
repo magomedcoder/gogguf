@@ -60,7 +60,7 @@ func TestApplyRoPEPartialScaledFactors(t *testing.T) {
 		Factors: []float32{2, 2},
 	})
 
-	// factor=2 -> угол вдвое меньше, чем у plain
+	// factor=2 -> angle half that of plain
 	half := []float32{1, 0, 0, 1}
 	ApplyRoPEPartial(half, 1, 10000, 4)
 	for i := range scaled {

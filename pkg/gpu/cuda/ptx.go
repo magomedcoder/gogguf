@@ -2,7 +2,7 @@
 
 package cuda
 
-// ptxTargets возвращает список SM-таргетов для попытки JIT
+// ptxTargets returns list of SM targets to try for JIT
 func ptxTargets(cc int) []int {
 	switch {
 	case cc >= 120:
@@ -24,13 +24,13 @@ func opsPTXForTarget(target int) string {
 	return ptxHeaderForTarget(target) + opsKernelsBody
 }
 
-// kernelsPTX выбирает PTX matmul-ядер по compute capability GPU
+// kernelsPTX selects PTX matmul kernels by GPU compute capability
 func kernelsPTX(cc int) string {
 	targets := ptxTargets(cc)
 	return kernelsPTXForTarget(targets[0])
 }
 
-// opsPTX выбирает PTX op-ядер (RMSNorm, ...)
+// opsPTX selects PTX op kernels (RMSNorm, ...)
 func opsPTX(cc int) string {
 	targets := ptxTargets(cc)
 	return opsPTXForTarget(targets[0])
@@ -39,7 +39,7 @@ func opsPTX(cc int) string {
 func ptxHeaderForTarget(target int) string {
 	switch {
 	case target >= 120:
-		// Blackwell (sm_120) требует PTX >= 8.7
+		// Blackwell (sm_120) requires PTX >= 8.7
 		return `.version 8.7
 .target sm_120
 .address_size 64
@@ -726,7 +726,7 @@ Q6K_EXIT:
 const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel + matmulQ4Kernel + matmulQ4KKernel + matmulQ5KKernel + matmulQ6KKernel
 
 // opsKernelsBody - RMSNorm, RoPE, SwiGLU, attention, softmax, add.
-// Комментарии внутри PTX только ASCII: ptxas отвергает не-ASCII символы.
+// Comments inside PTX must be ASCII only: ptxas rejects non-ASCII.
 const opsKernelsBody = `
 // rmsnorm: 1 block - sum on tid0, apply in parallel (stride)
 .visible .entry rmsnorm(

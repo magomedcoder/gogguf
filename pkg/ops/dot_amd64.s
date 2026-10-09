@@ -1,4 +1,4 @@
-// AVX2 dot product и проверка CPUID для amd64
+// AVX2 dot product and CPUID check for amd64
 
 //go:build amd64
 
@@ -27,7 +27,7 @@ noavx2:
 	RET
 
 // func dotAVX2Asm(a []float32, b []float32, n int) float32
-// n кратно 8
+// n is a multiple of 8
 TEXT ·dotAVX2Asm(SB), NOSPLIT, $0-60
 	MOVQ  a_base+0(FP), SI
 	MOVQ  b_base+24(FP), DI

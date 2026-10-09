@@ -13,7 +13,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// modelPath ищет Mistral-7B-Instruct-v0.2-Q4_K_M.gguf или пропускает тест
+// modelPath finds Mistral-7B-Instruct-v0.2-Q4_K_M.gguf or skips the test
 func modelPath(t *testing.T) string {
 	t.Helper()
 
@@ -46,7 +46,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 		}
 	}
 
-	// GGUF Mistral-7B-Instruct размечен как general.architecture=llama
+	// GGUF Mistral-7B-Instruct is tagged as general.architecture=llama
 	m, err := LoadLlamaMeta(weights.New(r), g, ngl, 0)
 	if err != nil {
 		if g != nil {
@@ -59,7 +59,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 	return m
 }
 
-// §5: fused QKV Mistral (NeoX RoPE, без QK-norm) на Q4_K должен давать те же logits, что и CPU-путь. Слоёв берём немного: 7B целиком в 4 ГБ VRAM не лезет
+// §5: fused QKV Mistral (NeoX RoPE, no QK-norm) on Q4_K must match CPU logits. Few layers only: full 7B does not fit 4 GB VRAM
 func TestMistralPartialOffloadLogitsParity(t *testing.T) {
 	const ngl = 4
 

@@ -1,6 +1,6 @@
 package mistral
 
-// DebugHooks - колбэки для пошаговой отладки forward pass
+// DebugHooks - callbacks for step-by-step forward pass debugging
 type DebugHooks struct {
 	OnEmbed       func(x []float32)
 	OnLayer       func(layer int, x []float32)

@@ -6,14 +6,14 @@ import (
 	"os"
 )
 
-// MappedReader - GGUF reader с memory-mapped файлом
+// MappedReader - GGUF reader with memory-mapped file
 type MappedReader struct {
 	*Reader
 	file *os.File
 	data []byte
 }
 
-// Data возвращает mmap-срез всего файла
+// Data returns mmap slice of entire file
 func (m *MappedReader) Data() []byte {
 	return m.data
 }

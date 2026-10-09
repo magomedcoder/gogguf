@@ -9,7 +9,7 @@ import (
 
 const parallelMatMulMinRows = 64
 
-// MatMulVec умножает матрицу [rows*cols] на вектор [cols]
+// MatMulVec multiplies matrix [rows*cols] by vector [cols]
 func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, error) {
 	if len(vec) != cols {
 		return nil, fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -26,7 +26,7 @@ func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, erro
 	return out, nil
 }
 
-// MatMulVecInto записывает matmul в out [rows]
+// MatMulVecInto writes matmul to out [rows]
 func MatMulVecInto(matrix []float32, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -52,7 +52,7 @@ func matMulVecRows(matrix, vec, out []float32, rowStart, rowEnd, cols int) {
 	}
 }
 
-// MatMulVecQ8_0 умножает Q8_0-матрицу [rows*cols] на float32-вектор [cols]
+// MatMulVecQ8_0 multiplies Q8_0 matrix [rows*cols] by float32 vector [cols]
 func MatMulVecQ8_0(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if len(vec) != cols {
 		return nil, fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -76,7 +76,7 @@ func MatMulVecQ8_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ8_0Into записывает Q8_0 matmul в out [rows]
+// MatMulVecQ8_0Into writes Q8_0 matmul to out [rows]
 func MatMulVecQ8_0Into(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -117,7 +117,7 @@ func matMulVecQ8_0Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
-// MatMulVecQ4_0 умножает Q4_0-матрицу [rows*cols] на float32-вектор [cols]
+// MatMulVecQ4_0 multiplies Q4_0 matrix [rows*cols] by float32 vector [cols]
 func MatMulVecQ4_0(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if len(vec) != cols {
 		return nil, fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -141,7 +141,7 @@ func MatMulVecQ4_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ4_0Into записывает Q4_0 matmul в out [rows]
+// MatMulVecQ4_0Into writes Q4_0 matmul to out [rows]
 func MatMulVecQ4_0Into(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -182,7 +182,7 @@ func matMulVecQ4_0Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
-// MatMulVecQ4_K умножает Q4_K-матрицу [rows*cols] на float32-вектор [cols]
+// MatMulVecQ4_K multiplies Q4_K matrix [rows*cols] by float32 vector [cols]
 func MatMulVecQ4_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if len(vec) != cols {
 		return nil, fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -206,7 +206,7 @@ func MatMulVecQ4_K(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ4_KInto записывает Q4_K matmul в out [rows]
+// MatMulVecQ4_KInto writes Q4_K matmul to out [rows]
 func MatMulVecQ4_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -247,7 +247,7 @@ func matMulVecQ4_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
-// MatMulVecQ5_K умножает Q5_K-матрицу [rows*cols] на float32-вектор [cols]
+// MatMulVecQ5_K multiplies Q5_K matrix [rows*cols] by float32 vector [cols]
 func MatMulVecQ5_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := MatMulVecQ5_KInto(raw, rows, cols, vec, out); err != nil {
@@ -257,7 +257,7 @@ func MatMulVecQ5_K(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ5_KInto записывает Q5_K matmul в out [rows]
+// MatMulVecQ5_KInto writes Q5_K matmul to out [rows]
 func MatMulVecQ5_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -298,7 +298,7 @@ func matMulVecQ5_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
-// MatMulVecQ6_K умножает Q6_K-матрицу [rows*cols] на float32-вектор [cols]
+// MatMulVecQ6_K multiplies Q6_K matrix [rows*cols] by float32 vector [cols]
 func MatMulVecQ6_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := MatMulVecQ6_KInto(raw, rows, cols, vec, out); err != nil {
@@ -308,7 +308,7 @@ func MatMulVecQ6_K(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ6_KInto записывает Q6_K matmul в out [rows]
+// MatMulVecQ6_KInto writes Q6_K matmul to out [rows]
 func MatMulVecQ6_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -349,12 +349,12 @@ func matMulVecQ6_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
-// RMSNorm применяет RMS-нормализацию: x * weight / RMS(x)
+// RMSNorm applies RMS normalization: x * weight / RMS(x)
 func RMSNorm(x, weight []float32, eps float32) ([]float32, error) {
 	return rmsnorm(x, weight, eps)
 }
 
-// Add поэлементно складывает a и b
+// Add element-wise adds a and b
 func Add(a, b []float32) []float32 {
 	out := make([]float32, len(a))
 	for i := range a {
@@ -364,7 +364,7 @@ func Add(a, b []float32) []float32 {
 	return out
 }
 
-// Scale умножает вектор на скаляр
+// Scale multiplies vector by scalar
 func Scale(x []float32, s float32) []float32 {
 	out := make([]float32, len(x))
 	for i, v := range x {
@@ -378,7 +378,7 @@ func SiLU(x float32) float32 {
 	return x / (1 + float32(math.Exp(float64(-x))))
 }
 
-// VectorRMS возвращает sqrt(mean(x²)) - метрика для сверки hidden states
+// VectorRMS returns sqrt(mean(x²)) - metric for comparing hidden states
 func VectorRMS(x []float32) float32 {
 	if len(x) == 0 {
 		return 0

@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
-// MatMulVecQ4_1 умножает Q4_1-матрицу [rows*cols] на float32-вектор [cols]
+// MatMulVecQ4_1 multiplies Q4_1 matrix [rows*cols] by float32 vector [cols]
 func MatMulVecQ4_1(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := MatMulVecQ4_1Into(raw, rows, cols, vec, out); err != nil {
@@ -16,7 +16,7 @@ func MatMulVecQ4_1(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ4_1Into записывает Q4_1 matmul в out [rows]
+// MatMulVecQ4_1Into writes Q4_1 matmul to out [rows]
 func MatMulVecQ4_1Into(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -57,7 +57,7 @@ func matMulVecQ4_1Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
-// MatMulVecQ5_0 умножает Q5_0-матрицу [rows*cols] на float32-вектор [cols]
+// MatMulVecQ5_0 multiplies Q5_0 matrix [rows*cols] by float32 vector [cols]
 func MatMulVecQ5_0(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := MatMulVecQ5_0Into(raw, rows, cols, vec, out); err != nil {
@@ -67,7 +67,7 @@ func MatMulVecQ5_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ5_0Into записывает Q5_0 matmul в out [rows]
+// MatMulVecQ5_0Into writes Q5_0 matmul to out [rows]
 func MatMulVecQ5_0Into(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -108,7 +108,7 @@ func matMulVecQ5_0Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
-// MatMulVecQ5_1 умножает Q5_1-матрицу [rows*cols] на float32-вектор [cols]
+// MatMulVecQ5_1 multiplies Q5_1 matrix [rows*cols] by float32 vector [cols]
 func MatMulVecQ5_1(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := MatMulVecQ5_1Into(raw, rows, cols, vec, out); err != nil {
@@ -118,7 +118,7 @@ func MatMulVecQ5_1(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ5_1Into записывает Q5_1 matmul в out [rows]
+// MatMulVecQ5_1Into writes Q5_1 matmul to out [rows]
 func MatMulVecQ5_1Into(raw []byte, rows, cols int, vec, out []float32) error {
 	if len(vec) != cols {
 		return fmt.Errorf("ops: len(vec)=%d, cols=%d", len(vec), cols)
@@ -159,7 +159,7 @@ func matMulVecQ5_1Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 	}
 }
 
-// EmbeddingQ4_1Into деквантизирует embedding-строку в dst
+// EmbeddingQ4_1Into dequantizes an embedding row into dst
 func EmbeddingQ4_1Into(dst []float32, raw []byte, dim, tokenID int) error {
 	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ4_1Size, quant.QK4_1)
 	if err != nil {
@@ -173,7 +173,7 @@ func EmbeddingQ4_1Into(dst []float32, raw []byte, dim, tokenID int) error {
 	return quant.DequantQ4_1Into(dst, raw[off:off+rowBytes], dim)
 }
 
-// EmbeddingQ5_0Into деквантизирует embedding-строку в dst
+// EmbeddingQ5_0Into dequantizes an embedding row into dst
 func EmbeddingQ5_0Into(dst []float32, raw []byte, dim, tokenID int) error {
 	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ5_0Size, quant.QK5_0)
 	if err != nil {
@@ -187,7 +187,7 @@ func EmbeddingQ5_0Into(dst []float32, raw []byte, dim, tokenID int) error {
 	return quant.DequantQ5_0Into(dst, raw[off:off+rowBytes], dim)
 }
 
-// EmbeddingQ5_1Into деквантизирует embedding-строку в dst
+// EmbeddingQ5_1Into dequantizes an embedding row into dst
 func EmbeddingQ5_1Into(dst []float32, raw []byte, dim, tokenID int) error {
 	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ5_1Size, quant.QK5_1)
 	if err != nil {

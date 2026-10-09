@@ -15,7 +15,7 @@ var (
 	symlinksDisabled bool
 )
 
-// downloadFile скачивает URL в localPath с resume и прогрессом в stderr
+// downloadFile downloads URL to localPath with resume and progress on stderr.
 func downloadFile(url, localPath, token string, expectedSize int64) error {
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		return err
@@ -46,7 +46,7 @@ func downloadFile(url, localPath, token string, expectedSize int64) error {
 
 	client := &http.Client{
 		Timeout: 0,
-	} // большие модели; прогресс через body
+	} // large models; progress via body
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -56,7 +56,7 @@ func downloadFile(url, localPath, token string, expectedSize int64) error {
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		offset = 0 // сервер отдал файл целиком
+		offset = 0 // server returned the full file
 	case http.StatusPartialContent:
 		// resume OK
 	default:
@@ -147,7 +147,7 @@ func (p *progressWriter) finish(ok bool) {
 	}
 }
 
-// finalizeFile создаёт symlink snapshots/... -> blobs/{oid} (или copy при ошибке)
+// finalizeFile creates symlink snapshots/... -> blobs/{oid} (or copy on failure).
 func finalizeFile(f FileInfo) (string, error) {
 	if f.LocalPath == f.FinalPath {
 		return f.FinalPath, nil
@@ -186,7 +186,7 @@ func finalizeFile(f FileInfo) (string, error) {
 		symlinkMu.Unlock()
 	}
 
-	// degraded: hardlink или copy
+	// degraded: hardlink or copy
 	if err := os.Link(f.LocalPath, f.FinalPath); err == nil {
 		return f.FinalPath, nil
 	}
@@ -211,7 +211,7 @@ func finalizeFile(f FileInfo) (string, error) {
 	return f.FinalPath, nil
 }
 
-// ensureDownloaded скачивает файл если его ещё нет в кэше
+// ensureDownloaded downloads the file if it is not yet in cache.
 func ensureDownloaded(f FileInfo, token string) (string, error) {
 	if _, err := os.Stat(f.FinalPath); err == nil {
 		return f.FinalPath, nil
@@ -222,7 +222,7 @@ func ensureDownloaded(f FileInfo, token string) (string, error) {
 			return finalizeFile(f)
 		}
 	} else {
-		// маленький файл без LFS oid - качаем прямо в FinalPath
+		// small file without LFS oid - download directly to FinalPath
 		f.LocalPath = f.FinalPath
 	}
 

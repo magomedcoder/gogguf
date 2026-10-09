@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 )
 
-// initFused готовит fused GPU-пути слоя (§5). Llama: RoPE NORM и без QK-norm
+// initFused sets up fused GPU layer paths (§5). Llama: RoPE NORM and no QK-norm
 func (m *Model) initFused() {
 	if m.gpu == nil {
 		return
@@ -45,7 +45,7 @@ func (m *Model) initFused() {
 	}
 }
 
-// initResidency включает device-resident hidden state (§1, §5): нужны все слои на GPU, fused-пути и единый поддерживаемый квант весов во всех слоях
+// initResidency enables device-resident hidden state (§1, §5): all layers on GPU, fused paths, and one supported weight quant in every layer
 func (m *Model) initResidency() {
 	if m.gpu == nil || m.ngl < m.cfg.NumLayers || m.fused == nil {
 		return
@@ -69,8 +69,8 @@ func (m *Model) initResidency() {
 	m.logitsOnGPU = true
 }
 
-// uploadHidden кладёт hidden state на устройство перед слоями (один HtoD на токен).
-// Отладочные хуки читают host-буфер x, поэтому с ними residency не включается
+// uploadHidden uploads hidden state before layers (one HtoD per token).
+// Debug hooks read host buffer x, so residency is not enabled with them
 func (m *Model) uploadHidden() {
 	if !m.residency || m.debug != nil || m.gpuKVStale {
 		return
@@ -84,8 +84,8 @@ func (m *Model) uploadHidden() {
 	m.residDevice = true
 }
 
-// forwardBlockDevice считает слой на GPU поверх резидентного hidden state.
-// k/v копируются на host только для зеркала CPU KV-cache (нужно для fallback-путей)
+// forwardBlockDevice runs the layer on GPU over resident hidden state.
+// k/v copied to host only for CPU KV-cache mirror (needed for fallback paths)
 func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []float32) error {
 	if err := m.qkvAttnGPU(layer, pos, ln, nil, k, v, attn); err != nil {
 		return err
@@ -95,21 +95,21 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []f
 	return m.attnFFNGPU(layer, ln, nil, attn)
 }
 
-// qkvAttnGPU: QKV + RoPE + KV append + attention на GPU.
-// h == nil - hidden резидентен: attn_norm считается на устройстве из residual
+// qkvAttnGPU: QKV + RoPE + KV append + attention on GPU.
+// h == nil - hidden resident: attn_norm computed on device from residual
 func (m *Model) qkvAttnGPU(layer, pos int, ln layerNorms, h, kOut, vOut, attn []float32) error {
 	kvPos := m.cache.Len()
 
 	return m.fused.QKVAttn(m.gpuLayers[layer], m.fusedDims, nil, nil, ln.attnNorm, h, attn, kOut, vOut, layer, pos, kvPos, kvPos+1)
 }
 
-// attnFFNGPU: WO + residual + ffn_norm + FFN + residual на GPU.
-// x == nil - hidden резидентен на устройстве
+// attnFFNGPU: WO + residual + ffn_norm + FFN + residual on GPU.
+// x == nil - hidden resident on device
 func (m *Model) attnFFNGPU(layer int, ln layerNorms, x, attn []float32) error {
 	return m.fused.AttnFFN(m.gpuLayers[layer], m.fusedDims, ln.ffnNorm, x, attn)
 }
 
-// recoverHiddenFromDevice возвращает hidden state на host после сбоя device-слоя
+// recoverHiddenFromDevice brings hidden state back to host after a device-layer failure
 func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	m.residDevice = false
 	m.residency = false
@@ -125,7 +125,7 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	return nil
 }
 
-// syncHiddenFromDevice забирает hidden state с устройства, если он там (для host-читателей)
+// syncHiddenFromDevice pulls hidden state from device when resident (for host readers)
 func (m *Model) syncHiddenFromDevice() error {
 	if !m.residDevice {
 		return nil
@@ -136,7 +136,7 @@ func (m *Model) syncHiddenFromDevice() error {
 	return m.gpu.HiddenDownload(m.scratch.x)
 }
 
-// logitsDevice считает RMSNorm(resident hidden) + lm_head на GPU без DtoH hidden (§2)
+// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH hidden (§2)
 func (m *Model) logitsDevice() error {
 	return m.fused.LogitsDevice("output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 }

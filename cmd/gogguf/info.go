@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf"
 )
 
-// runInfo выводит краткую информацию о GGUF-файле
+// runInfo prints brief information about a GGUF file.
 func runInfo(args []string) error {
 	fs := flag.NewFlagSet("info", flag.ExitOnError)
 	modelPath := fs.String("m", "", "путь к файлу GGUF")

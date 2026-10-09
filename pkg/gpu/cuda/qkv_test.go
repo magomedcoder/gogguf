@@ -9,7 +9,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
-// TestQKVRoPEAttentionGraphReplay проверяет QKV+RoPE+attn на GPU и replay CUDA Graph.
+// TestQKVRoPEAttentionGraphReplay checks QKV+RoPE+attn on GPU and CUDA Graph replay.
 func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -62,7 +62,7 @@ func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 	cos := make([]float32, half)
 	sin := make([]float32, half)
 
-	// runCPU - эталон на CPU: QKV -> RMSNorm -> RoPE -> attention
+	// runCPU - CPU reference: QKV -> RMSNorm -> RoPE -> attention
 	runCPU := func(pos, seqLen int) (attn, kTok, vTok []float32) {
 		ops.RoPECosSin(cos, sin, headDim, pos, freqBase)
 		q := make([]float32, qDim)
@@ -101,7 +101,7 @@ func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 		vCache := make([]float32, seqLen*kvDim)
 		copy(kCache[(seqLen-1)*kvDim:], k)
 		copy(vCache[(seqLen-1)*kvDim:], v)
-		// Ранние позиции нули: для первого токена важен только текущий
+		// Early positions zero: for first token only current matters
 		attn = make([]float32, qDim)
 		scores := make([]float32, seqLen)
 		if err := ops.AttentionScoresInto(attn, q, kCache, vCache, scores, seqLen, nHeads, nKVHeads, headDim); err != nil {
@@ -111,7 +111,7 @@ func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 		return attn, k, v
 	}
 
-	// Первый токен: capture CUDA Graph
+	// First token: capture CUDA Graph
 	ops.RoPECosSin(cos, sin, headDim, 0, freqBase)
 	wantAttn, _, _ := runCPU(0, 1)
 	attn := make([]float32, qDim)
@@ -127,10 +127,10 @@ func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 		}
 	}
 
-	// Второй токен: replay graph + seq_len=2
+	// Second token: replay graph + seq_len=2
 	ops.RoPECosSin(cos, sin, headDim, 1, freqBase)
 	wantAttn2, _, _ := runCPU(1, 2)
-	// runCPU выше кладёт в KV только текущий токен; собираем полный кеш из двух
+	// runCPU above stores only current token in KV; assemble full cache from two
 	{
 		ops.RoPECosSin(cos, sin, headDim, 0, freqBase)
 		q0 := make([]float32, qDim)

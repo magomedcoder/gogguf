@@ -1,6 +1,6 @@
 package llama
 
-// DebugHooks - колбэки для пошаговой отладки forward pass (сверка с llama.cpp)
+// DebugHooks - callbacks for step-by-step forward pass debugging (compare with llama.cpp)
 type DebugHooks struct {
 	OnEmbed       func(x []float32)
 	OnLayer       func(layer int, x []float32)

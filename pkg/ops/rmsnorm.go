@@ -37,7 +37,7 @@ func rmsnorm(x, weight []float32, eps float32) ([]float32, error) {
 	return out, nil
 }
 
-// RMSNormBatchInto - RMSNorm по batch подряд идущих векторов [batch*dim]
+// RMSNormBatchInto - RMSNorm over batch of contiguous vectors [batch*dim]
 func RMSNormBatchInto(dst, x, weight []float32, eps float32, batch, dim int) error {
 	if batch < 1 || dim < 1 {
 		return fmt.Errorf("ops: RMSNormBatchInto: batch=%d dim=%d", batch, dim)

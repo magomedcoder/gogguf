@@ -9,7 +9,7 @@ import (
 	"github.com/magomedcoder/gogguf"
 )
 
-// runInspect выводит метаданные и список тензоров файла
+// runInspect prints metadata and the file's tensor list.
 func runInspect(path string) error {
 	r, err := gogguf.OpenFile(path)
 	if err != nil {
@@ -40,7 +40,7 @@ func runInspect(path string) error {
 	return nil
 }
 
-// byteOrderLabel возвращает читаемое имя порядка байт
+// byteOrderLabel returns a readable byte order name.
 func byteOrderLabel(o binary.ByteOrder) string {
 	switch o {
 	case binary.LittleEndian:
@@ -52,7 +52,7 @@ func byteOrderLabel(o binary.ByteOrder) string {
 	}
 }
 
-// printMetadata выводит одно поле метаданных
+// printMetadata prints one metadata field.
 func printMetadata(name string, v any) {
 	switch vv := v.(type) {
 	case []uint8, []int8, []uint16, []int16, []uint32, []int32, []float32, []bool, []string, []uint64, []int64, []float64:
@@ -62,7 +62,7 @@ func printMetadata(name string, v any) {
 	}
 }
 
-// sliceLen возвращает длину слайса любого поддерживаемого типа
+// sliceLen returns the length of a slice of any supported type.
 func sliceLen(v any) int {
 	switch s := v.(type) {
 	case []uint8:

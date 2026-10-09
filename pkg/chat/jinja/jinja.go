@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Render выполняет Jinja2-шаблон с заданным контекстом
+// Render executes a Jinja2 template with the given context.
 func Render(template string, ctx map[string]any) (string, error) {
 	tokens, err := tokenize(template)
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// isMistralModel определяет Mistral по architecture или метаданным (TheBloke: arch=llama)
+// isMistralModel detects Mistral by architecture or metadata (TheBloke: arch=llama)
 func isMistralModel(r *format.Reader) bool {
 	arch, err := r.Metadata.String("general.architecture")
 	if err != nil {
@@ -38,7 +38,7 @@ func isMistralModel(r *format.Reader) bool {
 	return false
 }
 
-// isMixtralModel определяет Mixtral MoE по llama.* + expert_count или имени
+// isMixtralModel detects Mixtral MoE by llama.* + expert_count or name
 func isMixtralModel(r *format.Reader) bool {
 	arch, err := r.Metadata.String("general.architecture")
 	if err != nil || arch != "llama" {

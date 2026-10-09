@@ -2,7 +2,7 @@ package ops
 
 import "math"
 
-// SoftmaxInPlace применяет numerically stable softmax к x
+// SoftmaxInPlace applies numerically stable softmax to x
 func SoftmaxInPlace(x []float32) {
 	if len(x) == 0 {
 		return
@@ -20,7 +20,7 @@ func SoftmaxInPlace(x []float32) {
 	vecScaleInPlace(x, float32(1/sum))
 }
 
-// Softmax возвращает softmax(x)
+// Softmax returns softmax(x)
 func Softmax(x []float32) []float32 {
 	out := make([]float32, len(x))
 	copy(out, x)

@@ -15,11 +15,11 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// Model - интерфейс архитектуры для forward pass
+// Model - architecture interface for forward pass
 type Model interface {
 	Forward(tokenIDs []int, startPos int) ([]float32, error)
 
-	// Embed - last-token hidden после output-norm (до lm_head); сбрасывает KV-cache
+	// Embed - last-token hidden after output-norm (before lm_head); clears KV-cache
 	Embed(tokenIDs []int) ([]float32, error)
 
 	EmbeddingDim() int
@@ -29,7 +29,7 @@ type Model interface {
 	Close() error
 }
 
-// Load загружает модель по полю general.architecture
+// Load loads a model from general.architecture
 func Load(r *format.Reader, opts Options) (Model, error) {
 	if err := opts.Normalize(); err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 	case "qwen3moe":
 		return qwen3.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, opts.NBatch)
 	case "qwen2":
-		// DeepSeek-R1-Distill-Qwen и др. distill с arch=qwen2 (без QK-norm)
+		// DeepSeek-R1-Distill-Qwen and other distill models with arch=qwen2 (no QK-norm)
 		return mistral.LoadQwen2(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "qwen2moe":
 		return mistral.LoadQwen2MoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)

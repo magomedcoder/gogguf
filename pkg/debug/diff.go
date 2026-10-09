@@ -2,18 +2,18 @@ package debug
 
 import "math"
 
-// DiffStats - статистика сравнения двух векторов logits
+// DiffStats holds comparison statistics for two logit vectors.
 type DiffStats struct {
-	N         int     // число элементов
+	N         int     // number of elements
 	MaxAbs    float64 // max |a-b|
 	MeanAbs   float64 // mean |a-b|
 	RMSE      float64
-	MaxAbsIdx int // индекс max abs diff
-	OverTol   int // число позиций с |diff| > Tol
+	MaxAbsIdx int // index of max abs diff
+	OverTol   int // count of positions with |diff| > Tol
 	Tol       float64
 }
 
-// DiffLogits сравнивает a и b поэлементно (допуск tol для OverTol)
+// DiffLogits compares a and b element-wise (tol for OverTol).
 func DiffLogits(a, b []float32, tol float64) DiffStats {
 	n := min(len(b), len(a))
 
@@ -47,7 +47,7 @@ func DiffLogits(a, b []float32, tol float64) DiffStats {
 	return st
 }
 
-// LogSoftmaxInPlace пишет log(softmax(x)) в dst (dst может быть x)
+// LogSoftmaxInPlace writes log(softmax(x)) into dst (dst may be x).
 func LogSoftmaxInPlace(dst, x []float32) {
 	if len(dst) < len(x) {
 		panic("debug: LogSoftmaxInPlace: dst слишком короткий")
@@ -77,7 +77,7 @@ func LogSoftmaxInPlace(dst, x []float32) {
 	}
 }
 
-// AlignByMax сдвигает a так, чтобы a[imax] == b[imax] (инвариант softmax)
+// AlignByMax shifts a so that a[imax] == b[imax] (softmax invariant).
 func AlignByMax(a, b []float32) []float32 {
 	if len(a) == 0 || len(b) == 0 {
 		return append([]float32(nil), a...)

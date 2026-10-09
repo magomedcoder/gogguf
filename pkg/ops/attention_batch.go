@@ -5,12 +5,12 @@ import (
 	"math"
 )
 
-// AttentionScoresBatchCausalInto - causal attention для batch запросов (prefill n_batch).
+// AttentionScoresBatchCausalInto - causal attention for a batch of requests (prefill n_batch).
 //
 // q, dst: [batch * nHeads * headDim]
-// k, v:   [(pastLen+batch) * nKVHeads * headDim] - уже с дописанными новыми токенами scores: буфер длины >= pastLen+batch (переиспользуется)
+// k, v:   [(pastLen+batch) * nKVHeads * headDim] - already appended with new tokens scores: buffer length >= pastLen+batch (reused)
 //
-// Запрос i (позиция pastLen+i) видит ключи 0..pastLen+i включительно.
+// Query i (position pastLen+i) sees keys 0..pastLen+i inclusive.
 func AttentionScoresBatchCausalInto(dst, q, k, v, scores []float32, pastLen, batch, nHeads, nKVHeads, headDim int) error {
 	if batch < 1 {
 		return fmt.Errorf("ops: batch=%d", batch)
@@ -39,7 +39,7 @@ func AttentionScoresBatchCausalInto(dst, q, k, v, scores []float32, pastLen, bat
 	scale := float32(1 / math.Sqrt(float64(headDim)))
 
 	for b := range batch {
-		causalEnd := pastLen + b + 1 // число ключей, видимых запросу b
+		causalEnd := pastLen + b + 1 // number of keys visible to query b
 		headScores := scores[:causalEnd]
 		qBase := b * qDim
 		dstBase := b * qDim

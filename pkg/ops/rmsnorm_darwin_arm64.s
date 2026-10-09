@@ -1,11 +1,11 @@
-// NEON scale-mul для RMSNorm: dst[i] = x[i] * scale * weight[i]
+// NEON scale-mul for RMSNorm: dst[i] = x[i] * scale * weight[i]
 
 //go:build arm64 && darwin
 
 #include "textflag.h"
 
 // func rmsnormScaleMulNEONAsm(dst, x, weight []float32, scale float32, n int)
-// n кратно 4
+// n is a multiple of 4
 TEXT ·rmsnormScaleMulNEONAsm(SB), NOSPLIT, $0-88
 	MOVD	dst_base+0(FP), R3
 	MOVD	x_base+24(FP), R0

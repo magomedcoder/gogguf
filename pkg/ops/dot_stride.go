@@ -1,6 +1,6 @@
 package ops
 
-// dotStride: sum(weights[t] * v[vOff + t*vStride]) для t in [0,n)
+// dotStride: sum(weights[t] * v[vOff + t*vStride]) for t in [0,n)
 func dotStride(weights []float32, v []float32, vOff, vStride, n int) float32 {
 	if n <= 0 || n > len(weights) {
 		return 0

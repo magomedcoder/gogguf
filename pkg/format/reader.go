@@ -17,12 +17,12 @@ const (
 
 var errReaderAtRequired = errors.New("gguf: источник данных должен реализовывать io.ReaderAt")
 
-// Reader - читатель файлов GGUF
+// Reader - GGUF file reader
 type Reader struct {
 	r io.ReadSeeker
 
-	// ByteOrder - порядок байт файла GGUF
-	// Пакет не выполняет перестановку байт для данных тензоров
+	// ByteOrder - GGUF file byte order
+	// Package does not byte-swap tensor data
 	ByteOrder binary.ByteOrder
 
 	Version  int
@@ -32,7 +32,7 @@ type Reader struct {
 	tensorOffset int64
 }
 
-// readString читает строку GGUF: длина + байты
+// readString reads GGUF string: length + bytes
 func (r *Reader) readString() (string, error) {
 	length, err := read[uint64](r.r, r.ByteOrder)
 	if err != nil {
@@ -47,7 +47,7 @@ func (r *Reader) readString() (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-// readMetaDataValueScalar читает одно скалярное значение метаданных
+// readMetaDataValueScalar reads one scalar metadata value
 func (r *Reader) readMetaDataValueScalar(typ Type) (any, error) {
 	switch typ {
 	case Uint8:
@@ -86,7 +86,7 @@ func (r *Reader) readMetaDataValueScalar(typ Type) (any, error) {
 	}
 }
 
-// readMetaDataValueArray читает массив однотипных значений метаданных
+// readMetaDataValueArray reads array of homogeneous metadata values
 func readMetaDataValueArray[T readables](r *Reader, length uint64) ([]T, error) {
 	a := make([]T, length)
 	for i := range length {
@@ -99,7 +99,7 @@ func readMetaDataValueArray[T readables](r *Reader, length uint64) ([]T, error) 
 	return a, nil
 }
 
-// readMetaValue читает значение метаданных (скаляр или массив)
+// readMetaValue reads metadata value (scalar or array)
 func (r *Reader) readMetaValue() (any, error) {
 	typ, err := read[Type](r.r, r.ByteOrder)
 	if err != nil {
@@ -169,7 +169,7 @@ func (r *Reader) readMetaValue() (any, error) {
 	}
 }
 
-// OpenFile открывает файл GGUF
+// OpenFile opens GGUF file
 func OpenFile(filename string) (*Reader, error) {
 	f, err := os.Open(filename)
 	if err != nil {
@@ -179,7 +179,7 @@ func OpenFile(filename string) (*Reader, error) {
 	return Open(f)
 }
 
-// Open открывает файл GGUF из r. r должен быть позиционирован в начале файла и реализовывать io.ReaderAt для чтения данных тензоров
+// Open opens GGUF file from r. r must be at file start and implement io.ReaderAt for tensor data reads
 func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 	var buf [4]byte
 	if _, err := readSeeker.Read(buf[:]); err != nil {
@@ -302,7 +302,7 @@ func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 	return r, nil
 }
 
-// TensorInfo возвращает информацию о тензоре с указанным именем
+// TensorInfo returns info for tensor with given name
 func (r *Reader) TensorInfo(name string) (*TensorInfo, error) {
 	for i := range r.Tensors {
 		if r.Tensors[i].Name == name {
@@ -312,7 +312,7 @@ func (r *Reader) TensorInfo(name string) (*TensorInfo, error) {
 	return nil, fmt.Errorf("тензор %q не найден", name)
 }
 
-// TensorSize возвращает суммарный размер всех тензоров в файле
+// TensorSize returns total size of all tensors in file
 func (r *Reader) TensorSize() int64 {
 	var size int64
 	for _, t := range r.Tensors {

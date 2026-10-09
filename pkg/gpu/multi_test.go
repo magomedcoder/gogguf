@@ -8,7 +8,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// fakeDevice - устройство-заглушка: считает вызовы и повторяет семантику residency (hidden живёт на устройстве, download его снимает)
+// fakeDevice - device stub: counts calls and mimics residency (hidden on device, download clears it)
 type fakeDevice struct {
 	CPUBackend
 
@@ -92,7 +92,7 @@ func (f *fakeDevice) LogitsFromDevice(format.GGML, string, []float32, string, []
 	return nil
 }
 
-// qkv дёргает fused QKV слоя layer через multi-backend
+// qkv invokes fused QKV of layer via multi-backend
 func qkv(m *MultiBackend, layer int) error {
 	return m.QKVRoPEAttentionQuantCached(format.GgmlQ8_0, RoPENeoX, "q", "k", "v", "qn", "kn", "an",
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
@@ -114,7 +114,7 @@ func TestNewMultiBackendErrors(t *testing.T) {
 	}
 }
 
-// Список из одного устройства: маршрутизация прозрачная, переносов hidden нет
+// Single device list: transparent routing, no hidden transfers
 func TestMultiBackendSingleDevice(t *testing.T) {
 	dev := newFakeDevice("CUDA:0")
 	m, err := NewMultiBackend([]Backend{dev}, nil)
@@ -157,7 +157,7 @@ func TestMultiBackendSingleDevice(t *testing.T) {
 	}
 }
 
-// Два устройства: слои делятся пополам, hidden переезжает ровно один раз на границе
+// Two devices: layers split evenly, hidden moves exactly once at boundary
 func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 	d0, d1 := newFakeDevice("CUDA:0"), newFakeDevice("CUDA:1")
 	m, err := NewMultiBackend([]Backend{d0, d1}, nil)
@@ -188,7 +188,7 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 		}
 	}
 
-	// Глобальные слои 0,1 -> локальные 0,1 на GPU0; слои 2,3 -> локальные 0,1 на GPU1
+	// Global layers 0,1 -> local 0,1 on GPU0; layers 2,3 -> local 0,1 on GPU1
 	if !slices.Equal(d0.qkvLayers, []int{0, 1}) || !slices.Equal(d1.qkvLayers, []int{0, 1}) {
 		t.Fatalf("локальные слои: GPU0=%v GPU1=%v", d0.qkvLayers, d1.qkvLayers)
 	}
@@ -209,7 +209,7 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 		t.Fatalf("hidden на GPU1 = %v, ожидали %v", d1.hidden, x)
 	}
 
-	// Итог токена считает устройство последнего слоя
+	// Last layer's device computes token result
 	if err := m.LogitsFromDevice(format.GgmlQ8_0, "n", nil, "h", nil, nil, nil, 8, 4, 1e-6); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 		t.Fatalf("logits: GPU0=%d GPU1=%d, ожидали 0/1", d0.logits, d1.logits)
 	}
 
-	// Новый токен возвращает hidden на устройство первого слоя и гасит residency GPU1
+	// New token returns hidden to first layer's device and clears GPU1 residency
 	if err := m.HiddenUpload(x); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 	}
 }
 
-// -tensor-split задаёт неравные диапазоны слоёв
+// -tensor-split sets unequal layer ranges
 func TestMultiBackendTensorSplit(t *testing.T) {
 	d0, d1 := newFakeDevice("CUDA:0"), newFakeDevice("CUDA:1")
 	m, err := NewMultiBackend([]Backend{d0, d1}, []float64{0.75, 0.25})
@@ -279,7 +279,7 @@ func TestMultiBackendVRAMInfoSums(t *testing.T) {
 	}
 }
 
-// Residency доступна, только если её держат все устройства (иначе hidden не перенести)
+// Residency available only if all devices support it (otherwise hidden cannot be transferred)
 func TestMultiBackendHiddenResidentRequiresAll(t *testing.T) {
 	d0, d1 := newFakeDevice("CUDA:0"), newFakeDevice("CUDA:1")
 	m, err := NewMultiBackend([]Backend{d0, d1}, nil)

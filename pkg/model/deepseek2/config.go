@@ -8,7 +8,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
-// Config - DeepSeek-V2/V3 (MLA + MoE) из метаданных deepseek2.*
+// Config - DeepSeek-V2/V3 (MLA + MoE) from deepseek2.* metadata
 type Config struct {
 	ContextLength     int
 	EmbeddingDim      int
@@ -30,14 +30,14 @@ type Config struct {
 	ExpertFFN         int
 	ExpertWeightScale float32
 	ExpertWeightsNorm bool
-	// YaRN-масштабирование RoPE
+	// YaRN-scaled RoPE
 	RopeFreqScale  float32
 	RopeAttnFactor float32
 	RopeYarnLogMul float32
-	AttnScale      float32 // заранее посчитанный kq_scale
+	AttnScale      float32 // precomputed kq_scale
 }
 
-// ParseConfig читает deepseek2.*
+// ParseConfig reads deepseek2.*
 func ParseConfig(r *format.Reader) (Config, error) {
 	prefix := "deepseek2."
 	getInt := func(key string) (int, error) {
@@ -172,7 +172,7 @@ func ParseConfig(r *format.Reader) (Config, error) {
 	attnFactor := float32(1)
 	yarnLogMul := float32(0)
 	if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.scaling.factor"); err == nil && v > 0 {
-		// GGUF factor = ctx_new/ctx_orig; в ggml обычно freq_scale = 1/factor
+		// GGUF factor = ctx_new/ctx_orig; in ggml freq_scale is usually 1/factor
 		freqScale = 1 / v
 	}
 
@@ -185,7 +185,7 @@ func ParseConfig(r *format.Reader) (Config, error) {
 	}
 
 	if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.scaling.yarn_log_mul"); err == nil {
-		// компенсируем множитель скрипта конвертации (TAG_DEEPSEEK2_YARN_LOG_MUL_FIX)
+		// compensate conversion script multiplier (TAG_DEEPSEEK2_YARN_LOG_MUL_FIX)
 		yarnLogMul = v / 0.1
 	}
 
@@ -232,7 +232,7 @@ func yarnKQScale(headK int, freqScale, attnFactor, yarnLogMul float32) float32 {
 	if attnFactor <= 0 {
 		attnFactor = 1
 	}
-	// отмена yarn_attn_factor_adjust: attn_factor_org = attn_factor * (1 + 0.1*log(1/freq_scale)) затем mscale = attn_factor_org * (1 + 0.1*yarn_log_mul*log(1/freq_scale))
+	// undo yarn_attn_factor_adjust: attn_factor_org = attn_factor * (1 + 0.1*log(1/freq_scale)) then mscale = attn_factor_org * (1 + 0.1*yarn_log_mul*log(1/freq_scale))
 	inv := float64(1 / freqScale)
 	logInv := math.Log(inv)
 	attnOrg := float64(attnFactor) * (1 + 0.1*logInv)
@@ -290,7 +290,7 @@ func vocabSize(r *format.Reader, emb int) (int, error) {
 	if a == emb {
 		return b, nil
 	}
-	
+
 	if b == emb {
 		return a, nil
 	}

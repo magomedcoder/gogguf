@@ -10,7 +10,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/gpu"
 )
 
-// maxAbsDiff - максимальное расхождение двух logit-векторов
+// maxAbsDiff - maximum difference between two logit vectors
 func maxAbsDiff(t *testing.T, a, b []float32) float64 {
 	t.Helper()
 
@@ -36,7 +36,7 @@ func skipOOM(t *testing.T, err error) {
 	}
 }
 
-// §1+§2: полный offload с резидентным hidden и GPU out_norm+lm_head должен давать те же logits, что и CPU-путь
+// §1+§2: full offload with resident hidden and GPU out_norm+lm_head must match CPU-path logits
 func TestGPUFullOffloadLogitsParity(t *testing.T) {
 	path := testModelPath(t)
 
@@ -73,13 +73,13 @@ func TestGPUFullOffloadLogitsParity(t *testing.T) {
 	}
 }
 
-// §4: -b вместе с -ngl больше не запрещён и даёт те же logits, что и потокенный prefill на GPU
+// §4: -b with -ngl is allowed and yields same logits as token-wise GPU prefill
 func TestGPUNBatchPrefillParity(t *testing.T) {
 	path := testModelPath(t)
 
 	text := "Hello, world! Tell me about GPU offload."
 
-	// движки гоняем по очереди: две полные копии весов в VRAM могут не поместиться
+	// run engines sequentially: two full weight copies may not fit in VRAM
 	run := func(nBatch int) (prefill, decode []float32) {
 		eng, err := gogguf.Load(path, gogguf.LoadOptions{NGL: 999, NBatch: nBatch})
 		if err != nil {
@@ -98,7 +98,7 @@ func TestGPUNBatchPrefillParity(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// decode после prefill: K/V чанка должны быть в GPU KV-cache
+		// decode after prefill: chunk K/V must be in GPU KV-cache
 		decode, err = eng.ForwardTokenIDs(tokens[len(tokens)-1:], len(tokens))
 		if err != nil {
 			skipOOM(t, err)

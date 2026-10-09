@@ -47,7 +47,7 @@ func matMulVecKQuant(
 	return nil
 }
 
-// MatMulVecQ2_K умножает Q2_K-матрицу на float32-вектор
+// MatMulVecQ2_K multiplies Q2_K matrix by float32 vector
 func MatMulVecQ2_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := MatMulVecQ2_KInto(raw, rows, cols, vec, out); err != nil {
@@ -57,12 +57,12 @@ func MatMulVecQ2_K(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ2_KInto записывает Q2_K matmul в out
+// MatMulVecQ2_KInto writes Q2_K matmul to out
 func MatMulVecQ2_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	return matMulVecKQuant(raw, rows, cols, vec, out, quant.BlockQ2_KSize, quant.QK_K, quant.DotBlockQ2_K, "Q2_K")
 }
 
-// MatMulVecQ3_K умножает Q3_K-матрицу на float32-вектор
+// MatMulVecQ3_K multiplies Q3_K matrix by float32 vector
 func MatMulVecQ3_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := MatMulVecQ3_KInto(raw, rows, cols, vec, out); err != nil {
@@ -72,12 +72,12 @@ func MatMulVecQ3_K(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ3_KInto записывает Q3_K matmul в out
+// MatMulVecQ3_KInto writes Q3_K matmul to out
 func MatMulVecQ3_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	return matMulVecKQuant(raw, rows, cols, vec, out, quant.BlockQ3_KSize, quant.QK_K, quant.DotBlockQ3_K, "Q3_K")
 }
 
-// MatMulVecQ8_K умножает Q8_K-матрицу на float32-вектор
+// MatMulVecQ8_K multiplies Q8_K matrix by float32 vector
 func MatMulVecQ8_K(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := MatMulVecQ8_KInto(raw, rows, cols, vec, out); err != nil {
@@ -87,12 +87,12 @@ func MatMulVecQ8_K(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	return out, nil
 }
 
-// MatMulVecQ8_KInto записывает Q8_K matmul в out
+// MatMulVecQ8_KInto writes Q8_K matmul to out
 func MatMulVecQ8_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	return matMulVecKQuant(raw, rows, cols, vec, out, quant.BlockQ8_KSize, quant.QK_K, quant.DotBlockQ8_K, "Q8_K")
 }
 
-// EmbeddingQ2_KInto деквантизирует embedding-строку в dst
+// EmbeddingQ2_KInto dequantizes an embedding row into dst
 func EmbeddingQ2_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ2_KSize, quant.QK_K)
 	if err != nil {
@@ -106,7 +106,7 @@ func EmbeddingQ2_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	return quant.DequantQ2_KInto(dst, raw[off:off+rowBytes], dim)
 }
 
-// EmbeddingQ3_KInto деквантизирует embedding-строку в dst
+// EmbeddingQ3_KInto dequantizes an embedding row into dst
 func EmbeddingQ3_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ3_KSize, quant.QK_K)
 	if err != nil {
@@ -120,7 +120,7 @@ func EmbeddingQ3_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	return quant.DequantQ3_KInto(dst, raw[off:off+rowBytes], dim)
 }
 
-// EmbeddingQ8_KInto деквантизирует embedding-строку в dst
+// EmbeddingQ8_KInto dequantizes an embedding row into dst
 func EmbeddingQ8_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ8_KSize, quant.QK_K)
 	if err != nil {

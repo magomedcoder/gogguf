@@ -13,7 +13,7 @@ import (
 
 const defaultEndpoint = "https://huggingface.co/"
 
-// Endpoint возвращает базовый URL Hub (MODEL_ENDPOINT или huggingface.co)
+// Endpoint returns the Hub base URL (MODEL_ENDPOINT or huggingface.co).
 func Endpoint() string {
 	ep := strings.TrimSpace(os.Getenv("MODEL_ENDPOINT"))
 	if ep == "" {
@@ -27,7 +27,7 @@ func Endpoint() string {
 	return ep
 }
 
-// Token возвращает HF_TOKEN из окружения.
+// Token returns HF_TOKEN from the environment.
 func Token() string {
 	return strings.TrimSpace(os.Getenv("HF_TOKEN"))
 }
@@ -104,7 +104,7 @@ type treeItem struct {
 	} `json:"lfs"`
 }
 
-// resolveCommit получает SHA ветки main (или первой) и пишет в refs/
+// resolveCommit fetches main branch SHA (or first branch) and writes refs/.
 func resolveCommit(repoID, token string) (string, error) {
 	cli := newHTTPClient(token)
 	url := Endpoint() + "api/models/" + repoID + "/refs"
@@ -145,7 +145,7 @@ func resolveCommit(repoID, token string) (string, error) {
 	return commit, nil
 }
 
-// fetchRepoFiles запрашивает дерево файлов репозитория
+// fetchRepoFiles requests the repository file tree.
 func fetchRepoFiles(repoID, commit, token string) ([]FileInfo, error) {
 	cli := newHTTPClient(token)
 	url := Endpoint() + "api/models/" + repoID + "/tree/" + commit + "?recursive=true"
@@ -210,7 +210,7 @@ func fetchRepoFiles(repoID, commit, token string) ([]FileInfo, error) {
 	return files, nil
 }
 
-// cachedCommit читает refs/main (или любой ref) из локального кэша
+// cachedCommit reads refs/main (or any ref) from local cache.
 func cachedCommit(repoID string) string {
 	repoPath, err := RepoPath(repoID)
 	if err != nil {
@@ -251,7 +251,7 @@ func cachedCommit(repoID string) string {
 	return fallback
 }
 
-// listCachedFiles перечисляет файлы в snapshots/{commit} для репо
+// listCachedFiles lists files in snapshots/{commit} for a repo.
 func listCachedFiles(repoID string) []FileInfo {
 	commit := cachedCommit(repoID)
 	if commit == "" {

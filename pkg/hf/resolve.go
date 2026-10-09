@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// Resolve скачивает (при необходимости) GGUF из HF repo и возвращает локальный путь.
-// repoWithTag: "owner/repo" или "owner/repo:Q8_0".
+// Resolve downloads (if needed) a GGUF from an HF repo and returns the local path.
+// repoWithTag: "owner/repo" or "owner/repo:Q8_0".
 func Resolve(repoWithTag string) (string, error) {
 	spec, err := SplitRepoTag(repoWithTag)
 	if err != nil {
@@ -17,7 +17,7 @@ func Resolve(repoWithTag string) (string, error) {
 	token := Token()
 	files, err := fetchRepoFilesOnline(spec.Repo, token)
 	if err != nil {
-		// offline fallback: только локальный кэш
+		// offline fallback: local cache only
 		cached := listCachedFiles(spec.Repo)
 		if len(cached) == 0 {
 			return "", fmt.Errorf("hf: не удалось получить список файлов для %s: %w", spec.Repo, err)
@@ -42,7 +42,7 @@ func Resolve(repoWithTag string) (string, error) {
 		return "", fmt.Errorf("%s", msg)
 	}
 
-	// для offline-кэша URL/OID могут быть пустыми - файл уже на диске
+	// for offline cache URL/OID may be empty - file is already on disk
 	if primary.URL == "" {
 		if primary.FinalPath != "" {
 			if _, err := os.Stat(primary.FinalPath); err == nil {

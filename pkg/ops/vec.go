@@ -18,7 +18,7 @@ func addInPlacePure(a, b []float32) {
 	}
 }
 
-// vectorMax возвращает max(x)
+// vectorMax returns max(x)
 var vectorMax = vectorMaxPure
 
 func vectorMaxPure(x []float32) float32 {

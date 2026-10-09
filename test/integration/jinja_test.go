@@ -20,13 +20,13 @@ func TestJinjaQwen3MatchesFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fallback без Jinja metadata path - сравниваем с тем, что Jinja даёт тот же результат
+	// fallback without Jinja metadata path - compare that Jinja gives the same result
 	meta := engine.Metadata()
 	if !chat.HasTemplateMeta(meta) {
 		t.Skip("нет chat template")
 	}
 
-	// Повторный вызов должен быть стабильным
+	// repeated calls must be stable
 	got2, err := chat.FormatUser("Hello", chat.Options{Metadata: meta})
 	if err != nil {
 		t.Fatal(err)

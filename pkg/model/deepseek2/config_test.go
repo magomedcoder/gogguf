@@ -33,7 +33,7 @@ func TestParseConfigMLA(t *testing.T) {
 		},
 		Tensors: []format.TensorInfo{
 			{
-				Name: "token_embd.weight",
+				Name:       "token_embd.weight",
 				Dimensions: []uint64{2048, 102400},
 			},
 		},
@@ -64,7 +64,7 @@ func TestParseConfigMLA(t *testing.T) {
 		t.Fatalf("AttnScale=%v", cfg.AttnScale)
 	}
 
-	// при YaRN factor=40 scale должен отличаться от обычного 1/sqrt(192)
+	// with YaRN factor=40 scale must differ from usual 1/sqrt(192)
 	plain := float32(1 / math.Sqrt(192))
 	if math.Abs(float64(cfg.AttnScale-plain)) < 1e-6 {
 		t.Fatalf("ожидали YaRN scale ≠ plain, получили %v", cfg.AttnScale)
@@ -83,7 +83,7 @@ func TestParseConfigRequiresKVLora(t *testing.T) {
 		},
 		Tensors: []format.TensorInfo{
 			{
-				Name: "token_embd.weight",
+				Name:       "token_embd.weight",
 				Dimensions: []uint64{2048, 102400},
 			},
 		},

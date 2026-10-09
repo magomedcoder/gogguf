@@ -1,7 +1,7 @@
 package sampler
 
-// ApplyRepeatPenalty снижает logit повторяющихся токенов (как в llama.cpp)
-// penalty == 1 - без изменений; > 1 - штраф за повтор
+// ApplyRepeatPenalty reduces logits of repeated tokens (like llama.cpp)
+// penalty == 1 - no change; > 1 - penalty for repeat
 func ApplyRepeatPenalty(logits []float32, history []int, penalty float32, lastN int) {
 	if penalty == 1 || len(logits) == 0 || len(history) == 0 {
 		return
@@ -31,7 +31,7 @@ func ApplyRepeatPenalty(logits []float32, history []int, penalty float32, lastN 
 	}
 }
 
-// ApplyMinP обнуляет logit токенов с prob < minP * maxProb (после softmax)
+// ApplyMinP zeroes logits of tokens with prob < minP * maxProb (after softmax)
 func ApplyMinP(logits []float32, minP float32) {
 	if minP <= 0 || len(logits) == 0 {
 		return

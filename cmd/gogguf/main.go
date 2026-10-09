@@ -17,7 +17,7 @@ const usage = `GoGGUF - система запуска GGUF-моделей на G
   gogguf serve -hf owner/repo[:quant]         HTTP API с моделью с Hugging Face
 `
 
-// main - точка входа CLI gogguf
+// main is the gogguf CLI entry point.
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Print(usage)

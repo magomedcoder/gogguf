@@ -25,10 +25,10 @@ type Model struct {
 	lmHeadName       string
 	ropeFactorsShort []float32
 	ropeFactorsLong  []float32
-	fused            *gpuresid.Runner // fused GPU-FFN слоя (§5)
+	fused            *gpuresid.Runner // fused GPU layer FFN (§5)
 }
 
-// Load создаёт Phi-3 из весов GGUF
+// Load creates Phi-3 from GGUF weights
 func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
@@ -79,7 +79,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 		return nil, err
 	}
 
-	// fused FFN доступен только слоям с раздельными ffn_gate/ffn_up: слитый ffn_up [embd, 2*ffn] потребовал бы отдельного kernel
+	// fused FFN only for layers with separate ffn_gate/ffn_up: merged ffn_up [embd, 2*ffn] would need a separate kernel
 	if g != nil && ngl > 0 {
 		m.fused = gpuresid.New(w, g, gpu.RoPENeoX)
 	}
@@ -98,12 +98,12 @@ func (m *Model) initGPUKVCache() error {
 	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
-// Config возвращает конфигурацию модели
+// Config returns the model configuration
 func (m *Model) Config() Config {
 	return m.cfg
 }
 
-// ResetCache сбрасывает KV-cache
+// ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
 	if m.gpu != nil {
@@ -111,7 +111,7 @@ func (m *Model) ResetCache() {
 	}
 }
 
-// Close освобождает GPU-ресурсы модели
+// Close releases GPU resources held by the model
 func (m *Model) Close() error {
 	if m.gpu == nil {
 		return nil
@@ -122,7 +122,7 @@ func (m *Model) Close() error {
 	return err
 }
 
-// Forward выполняет forward pass для последовательности tokenIDs начиная с startPos
+// Forward runs forward pass for tokenIDs starting at startPos
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("phi3: пустой ввод")
@@ -151,12 +151,12 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	return m.scratch.out, nil
 }
 
-// EmbeddingDim возвращает размер скрытого состояния
+// EmbeddingDim returns the hidden state dimension
 func (m *Model) EmbeddingDim() int {
 	return m.cfg.EmbeddingDim
 }
 
-// Embed - last-token RMSNorm(hidden) до lm_head (сбрасывает KV)
+// Embed - last-token RMSNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("phi3: пустой ввод")
@@ -278,7 +278,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	return nil
 }
 
-// ropeScale выбирает short/long factors как в llama.cpp get_rope_factors
+// ropeScale picks short/long factors like llama.cpp get_rope_factors
 func (m *Model) ropeScale() ops.RoPEScale {
 	s := ops.RoPEScale{
 		FreqScale:  m.cfg.RopeFreqScale,
@@ -346,7 +346,7 @@ func (m *Model) ffn(lt layerTensors, layer int) error {
 		return m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, ffn, m.scratch.gate, m.scratch.h, layer)
 	}
 
-	// §5: раздельные gate/up идут одним fused SwiGLU-вызовом на GPU
+	// §5: separate gate/up go through one fused SwiGLU call on GPU
 	if m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.fused.FFNNamed(lt.ffnGate, lt.ffnUp, lt.ffnDown, m.scratch.h, m.scratch.h, m.cfg.EmbeddingDim, ffn); err == nil {
 			return nil

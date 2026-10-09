@@ -78,7 +78,7 @@ func TestGreedyNextAfterChatPrefill(t *testing.T) {
 	}
 
 	next := gogguf.Greedy(logits)
-	// thinking выключен по умолчанию - модель начинает ответ сразу
+	// thinking is off by default - model starts the reply immediately
 	if next != 9707 {
 		t.Fatalf("greedy next = %d, ожидали 9707 (Hello)", next)
 	}

@@ -2,7 +2,7 @@ package format
 
 import "fmt"
 
-// GGML представляет кодировку данных тензора
+// GGML represents tensor data encoding
 type GGML uint32
 
 const (
@@ -80,7 +80,7 @@ var ggmlBlocks = map[GGML]ggmlBlock{
 	GgmlInt32:   {blockSize: 4, valuesInBlock: 1},
 }
 
-// String возвращает имя типа GGML
+// String returns GGML type name
 func (g GGML) String() string {
 	if name, ok := ggmlNames[g]; ok {
 		return name
@@ -89,7 +89,7 @@ func (g GGML) String() string {
 	return fmt.Sprintf("неизвестный GGML(%d)", g)
 }
 
-// dataSize вычисляет размер данных тензора в байтах
+// dataSize computes tensor data size in bytes
 func (g GGML) dataSize(dimensions []uint64) int64 {
 	block, ok := ggmlBlocks[g]
 	if !ok {

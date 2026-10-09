@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-// TestBlockQ2_KSizeMatchesFormat проверяет размер блока Q2_K (llama.cpp: 84 байта)
+// TestBlockQ2_KSizeMatchesFormat checks Q2_K block size (llama.cpp: 84 bytes)
 func TestBlockQ2_KSizeMatchesFormat(t *testing.T) {
 	if BlockQ2_KSize != 84 {
 		t.Fatalf("BlockQ2_KSize=%d, ожидали 84", BlockQ2_KSize)
 	}
 }
 
-// TestDequantBlockQ2_K проверяет формулу w = d*scale*q - dmin*min на синтетическом блоке.
+// TestDequantBlockQ2_K checks formula w = d*scale*q - dmin*min on synthetic block.
 func TestDequantBlockQ2_K(t *testing.T) {
 	block := make([]byte, BlockQ2_KSize)
 	for i := range 16 {
@@ -36,25 +36,25 @@ func TestDequantBlockQ2_K(t *testing.T) {
 	}
 }
 
-// TestBlockQ3_KSizeMatchesFormat проверяет размер блока Q3_K (llama.cpp: 110 байт).
+// TestBlockQ3_KSizeMatchesFormat checks Q3_K block size (llama.cpp: 110 bytes).
 func TestBlockQ3_KSizeMatchesFormat(t *testing.T) {
 	if BlockQ3_KSize != 110 {
 		t.Fatalf("BlockQ3_KSize=%d, ожидали 110", BlockQ3_KSize)
 	}
 }
 
-// TestDequantBlockQ3_K проверяет, что деквант Q3_K даёт конечные значения.
+// TestDequantBlockQ3_K checks that Q3_K dequant yields finite values.
 func TestDequantBlockQ3_K(t *testing.T) {
 	block := make([]byte, BlockQ3_KSize)
 	for i := range 32 {
-		block[i] = 0xff // все старшие биты -> без смещения -4
+		block[i] = 0xff // all high bits set -> no -4 offset
 	}
 
 	for i := 32; i < 96; i++ {
-		block[i] = 0x55 // младшие 2 бита = 1
+		block[i] = 0x55 // low 2 bits = 1
 	}
 
-	// scales[12]: упакованные 6-битные шкалы (после unpack: scale-32)
+	// scales[12]: packed 6-bit scales (after unpack: scale-32)
 	for i := range 12 {
 		block[96+i] = 0x21
 	}
@@ -70,14 +70,14 @@ func TestDequantBlockQ3_K(t *testing.T) {
 	}
 }
 
-// TestBlockQ8_KSizeMatchesFormat проверяет размер блока Q8_K (llama.cpp: 292 байта).
+// TestBlockQ8_KSizeMatchesFormat checks Q8_K block size (llama.cpp: 292 bytes).
 func TestBlockQ8_KSizeMatchesFormat(t *testing.T) {
 	if BlockQ8_KSize != 292 {
 		t.Fatalf("BlockQ8_KSize=%d, ожидали 292", BlockQ8_KSize)
 	}
 }
 
-// TestDequantBlockQ8_K проверяет формулу w = d * qs[i] (qs - int8).
+// TestDequantBlockQ8_K checks formula w = d * qs[i] (qs as int8).
 func TestDequantBlockQ8_K(t *testing.T) {
 	block := make([]byte, BlockQ8_KSize)
 	binary.LittleEndian.PutUint32(block[0:4], math.Float32bits(0.5))

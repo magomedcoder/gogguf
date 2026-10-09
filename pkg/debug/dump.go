@@ -10,7 +10,7 @@ import (
 
 const logitsMagic = "GGUFLGT1"
 
-// LogitsMeta - JSON-метаданные рядом с .bin dump
+// LogitsMeta is JSON metadata alongside a .bin dump.
 type LogitsMeta struct {
 	Magic   string  `json:"magic"`
 	Model   string  `json:"model"`
@@ -24,7 +24,7 @@ type LogitsMeta struct {
 	NGL     int     `json:"ngl,omitempty"`
 }
 
-// WriteLogitsBin пишет float32 logits little-endian: magic(8) + n(u32) + data
+// WriteLogitsBin writes float32 logits little-endian: magic(8) + n(u32) + data.
 func WriteLogitsBin(w io.Writer, logits []float32) error {
 	if _, err := io.WriteString(w, logitsMagic); err != nil {
 		return err
@@ -37,7 +37,7 @@ func WriteLogitsBin(w io.Writer, logits []float32) error {
 	return binary.Write(w, binary.LittleEndian, logits)
 }
 
-// ReadLogitsBin читает dump от WriteLogitsBin
+// ReadLogitsBin reads a dump from WriteLogitsBin.
 func ReadLogitsBin(r io.Reader) ([]float32, error) {
 	magic := make([]byte, 8)
 	if _, err := io.ReadFull(r, magic); err != nil {
@@ -61,7 +61,7 @@ func ReadLogitsBin(r io.Reader) ([]float32, error) {
 	return logits, nil
 }
 
-// SaveLogitsDump пишет path.bin и path.json
+// SaveLogitsDump writes path.bin and path.json.
 func SaveLogitsDump(path string, meta LogitsMeta, logits []float32) error {
 	meta.Magic = logitsMagic
 	meta.Vocab = len(logits)
@@ -92,7 +92,7 @@ func SaveLogitsDump(path string, meta LogitsMeta, logits []float32) error {
 	return os.WriteFile(path+".json", append(js, '\n'), 0o644)
 }
 
-// LoadLogitsDump читает path.bin (+ опционально path.json)
+// LoadLogitsDump reads path.bin (+ optional path.json).
 func LoadLogitsDump(path string) (LogitsMeta, []float32, error) {
 	var meta LogitsMeta
 	if data, err := os.ReadFile(path + ".json"); err == nil {
@@ -101,7 +101,7 @@ func LoadLogitsDump(path string) (LogitsMeta, []float32, error) {
 
 	f, err := os.Open(path + ".bin")
 	if err != nil {
-		// допускаем path уже с .bin
+		// allow path to already include .bin
 		f, err = os.Open(path)
 		if err != nil {
 			return meta, nil, err

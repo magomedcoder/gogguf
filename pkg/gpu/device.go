@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// ParseDeviceList разбирает значение флага -dev: "1" или "0,1" (ordinal устройств после CUDA_VISIBLE_DEVICES). Пустая строка = устройство по умолчанию (nil)
+// ParseDeviceList parses -dev flag: "1" or "0,1" (device ordinals after CUDA_VISIBLE_DEVICES). Empty string = default device (nil)
 func ParseDeviceList(s string) ([]int, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -32,7 +32,7 @@ func ParseDeviceList(s string) ([]int, error) {
 	return normalizeDeviceList(devices)
 }
 
-// ParseTensorSplit разбирает -tensor-split: "0.6,0.4" или "24,4" (веса пропорций слоёв)
+// ParseTensorSplit parses -tensor-split: "0.6,0.4" or "24,4" (layer proportion weights)
 func ParseTensorSplit(s string) ([]float64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -72,8 +72,8 @@ func ParseTensorSplit(s string) ([]float64, error) {
 	return split, nil
 }
 
-// ParseDevices разбирает пару флагов -dev / -tensor-split в план offload.
-// Пустой -dev с несколькими долями в -tensor-split означает устройства 0..N-1
+// ParseDevices parses -dev / -tensor-split flags into an offload plan.
+// Empty -dev with multiple -tensor-split shares means devices 0..N-1
 func ParseDevices(devList, splitList string) (devices []int, split []float64, err error) {
 	split, err = ParseTensorSplit(splitList)
 	if err != nil {
@@ -99,7 +99,7 @@ func ParseDevices(devList, splitList string) (devices []int, split []float64, er
 	return devices, split, nil
 }
 
-// normalizeDeviceList проверяет ordinal'ы и убирает дубликаты, сохраняя порядок
+// normalizeDeviceList validates ordinals and deduplicates preserving order
 func normalizeDeviceList(devices []int) ([]int, error) {
 	if len(devices) == 0 {
 		return []int{0}, nil

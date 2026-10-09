@@ -1,10 +1,10 @@
-// Package metal - каркас Metal-backend для macOS.
+// Package metal - Metal backend scaffold for macOS.
 //
-// Статус: только scaffold.
-// Структура Backend реализует интерфейс gpu.Backend целиком, но все вычисления возвращают ErrUnavailable - Metal-kernels ещё нет.
-// Смысл пакета: закрепить точку расширения (gpu.OpenMetal) и не ломать CUDA-путь.
+// Status: scaffold only.
+// Backend struct implements full gpu.Backend but all compute returns ErrUnavailable - no Metal kernels yet.
+// Package purpose: anchor extension point (gpu.OpenMetal) without breaking CUDA path.
 //
-// Пакет намеренно не импортирует pkg/gpu (иначе цикл импорта): Open возвращает конкретный *Backend, а gpu.OpenMetal приводит его к gpu.Backend.
+// Package intentionally does not import pkg/gpu (import cycle): Open returns concrete *Backend, gpu.OpenMetal casts to gpu.Backend.
 package metal
 
 import (
@@ -14,15 +14,15 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
-// ErrUnavailable: Metal-backend пока не считает ничего
+// ErrUnavailable: Metal backend does not compute yet
 var ErrUnavailable = errors.New("metal: backend не реализован (scaffold)")
 
-// Backend - заглушка устройства Metal: реализует весь интерфейс gpu.Backend, но на любой compute-вызов отдаёт ErrUnavailable
+// Backend - Metal device stub: implements full gpu.Backend interface but any compute call returns ErrUnavailable
 type Backend struct {
 	name string
 }
 
-// Name возвращает имя устройства, например "Metal (scaffold)"
+// Name returns device name, e.g. "Metal (scaffold)"
 func (b *Backend) Name() string {
 	if b == nil || b.name == "" {
 		return "Metal (scaffold)"
@@ -31,7 +31,7 @@ func (b *Backend) Name() string {
 	return b.name
 }
 
-// VRAMInfo: размер unified memory пока не запрашивается
+// VRAMInfo: unified memory size not queried yet
 func (b *Backend) VRAMInfo() (used, total uint64, err error) {
 	return 0, 0, nil
 }
@@ -120,7 +120,7 @@ func (b *Backend) QKVRoPEAttentionQuantCached(_ format.GGML, _ ops.RoPEMode, _, 
 	return ErrUnavailable
 }
 
-// HiddenResident: device-resident hidden state потребует Metal-kernels
+// HiddenResident: device-resident hidden state will require Metal kernels
 func (b *Backend) HiddenResident() bool {
 	return false
 }

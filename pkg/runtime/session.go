@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/sampler"
 )
 
-// GenerationSession - пошаговая генерация после prefill
+// GenerationSession is step-by-step generation after prefill.
 type GenerationSession struct {
 	ctx          *Context
 	promptTokens []int
@@ -15,7 +15,7 @@ type GenerationSession struct {
 	logits       []float32
 }
 
-// StartGeneration кодирует промпт, выполняет prefill и возвращает сессию decode
+// StartGeneration encodes the prompt, runs prefill, and returns a decode session.
 func (c *Context) StartGeneration(prompt string) (*GenerationSession, error) {
 	c.engine.Model.ResetCache()
 
@@ -40,13 +40,13 @@ func (c *Context) StartGeneration(prompt string) (*GenerationSession, error) {
 	}, nil
 }
 
-// DecodeStep выбирает и декодирует один следующий токен
-// Возвращает tokenID < 0 при EOS или если sampler вернул -1
+// DecodeStep selects and decodes one next token.
+// Returns tokenID < 0 on EOS or if the sampler returned -1.
 func (s *GenerationSession) DecodeStep(samp sampler.Func) (int, error) {
 	return s.DecodeStepWith(GenerateParams{Sampler: samp})
 }
 
-// DecodeStepWith выбирает следующий токен с учётом repeat penalty
+// DecodeStepWith selects the next token with repeat penalty applied.
 func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 	samp := params.Sampler
 	if samp == nil {
@@ -102,34 +102,34 @@ func (s *GenerationSession) tokenHistory() []int {
 	return out
 }
 
-// GeneratedTokens возвращает ID сгенерированных токенов
+// GeneratedTokens returns IDs of generated tokens.
 func (s *GenerationSession) GeneratedTokens() []int {
 	out := make([]int, len(s.generated))
 	copy(out, s.generated)
 	return out
 }
 
-// GeneratedText возвращает текст сгенерированных токенов
+// GeneratedText returns text of generated tokens.
 func (s *GenerationSession) GeneratedText() string {
 	return s.ctx.tok.Decode(s.generated)
 }
 
-// GeneratedCount возвращает число сгенерированных токенов
+// GeneratedCount returns the number of generated tokens.
 func (s *GenerationSession) GeneratedCount() int {
 	return len(s.generated)
 }
 
-// PromptTokenCount возвращает длину промпта в токенах
+// PromptTokenCount returns prompt length in tokens.
 func (s *GenerationSession) PromptTokenCount() int {
 	return len(s.promptTokens)
 }
 
-// DecodeToken преобразует token ID в текст
+// DecodeToken converts a token ID to text.
 func (s *GenerationSession) DecodeToken(id int) string {
 	return s.ctx.DecodeToken(id)
 }
 
-// GenerateSteps выполняет до maxTokens шагов decode
+// GenerateSteps runs up to maxTokens decode steps.
 func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 	maxTokens := params.MaxTokens
 	if maxTokens <= 0 {
@@ -169,5 +169,5 @@ func hitStopSequence(text string, stops []string) bool {
 	return false
 }
 
-// ErrNoSession возвращается, если сессия не инициализирована
+// ErrNoSession is returned when the generation session was not started.
 var ErrNoSession = fmt.Errorf("runtime: сессия генерации не начата")

@@ -9,23 +9,23 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/tokenizer"
 )
 
-// GenerateParams - параметры генерации
+// GenerateParams holds generation parameters.
 type GenerateParams struct {
 	MaxTokens     int
 	Sampler       sampler.Func
-	RepeatPenalty float32 // 1.0 = выключено
-	RepeatLastN   int     // окно истории для penalty (0 = 64)
+	RepeatPenalty float32 // 1.0 = disabled
+	RepeatLastN   int     // history window for penalty (0 = 64)
 	Stop          []string
 	OnToken       func(tokenID int) bool
 }
 
-// Context выполняет prefill и autoregressive decode
+// Context runs prefill and autoregressive decode.
 type Context struct {
 	engine *Engine
 	tok    *tokenizer.Tokenizer
 }
 
-// NewContext создаёт inference-контекст
+// NewContext creates an inference context.
 func (e *Engine) NewContext() (*Context, error) {
 	if e.tok == nil {
 		return nil, fmt.Errorf("runtime: tokenizer не загружен")
@@ -37,12 +37,12 @@ func (e *Engine) NewContext() (*Context, error) {
 	}, nil
 }
 
-// Encode преобразует текст в token IDs (без автоматического BOS)
+// Encode converts text to token IDs (no automatic BOS).
 func (c *Context) Encode(text string) ([]int, error) {
 	return c.tok.Encode(text)
 }
 
-// EncodeForInference кодирует текст с BOS для архитектур, которым он нужен (llama)
+// EncodeForInference encodes text with BOS for architectures that need it (llama).
 func (c *Context) EncodeForInference(text string) ([]int, error) {
 	return c.encodeForInference(text)
 }
@@ -91,12 +91,12 @@ func needsBOSPrefix(meta format.Metadata, ids []int) bool {
 	return true
 }
 
-// DecodeToken преобразует один token ID в текст
+// DecodeToken converts a single token ID to text.
 func (c *Context) DecodeToken(id int) string {
 	return c.tok.Decode([]int{id})
 }
 
-// Generate выполняет prefill + decode и возвращает сгенерированный текст
+// Generate runs prefill + decode and returns generated text.
 func (c *Context) Generate(prompt string, params GenerateParams) (string, error) {
 	if params.Sampler == nil {
 		params.Sampler = sampler.Greedy
@@ -118,7 +118,7 @@ func (c *Context) Generate(prompt string, params GenerateParams) (string, error)
 	return sess.GeneratedText(), nil
 }
 
-// GenerateStream пишет сгенерированные token IDs в w по мере decode
+// GenerateStream writes generated token IDs to w as decode progresses.
 func (c *Context) GenerateStream(prompt string, params GenerateParams, w io.Writer) error {
 	params.OnToken = func(id int) bool {
 		_, err := io.WriteString(w, c.tok.Decode([]int{id}))

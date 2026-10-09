@@ -8,7 +8,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
-// Tensor - деквантизованный тензор в float32
+// Tensor is a dequantized float32 tensor.
 type Tensor struct {
 	Name  string
 	Shape []int
@@ -17,7 +17,7 @@ type Tensor struct {
 	Raw   []byte
 }
 
-// LoadRawView возвращает срез сырых байт тензора без копирования, если источник поддерживает mmap/ReaderAt
+// LoadRawView returns a zero-copy slice of the tensor's raw bytes when the source supports mmap/ReaderAt.
 func LoadRawView(info *format.TensorInfo) ([]byte, error) {
 	if view, ok := info.RawView(); ok {
 		return view, nil
@@ -26,7 +26,7 @@ func LoadRawView(info *format.TensorInfo) ([]byte, error) {
 	return LoadRaw(info)
 }
 
-// LoadRaw читает сырые байты тензора из GGUF-файла.
+// LoadRaw reads the tensor's raw bytes from the GGUF file.
 func LoadRaw(info *format.TensorInfo) ([]byte, error) {
 	r, err := info.Reader()
 	if err != nil {
@@ -41,7 +41,7 @@ func LoadRaw(info *format.TensorInfo) ([]byte, error) {
 	return raw, nil
 }
 
-// LoadFloats загружает и деквантизирует тензор в float32
+// LoadFloats loads and dequantizes a tensor to float32.
 func LoadFloats(info *format.TensorInfo) ([]float32, error) {
 	raw, err := LoadRaw(info)
 	if err != nil {
@@ -51,7 +51,7 @@ func LoadFloats(info *format.TensorInfo) ([]float32, error) {
 	return quant.ToFloat32(info.Type, raw, int(info.ValuesCount()))
 }
 
-// FromGGUF загружает тензор из GGUF
+// FromGGUF loads a tensor from GGUF.
 func FromGGUF(info *format.TensorInfo) (*Tensor, error) {
 	raw, err := LoadRaw(info)
 	if err != nil {

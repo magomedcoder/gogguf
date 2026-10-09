@@ -17,7 +17,7 @@ type mergePair struct {
 
 type pretokenizeFunc func(string) []string
 
-// Tokenizer кодирует текст в token IDs и обратно
+// Tokenizer encodes text to token IDs and back
 type Tokenizer struct {
 	tokens      []string
 	id          map[string]int
@@ -29,7 +29,7 @@ type Tokenizer struct {
 	special     []string
 }
 
-// FromGGUF создаёт tokenizer из метаданных GGUF-файла
+// FromGGUF creates tokenizer from GGUF file metadata
 func FromGGUF(r *format.Reader) (*Tokenizer, error) {
 	model, err := r.Metadata.String("tokenizer.ggml.model")
 	if err != nil {
@@ -115,22 +115,22 @@ func (t *Tokenizer) encodeSegment(text string) ([]int, error) {
 	return out, nil
 }
 
-// BOS возвращает ID токена начала последовательности
+// BOS returns beginning-of-sequence token ID
 func (t *Tokenizer) BOS() int {
 	return t.bosID
 }
 
-// EOS возвращает ID токена конца последовательности
+// EOS returns end-of-sequence token ID
 func (t *Tokenizer) EOS() int {
 	return t.eosID
 }
 
-// VocabSize возвращает размер словаря
+// VocabSize returns vocabulary size
 func (t *Tokenizer) VocabSize() int {
 	return len(t.tokens)
 }
 
-// Encode преобразует текст в token IDs
+// Encode converts text to token IDs
 func (t *Tokenizer) Encode(text string) ([]int, error) {
 	if text == "" {
 		return nil, nil
@@ -155,7 +155,7 @@ func (t *Tokenizer) Encode(text string) ([]int, error) {
 	return out, nil
 }
 
-// Decode преобразует token IDs в текст
+// Decode converts token IDs to text
 func (t *Tokenizer) Decode(ids []int) string {
 	var b strings.Builder
 	stripLeadSPM := false

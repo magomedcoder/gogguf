@@ -10,10 +10,10 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/runtime"
 )
 
-// Options - параметры HTTP-сервера (auth, rate limit)
+// Options configures the HTTP server (auth, rate limit).
 type Options struct {
-	APIKey             string // пусто = без auth
-	RateLimitPerMinute int    // 0 = без лимита; токен-бакет на IP
+	APIKey             string // empty = no auth
+	RateLimitPerMinute int    // 0 = unlimited; token bucket per IP
 }
 
 type Server struct {
@@ -25,7 +25,7 @@ type Server struct {
 	conv      *runtime.Conversation
 }
 
-// New создаёт сервер. opts можно не передавать.
+// New creates a server. opts may be omitted.
 func New(engine *runtime.Engine, modelPath string, opts ...Options) *Server {
 	var o Options
 	if len(opts) > 0 {
@@ -62,7 +62,7 @@ func (s *Server) ListenAndServe(addr string) error {
 	return srv.ListenAndServe()
 }
 
-// Run блокируется до ctx.Done() или ошибки ListenAndServe
+// Run blocks until ctx.Done() or ListenAndServe returns an error.
 func (s *Server) Run(ctx context.Context, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,

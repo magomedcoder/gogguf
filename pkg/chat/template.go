@@ -6,17 +6,17 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// Options задаёт параметры chat template
+// Options configures chat template parameters.
 type Options struct {
 	System            string
-	Thinking          *bool // nil - выключено; true включает размышление
+	Thinking          *bool // nil = off; true enables thinking mode
 	Metadata          format.Metadata
 	Tools             []Tool
-	ToolChoice        any  // "auto"|"none"|"required" или {"type":"function",...}
-	ParallelToolCalls bool // передать parallel_tool_calls в Jinja
+	ToolChoice        any  // "auto"|"none"|"required" or {"type":"function",...}
+	ParallelToolCalls bool // pass parallel_tool_calls into Jinja
 }
 
-// ThinkingEnabled возвращает true, если режим размышления включён
+// ThinkingEnabled reports whether thinking mode is enabled.
 func ThinkingEnabled(opts Options) bool {
 	if opts.Thinking == nil {
 		return false
@@ -25,24 +25,24 @@ func ThinkingEnabled(opts Options) bool {
 	return *opts.Thinking
 }
 
-// HasTemplate возвращает true, если в GGUF есть tokenizer.chat_template
+// HasTemplate reports whether GGUF contains tokenizer.chat_template.
 func HasTemplate(r *format.Reader) bool {
 	return HasTemplateMeta(r.Metadata)
 }
 
-// HasTemplateMeta проверяет наличие chat template в метаданных
+// HasTemplateMeta checks for a chat template in metadata.
 func HasTemplateMeta(m format.Metadata) bool {
 	_, err := m.String("tokenizer.chat_template")
 	return err == nil
 }
 
-// HasToolUseTemplateMeta проверяет наличие tool_use chat template
+// HasToolUseTemplateMeta checks for a tool_use chat template.
 func HasToolUseTemplateMeta(m format.Metadata) bool {
 	_, err := m.String("tokenizer.chat_template.tool_use")
 	return err == nil
 }
 
-// SelectChatTemplate выбирает Jinja-шаблон: tool_use при наличии tools, иначе обычный
+// SelectChatTemplate picks a Jinja template: tool_use when tools are present, otherwise the default.
 func SelectChatTemplate(m format.Metadata, opts Options) (string, error) {
 	if HasTools(opts) {
 		if tmpl, err := m.String("tokenizer.chat_template.tool_use"); err == nil && tmpl != "" {
@@ -53,8 +53,8 @@ func SelectChatTemplate(m format.Metadata, opts Options) (string, error) {
 	return m.String("tokenizer.chat_template")
 }
 
-// FormatUser оборачивает пользовательский промпт в chat template (ChatML/Qwen)
-// При наличии tokenizer.chat_template в метаданных использует Render, иначе fallback
+// FormatUser wraps the user prompt in a chat template (ChatML/Qwen).
+// Uses Render when tokenizer.chat_template is in metadata, otherwise fallback.
 func FormatUser(user string, opts Options) (string, error) {
 	msgs := []Message{
 		{
@@ -89,7 +89,7 @@ func FormatUser(user string, opts Options) (string, error) {
 	return formatUserFallback(user, opts), nil
 }
 
-// FormatUserMust как FormatUser, но panic при ошибке рендера (для CLI)
+// FormatUserMust is like FormatUser but panics on render error (for CLI).
 func FormatUserMust(user string, opts Options) string {
 	s, err := FormatUser(user, opts)
 	if err != nil {

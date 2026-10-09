@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// OpenFileMapped открывает GGUF и загружает содержимое в память (fallback без mmap)
+// OpenFileMapped opens GGUF and loads content into memory (fallback without mmap)
 func OpenFileMapped(path string) (*MappedReader, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -25,7 +25,7 @@ func OpenFileMapped(path string) (*MappedReader, error) {
 	}, nil
 }
 
-// Close освобождает ссылку на загруженные данные
+// Close releases reference to loaded data
 func (m *MappedReader) Close() error {
 	m.data = nil
 

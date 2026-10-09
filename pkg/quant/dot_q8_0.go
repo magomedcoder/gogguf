@@ -2,7 +2,7 @@ package quant
 
 import "encoding/binary"
 
-// dotBlockQ8_0 - dot product одного Q8_0-блока (32 значения) с float32-вектором
+// dotBlockQ8_0 - dot product of one Q8_0 block (32 values) with float32 vector
 var dotBlockQ8_0 = dotBlockQ8_0Go
 
 func dotBlockQ8_0Go(block []byte, x []float32) float32 {

@@ -21,7 +21,7 @@ const benchUsage = `bench - измерение скорости inference (prefi
 
 `
 
-// benchResult - метрики одного прогона бенчмарка
+// benchResult holds metrics from one benchmark run.
 type benchResult struct {
 	PromptTokens int     `json:"prompt_tokens"`
 	DecodeTokens int     `json:"decode_tokens"`
@@ -34,7 +34,7 @@ type benchResult struct {
 	TotalTPS     float64 `json:"total_tps"`
 }
 
-// runBench выполняет бенчмарк скорости inference
+// runBench runs an inference speed benchmark.
 func runBench(args []string) error {
 	fs := flag.NewFlagSet("bench", flag.ContinueOnError)
 	modelPath := fs.String("m", "", "путь к файлу GGUF")
@@ -81,19 +81,19 @@ func runBench(args []string) error {
 	return runBenchSingle(*modelPath, *prompt, *maxTokens, *ngl, *nBatch, *ctxLen, *chat, *thinking, *runs, *warmup, *jsonOut, gpuOpts)
 }
 
-// benchGPUOptions - выбор устройств для offload (-dev / -tensor-split)
+// benchGPUOptions selects devices for offload (-dev / -tensor-split).
 type benchGPUOptions struct {
 	devices     []int
 	tensorSplit []float64
 }
 
-// vramMB - занятая/общая видеопамять backend'а в МБ (0 при CPU-прогоне)
+// vramMB is used/total backend VRAM in MB (0 on CPU runs).
 type vramMB struct {
 	used  float64
 	total float64
 }
 
-// readVRAM снимает состояние видеопамяти после прогона (cuMemGetInfo)
+// readVRAM samples VRAM after a run (cuMemGetInfo).
 func readVRAM(engine *gogguf.Engine) vramMB {
 	used, total, err := engine.VRAMInfo()
 	if err != nil || total == 0 {
@@ -375,7 +375,7 @@ func printBenchHuman(modelPath string, ngl int, loadMS float64, runs int, avg be
 	fmt.Printf("Итого: %.1f ms (%.1f tok/s)\n", avg.TotalMS, avg.TotalTPS)
 }
 
-// runBenchOnce выполняет один прогон: prefill + greedy decode maxTokens шагов
+// runBenchOnce runs one iteration: prefill + greedy decode for maxTokens steps.
 func runBenchOnce(ctx *gogguf.Context, prompt string, maxTokens int) (benchResult, error) {
 	totalStart := time.Now()
 
@@ -439,7 +439,7 @@ func runBenchOnce(ctx *gogguf.Context, prompt string, maxTokens int) (benchResul
 	return res, nil
 }
 
-// averageBench усредняет несколько прогонов (prefill/decode/tps)
+// averageBench averages several runs (prefill/decode/tps).
 func averageBench(results []benchResult) benchResult {
 	if len(results) == 0 {
 		return benchResult{}

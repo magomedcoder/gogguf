@@ -19,7 +19,7 @@ type Model struct {
 	gpu          gpu.Backend
 	ngl          int
 	gpuMaxSeq    int
-	nBatch       int // размер chunk prefill (1 = по токену); decode всегда 1
+	nBatch       int // chunk prefill size (1 = per token); decode always 1
 	debug        *DebugHooks
 	scratch      scratch
 	layerNorms   []layerNorms
@@ -27,24 +27,24 @@ type Model struct {
 	outNorm      []float32
 	lmHeadName   string
 
-	layerQuant  []format.GGML // тип matmul-весов слоя для fused-путей
-	residency   bool          // слои умеют держать hidden state на устройстве
-	residDevice bool          // hidden state сейчас на устройстве, host-буфер x устарел
-	logitsOnGPU bool          // out_norm + lm_head считаются на GPU
-	gpuKVStale  bool          // GPU KV-cache неполный: attention только на CPU
+	layerQuant  []format.GGML // matmul weight type per layer for fused paths
+	residency   bool          // layers can keep hidden state on device
+	residDevice bool          // hidden state is on device; host buffer x is stale
+	logitsOnGPU bool          // out_norm + lm_head computed on GPU
+	gpuKVStale  bool          // GPU KV-cache incomplete: attention on CPU only
 
-	fused     *gpuresid.Runner   // fused GPU-пути слоя (§5)
-	fusedDims gpuresid.Dims      // размерности для fused-путей
-	gpuLayers []gpuresid.Tensors // имена весов слоя для fused-путей
-	moeGPU    bool               // эксперты MoE считаются на GPU (§6)
+	fused     *gpuresid.Runner   // fused GPU layer paths (§5)
+	fusedDims gpuresid.Dims      // dimensions for fused paths
+	gpuLayers []gpuresid.Tensors // layer weight names for fused paths
+	moeGPU    bool               // MoE experts computed on GPU (§6)
 }
 
-// Load создаёт Qwen3 из весов
+// Load creates Qwen3 from weights
 func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
 	return loadWithConfig(w, g, ngl, gpuMaxSeq, nBatch, ParseConfig)
 }
 
-// LoadMoE создаёт Qwen3-MoE (qwen3moe.*, QK-norm + MoE)
+// LoadMoE creates Qwen3-MoE (qwen3moe.*, QK-norm + MoE)
 func LoadMoE(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
 	return loadWithConfig(w, g, ngl, gpuMaxSeq, nBatch, ParseConfigMoE)
 }
@@ -67,7 +67,7 @@ func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int,
 		nBatch = 512
 	}
 
-	// MoE: пока только serial (n_batch=1)
+	// MoE: serial only for now (n_batch=1)
 	if cfg.ExpertCount > 0 {
 		nBatch = 1
 	}
@@ -113,7 +113,7 @@ func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int,
 	return m, nil
 }
 
-// initFused готовит общую обвязку fused GPU-путей (§5): Qwen3 - NeoX RoPE + QK-norm
+// initFused sets up shared fused GPU path wiring (§5): Qwen3 - NeoX RoPE + QK-norm
 func (m *Model) initFused() {
 	if m.gpu == nil {
 		return
@@ -148,7 +148,7 @@ func (m *Model) initFused() {
 		}
 	}
 
-	// §6: эксперты считаются на GPU только если все веса экспертов нативно квантованы
+	// §6: experts on GPU only if all expert weights are natively quantized
 	m.moeGPU = m.cfg.ExpertCount > 0
 	for _, lt := range m.layerTensors {
 		if lt.moe && !m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps) {
@@ -158,7 +158,7 @@ func (m *Model) initFused() {
 	}
 }
 
-// resolveLayerQuants возвращает тип matmul-весов каждого слоя; format.GgmlFloat32 как «нет единого квантованного типа» - такой слой пойдёт по FP32/discrete пути
+// resolveLayerQuants returns matmul weight type per layer; format.GgmlFloat32 means no unified quant type - that layer uses FP32/discrete path
 func resolveLayerQuants(w *weights.Store, lts []layerTensors) []format.GGML {
 	kinds := make([]format.GGML, len(lts))
 	for i, lt := range lts {
@@ -173,8 +173,8 @@ func resolveLayerQuants(w *weights.Store, lts []layerTensors) []format.GGML {
 	return kinds
 }
 
-// initResidency включает device-resident hidden state (§1): требуются все слои на GPU,
-// fused QKV/residual пути и единый поддерживаемый квант весов во всех слоях
+// initResidency enables device-resident hidden state (§1): all layers on GPU required,
+// fused QKV/residual paths and a single supported weight quant across all layers
 func (m *Model) initResidency() {
 	if m.gpu == nil || m.ngl < m.cfg.NumLayers || m.cfg.ExpertCount > 0 {
 		return
@@ -208,12 +208,12 @@ func (m *Model) initGPUKVCache() error {
 	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
-// Config возвращает конфигурацию модели
+// Config returns the model configuration
 func (m *Model) Config() Config {
 	return m.cfg
 }
 
-// ResetCache сбрасывает KV-cache
+// ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
 	m.residDevice = false
@@ -223,7 +223,7 @@ func (m *Model) ResetCache() {
 	}
 }
 
-// Close освобождает GPU-ресурсы модели
+// Close releases GPU resources held by the model
 func (m *Model) Close() error {
 	if m.gpu == nil {
 		return nil
@@ -234,19 +234,19 @@ func (m *Model) Close() error {
 	return err
 }
 
-// SetDebugHooks включает колбэки для пошаговой отладки forward pass
+// SetDebugHooks enables callbacks for step-by-step forward pass debugging
 func (m *Model) SetDebugHooks(h *DebugHooks) {
 	m.debug = h
 }
 
-// Forward выполняет forward pass для последовательности tokenIDs начиная с startPos
-// Возвращает logits для последнего токена [vocabSize]
+// Forward runs forward pass for tokenIDs starting at startPos
+// Returns logits for the last token [vocabSize]
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("qwen3: пустой ввод")
 	}
 
-	// n_batch>1: multi-token prefill; при -ngl matmul/attn чанка на GPU (loop MatMulVec*Cached + AttentionScoresKV), иначе CPU-GEMM. MoE/debug - serial.
+	// n_batch>1: multi-token prefill; with -ngl chunk matmul/attn on GPU (loop MatMulVec*Cached + AttentionScoresKV), else CPU GEMM. MoE/debug - serial.
 	useBatch := m.nBatch > 1 && m.cfg.ExpertCount == 0 && m.debug == nil && len(tokenIDs) > 1
 	if useBatch {
 		for i := 0; i < len(tokenIDs); {
@@ -277,12 +277,12 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	return m.scratch.out, nil
 }
 
-// EmbeddingDim возвращает размер скрытого состояния
+// EmbeddingDim returns the hidden state dimension
 func (m *Model) EmbeddingDim() int {
 	return m.cfg.EmbeddingDim
 }
 
-// Embed - last-token RMSNorm(hidden) до lm_head (сбрасывает KV)
+// Embed - last-token RMSNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("qwen3: пустой ввод")
@@ -297,7 +297,7 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 		}
 	}
 
-	// Embed читает hidden на host: при residency сначала забираем его с устройства
+	// Embed reads hidden on host: with residency, sync it from the device first
 	if err := m.syncHiddenFromDevice(); err != nil {
 		return nil, err
 	}
@@ -322,9 +322,9 @@ func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 		m.debug.OnEmbed(m.scratch.x[:m.cfg.EmbeddingDim])
 	}
 
-	// §1: единственный HtoD hidden state за токен, дальше слои работают на устройстве.
-	// Отладочные хуки читают host-буфер x, поэтому с ними residency не включаем.
-	// gpuKVStale: fused QKV считает attention по GPU KV-cache, а он неполный.
+	// §1: single HtoD hidden state per token; layers then run on device.
+	// Debug hooks read host buffer x, so residency is disabled with them.
+	// gpuKVStale: fused QKV attends using GPU KV-cache, which is incomplete.
 	if m.residency && m.debug == nil && !m.gpuKVStale {
 		if err := m.gpu.HiddenUpload(m.scratch.x[:m.cfg.EmbeddingDim]); err != nil {
 			m.residency = false
@@ -379,8 +379,8 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	gate := m.scratch.gate[:ffn]
 	up := m.scratch.up[:ffn]
 
-	// §1: слой целиком на устройстве - attn_norm, QKV, attention, WO, FFN и оба residual.
-	// host x при этом не читается и не обновляется.
+	// §1: entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals.
+	// host x is not read or updated.
 	if m.residDevice {
 		err := m.forwardBlockDevice(layer, pos, ln, k, v, attn)
 		if err == nil {
@@ -396,7 +396,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	// fused QKV берёт attention из GPU KV-cache: при gpuKVStale он неполный
+	// fused QKV reads attention from GPU KV-cache: when gpuKVStale it is incomplete
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && qkvResidencyEnabled() && !m.gpuKVStale {
 		if err := m.qkvAttnGPU(layer, pos, ln, h, k, v, attn); err == nil {
 			m.cache.Append(layer, k, v)
@@ -430,7 +430,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 		kvPos := m.cache.Len()
 		m.cache.Append(layer, k, v)
-		// токен не попал в GPU KV-cache - GPU attention отключаем до ResetCache, иначе fused QKV/AttentionScoresKV посчитают по неполному кешу
+		// token missed GPU KV-cache - disable GPU attention until ResetCache, else fused QKV/AttentionScoresKV use incomplete cache
 		if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
 			if err := m.gpu.KVCacheAppend(layer, kvPos, k, v); err != nil {
 				m.gpuKVStale = true
@@ -443,8 +443,8 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 			return err
 		}
 	}
-	// WO+RMSNorm+FFN residency (отключить: GGUF_ATTN_FFN_RESIDENCY=0).
-	// MoE-слой сюда не идёт: fused-путь считает и dense FFN, а его заменяют эксперты
+	// WO+RMSNorm+FFN residency (disable: GGUF_ATTN_FFN_RESIDENCY=0).
+	// MoE layers skip this: the fused path assumes dense FFN, replaced by experts
 	if !lt.moe && m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && attnFFNResidencyEnabled() {
 		if err := m.attnFFNGPU(layer, ln, x, attn); err == nil {
 			return nil
@@ -493,8 +493,8 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	return nil
 }
 
-// forwardBlockDevice считает слой на GPU поверх резидентного hidden state.
-// k/v копируются на host только для зеркала CPU KV-cache (нужно для fallback-путей).
+// forwardBlockDevice runs the layer on GPU over resident hidden state.
+// k/v copied to host only for CPU KV-cache mirror (needed for fallback paths).
 func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []float32) error {
 	if err := m.qkvAttnGPU(layer, pos, ln, nil, k, v, attn); err != nil {
 		return err
@@ -504,8 +504,8 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []f
 	return m.attnFFNGPU(layer, ln, nil, attn)
 }
 
-// recoverHiddenFromDevice возвращает hidden state на host после сбоя device-слоя.
-// Если residual уже был частично изменён, актуального состояния нет нигде - это ошибка.
+// recoverHiddenFromDevice brings hidden state back to host after a device-layer failure.
+// If residual was partially updated, valid state exists nowhere - error.
 func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	m.residDevice = false
 	m.residency = false
@@ -521,7 +521,7 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	return nil
 }
 
-// syncHiddenFromDevice забирает hidden state с устройства, если он там (для host-читателей)
+// syncHiddenFromDevice pulls hidden state from device when resident (for host readers)
 func (m *Model) syncHiddenFromDevice() error {
 	if !m.residDevice {
 		return nil
@@ -546,13 +546,13 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 
 	clear(m.scratch.moeAcc)
 
-	// §6: выбранные эксперты считаются на GPU; веса эксперта кешируются на устройстве срезом raw-тензора, host-деквантизации всей матрицы экспертов нет
+	// §6: selected experts on GPU; expert weights cached on device as raw tensor slice, no full expert matrix dequant on host
 	if m.moeGPU && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.moeExpertsGPU(lt, idxs, weights, h, ffn); err == nil {
 			return nil
 		}
 
-		// эксперт не пошёл на GPU (VRAM / тип весов): дальше только CPU
+		// expert did not run on GPU (VRAM / weight type): CPU only from here
 		m.moeGPU = false
 		clear(m.scratch.moeAcc)
 	}
@@ -601,7 +601,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	return nil
 }
 
-// moeExpertsGPU считает выбранных экспертов fused-FFN на GPU и копит взвешенную сумму
+// moeExpertsGPU runs selected experts as fused-FFN on GPU and accumulates weighted sum
 func (m *Model) moeExpertsGPU(lt layerTensors, idxs []int, weights []float32, h []float32, ffn int) error {
 	embd := m.cfg.EmbeddingDim
 	for i, ei := range idxs {
@@ -622,7 +622,7 @@ func attnFFNResidencyEnabled() bool {
 	return gpuresid.AttnFFNResidencyEnabled()
 }
 
-// hiddenResidencyEnabled - device-resident hidden state (выкл.: GGUF_HIDDEN_RESIDENCY=0)
+// hiddenResidencyEnabled - device-resident hidden state (disable: GGUF_HIDDEN_RESIDENCY=0)
 func hiddenResidencyEnabled() bool {
 	return gpuresid.HiddenResidencyEnabled()
 }
@@ -631,14 +631,14 @@ func qkvResidencyEnabled() bool {
 	return gpuresid.QKVResidencyEnabled()
 }
 
-// attnFFNGPU: WO + residual + ffn_norm + FFN + residual на GPU.
-// x == nil - hidden резидентен на устройстве (§1).
+// attnFFNGPU: WO + residual + ffn_norm + FFN + residual on GPU.
+// x == nil - hidden resident on device (§1).
 func (m *Model) attnFFNGPU(layer int, ln layerNorms, x, attn []float32) error {
 	return m.fused.AttnFFN(m.gpuLayers[layer], m.fusedDims, ln.ffnNorm, x, attn)
 }
 
-// qkvAttnGPU: QKV + QK-norm + RoPE + KV append + attention на GPU.
-// h == nil - hidden резидентен: attn_norm считается на устройстве из residual (§1).
+// qkvAttnGPU: QKV + QK-norm + RoPE + KV append + attention on GPU.
+// h == nil - hidden resident: attn_norm computed on device from residual (§1).
 func (m *Model) qkvAttnGPU(layer, pos int, ln layerNorms, h, kOut, vOut, attn []float32) error {
 	kvPos := m.cache.Len()
 
@@ -750,7 +750,7 @@ func (m *Model) matmul(name string, rows, cols int, vec []float32, layer int) ([
 	}
 }
 
-// matmulGPU выполняет matmul на GPU (Q8_0/Q4_0 без полной деквантизации, иначе FP32)
+// matmulGPU runs matmul on GPU (Q8_0/Q4_0 without full dequantization, else FP32)
 func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32, error) {
 	info, err := m.weights.Info(name)
 	if err != nil {
@@ -811,13 +811,13 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logits() error {
-	// §2: hidden на устройстве - out_norm + lm_head тоже на GPU, на host уходят только logits
+	// §2: hidden on device - out_norm + lm_head on GPU too; only logits go to host
 	if m.residDevice && m.logitsOnGPU {
 		if err := m.logitsDevice(); err == nil {
 			return nil
 		}
 
-		// lm_head на GPU не получился (тип весов / VRAM): дальше считаем на host
+		// lm_head on GPU failed (weight type / VRAM): continue on host
 		m.logitsOnGPU = false
 	}
 
@@ -828,7 +828,7 @@ func (m *Model) logits() error {
 	return m.logitsFromHidden(m.scratch.x[:m.cfg.EmbeddingDim])
 }
 
-// logitsDevice считает RMSNorm(resident hidden) + lm_head на GPU без DtoH скрытого состояния
+// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH of hidden state
 func (m *Model) logitsDevice() error {
 	return m.fused.LogitsDevice("output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 }
@@ -901,13 +901,13 @@ func (m *Model) logitsFinish() error {
 }
 
 func (m *Model) rmsNormInto(dst, x, weight []float32, layer int) error {
-	// RMSNorm на GPU невыгоден на PCIe (маленький буфер): только CPU.
+	// RMSNorm on GPU is not worthwhile over PCIe (small buffer): CPU only.
 	_ = layer
 	return ops.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps)
 }
 
 func (m *Model) applyRoPEHeads(v []float32, nHeads, pos, layer int) {
-	// RoPE на GPU: HtoD/DtoH > выгоды на decode; CPU быстрее для residency-пути.
+	// RoPE on GPU: HtoD/DtoH cost exceeds decode benefit; CPU is faster for the residency path.
 	_ = layer
 	ops.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
 }
@@ -924,7 +924,7 @@ func (m *Model) swigluInPlace(gate, up []float32, layer int) {
 
 func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, layer int) error {
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		// gpuKVStale: часть токенов не попала в GPU KV-cache - attention только по CPU-кешу
+		// gpuKVStale: some tokens missed GPU KV-cache - attention uses CPU cache only
 		if !m.gpuKVStale {
 			if err := m.gpu.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 				return nil

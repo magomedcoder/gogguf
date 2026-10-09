@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// Config - гиперпараметры Phi-3 / Phi-3.5 из метаданных GGUF
+// Config - Phi-3 / Phi-3.5 hyperparameters from GGUF metadata
 type Config struct {
 	ContextLength  int
 	EmbeddingDim   int
@@ -24,7 +24,7 @@ type Config struct {
 	RopeAttnFactor float32 // rope.scaling.attn_factor; 0 -> 1
 }
 
-// ParseConfig читает конфиг из метаданных GGUF (префикс phi3.)
+// ParseConfig reads config from GGUF metadata (phi3. prefix)
 func ParseConfig(r *format.Reader) (Config, error) {
 	prefix := "phi3."
 	getInt := func(key string) (int, error) {

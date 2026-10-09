@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
-// MatMulMatInto: W [rows*cols] * X [batch*cols] -> out [batch*rows] X и out - подряд идущие векторы (токен b с offset b*cols / b*rows)
+// MatMulMatInto: W [rows*cols] * X [batch*cols] -> out [batch*rows] X and out are contiguous vectors (token b at offset b*cols / b*rows)
 func MatMulMatInto(matrix []float32, rows, cols int, x []float32, batch int, out []float32) error {
 	if batch < 1 {
 		return fmt.Errorf("ops: batch=%d", batch)
@@ -35,7 +35,7 @@ func MatMulMatInto(matrix []float32, rows, cols int, x []float32, batch int, out
 	return nil
 }
 
-// MatMulMatQ8_0Into - то же для Q8_0-матрицы.
+// MatMulMatQ8_0Into - same for a Q8_0 matrix.
 func MatMulMatQ8_0Into(raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
 	if batch < 1 {
 		return fmt.Errorf("ops: batch=%d", batch)
@@ -79,7 +79,7 @@ func MatMulMatQ8_0Into(raw []byte, rows, cols int, x []float32, batch int, out [
 	return nil
 }
 
-// MatMulMatViaVecInto - batch через MatMulVecInto (любой уже готовый vec-kernel)
+// MatMulMatViaVecInto - batch via MatMulVecInto (any existing vec kernel)
 func MatMulMatViaVecInto(batch int, rows, cols int, x, out []float32, mul func(vec, dst []float32) error) error {
 	if batch < 1 {
 		return fmt.Errorf("ops: batch=%d", batch)

@@ -2,7 +2,7 @@
 
 package gpu
 
-// OpenMetal без тега metal недоступен (CUDA-путь это не затрагивает)
+// OpenMetal without metal tag unavailable (does not affect CUDA path)
 func OpenMetal() (Backend, error) {
 	return nil, ErrMetalUnavailable
 }

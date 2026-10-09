@@ -2,24 +2,24 @@ package ops
 
 import "math"
 
-// RoPEScale - масштабирование RoPE (LongRoPE / linear); нулевые поля = без масштаба
+// RoPEScale - RoPE scaling (LongRoPE / linear); zero fields = no scaling
 type RoPEScale struct {
-	FreqScale  float32   // множитель угла (1/scaling.factor); 0 -> 1
-	AttnFactor float32   // mscale для cos/sin; 0 -> 1
-	Factors    []float32 // на пару dim (len = nRot/2); nil -> все 1
+	FreqScale  float32   // angle multiplier (1/scaling.factor); 0 -> 1
+	AttnFactor float32   // mscale for cos/sin; 0 -> 1
+	Factors    []float32 // per dim pair (len = nRot/2); nil -> all 1
 }
 
-// ApplyRoPE применяет rotary positional embedding в стиле GPT-NeoX / Qwen (пары dim i и i+headDim/2)
+// ApplyRoPE applies rotary positional embedding GPT-NeoX / Qwen style (dim pairs i and i+headDim/2)
 func ApplyRoPE(v []float32, pos int, freqBase float32) {
 	ApplyRoPEPartial(v, pos, freqBase, len(v))
 }
 
-// ApplyRoPEPartial применяет NeoX RoPE только к первым nRot измерениям головы (остальное без изменений)
+// ApplyRoPEPartial applies NeoX RoPE only to first nRot dimensions of head (rest unchanged)
 func ApplyRoPEPartial(v []float32, pos int, freqBase float32, nRot int) {
 	ApplyRoPEPartialScaled(v, pos, freqBase, nRot, RoPEScale{})
 }
 
-// ApplyRoPEPartialScaled как ApplyRoPEPartial + LongRoPE factors / freq_scale / attn_factor
+// ApplyRoPEPartialScaled like ApplyRoPEPartial + LongRoPE factors / freq_scale / attn_factor
 func ApplyRoPEPartialScaled(v []float32, pos int, freqBase float32, nRot int, scale RoPEScale) {
 	if nRot <= 0 || nRot > len(v) {
 		nRot = len(v)

@@ -5,13 +5,13 @@ import (
 	"math"
 )
 
-// AttentionScoresInto записывает attention в dst [nHeads*headDim]
-// scores - буфер длины >= seqLen для softmax weights (переиспользуется между головами)
+// AttentionScoresInto writes attention to dst [nHeads*headDim]
+// scores - buffer length >= seqLen for softmax weights (reused across heads)
 func AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	return AttentionScoresIntoSoftcap(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim, 0)
 }
 
-// AttentionScoresIntoSoftcap как AttentionScoresInto; softcap>0 -> softcap*tanh(score/softcap) (Gemma2)
+// AttentionScoresIntoSoftcap like AttentionScoresInto; softcap>0 -> softcap*tanh(score/softcap) (Gemma2)
 func AttentionScoresIntoSoftcap(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int, softcap float32) error {
 	if len(dst) < nHeads*headDim {
 		return fmt.Errorf("ops: dst слишком короткий")
@@ -57,7 +57,7 @@ func AttentionScoresIntoSoftcap(dst, q, k, v, scores []float32, seqLen, nHeads, 
 	return nil
 }
 
-// AttentionScores вычисляет scaled dot-product attention для одной позиции
+// AttentionScores computes scaled dot-product attention for one position
 // q: [nHeads*headDim]
 // k: [seqLen*nKVHeads*headDim]
 // v: [seqLen*nKVHeads*headDim]

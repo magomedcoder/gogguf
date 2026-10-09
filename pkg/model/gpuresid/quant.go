@@ -7,8 +7,8 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
-// QuantBytes возвращает размер матрицы rows*cols в сыром виде для квантованного типа.
-// Нужен, чтобы резать тензор экспертов MoE без деквантизации (§6)
+// QuantBytes returns raw byte size of a rows*cols matrix for a quantized type.
+// Used to slice MoE expert tensor without dequantization (§6)
 func QuantBytes(t format.GGML, rows, cols int) (int, error) {
 	if rows <= 0 || cols <= 0 {
 		return 0, fmt.Errorf("rows=%d cols=%d", rows, cols)

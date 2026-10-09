@@ -1,6 +1,6 @@
 package chat
 
-// FormatMessages форматирует диалог в chat template
+// FormatMessages formats a dialog into the chat template.
 func FormatMessages(messages []Message, opts Options) (string, error) {
 	if len(messages) == 0 {
 		return "", nil

@@ -34,7 +34,7 @@ type layerBias struct {
 	ffnDn   []float32
 }
 
-// Load создаёт Phi-2 из весов GGUF
+// Load creates Phi-2 from GGUF weights
 func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
@@ -144,12 +144,12 @@ func (m *Model) initGPUKVCache() error {
 	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
-// Config возвращает конфигурацию модели
+// Config returns the model configuration
 func (m *Model) Config() Config {
 	return m.cfg
 }
 
-// ResetCache сбрасывает KV-cache
+// ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
 	if m.gpu != nil {
@@ -157,7 +157,7 @@ func (m *Model) ResetCache() {
 	}
 }
 
-// Close освобождает GPU-ресурсы модели
+// Close releases GPU resources held by the model
 func (m *Model) Close() error {
 	if m.gpu == nil {
 		return nil
@@ -167,7 +167,7 @@ func (m *Model) Close() error {
 	return err
 }
 
-// Forward выполняет forward pass для последовательности tokenIDs начиная с startPos
+// Forward runs forward pass for tokenIDs starting at startPos
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("phi2: пустой ввод")
@@ -196,12 +196,12 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	return m.scratch.out, nil
 }
 
-// EmbeddingDim возвращает размер скрытого состояния
+// EmbeddingDim returns the hidden state dimension
 func (m *Model) EmbeddingDim() int {
 	return m.cfg.EmbeddingDim
 }
 
-// Embed - last-token LayerNorm(hidden) до lm_head (сбрасывает KV)
+// Embed - last-token LayerNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("phi2: пустой ввод")
@@ -281,7 +281,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	lt := m.layerTensors[layer]
 	lb := m.layerBias[layer]
 
-	// один LayerNorm на residual; attn и FFN параллельно
+	// one LayerNorm on residual; attn and FFN in parallel
 	if err := ops.LayerNormInto(m.scratch.h, m.scratch.x, ln.attnW, ln.attnB, m.cfg.LayerNormEps); err != nil {
 		return err
 	}
@@ -313,7 +313,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	ops.AddBiasInPlace(m.scratch.attnOut, lb.wo)
 	ops.AddInPlace(m.scratch.x, m.scratch.attnOut)
 
-	// FFN от того же normed h (parallel residual)
+	// FFN from the same normed h (parallel residual)
 	if err := m.matmulInto(lt.ffnUp, m.cfg.FFNHidden, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.up, layer); err != nil {
 		return err
 	}

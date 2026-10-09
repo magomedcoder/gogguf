@@ -8,8 +8,8 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/gpu/metal"
 )
 
-// OpenMetal возвращает Metal-backend (scaffold: compute-вызовы отдают ошибку).
-// Собирается только с тегом metal, работает только на macOS
+// OpenMetal returns Metal backend (scaffold: compute calls return error).
+// Built only with metal tag, runs only on macOS
 func OpenMetal() (Backend, error) {
 	b, err := metal.Open()
 	if err != nil {

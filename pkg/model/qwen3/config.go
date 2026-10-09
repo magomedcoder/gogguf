@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// Config - гиперпараметры Qwen3 из метаданных GGUF
+// Config - Qwen3 hyperparameters from GGUF metadata
 type Config struct {
 	ContextLength     int
 	EmbeddingDim      int
@@ -25,7 +25,7 @@ type Config struct {
 	MoENormWeights    bool
 }
 
-// ParseConfigMoE читает qwen3moe.*
+// ParseConfigMoE reads qwen3moe.*
 func ParseConfigMoE(r *format.Reader) (Config, error) {
 	cfg, err := parseConfigWithPrefix(r, "qwen3moe.")
 	if err != nil {
@@ -44,7 +44,7 @@ func ParseConfigMoE(r *format.Reader) (Config, error) {
 	return cfg, nil
 }
 
-// ParseConfig читает конфиг из метаданных GGUF
+// ParseConfig reads config from GGUF metadata
 func ParseConfig(r *format.Reader) (Config, error) {
 	return parseConfigWithPrefix(r, "qwen3.")
 }

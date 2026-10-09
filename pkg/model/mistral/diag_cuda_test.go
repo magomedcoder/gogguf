@@ -12,7 +12,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// диагностика: сверка matmul-ядер GPU с CPU на реальных весах слоя 0
+// diagnostics: compare GPU matmul kernels to CPU on real layer-0 weights
 func TestDiagLayer0Matmuls(t *testing.T) {
 	r, err := format.OpenFile(modelPath(t))
 	if err != nil {
@@ -83,7 +83,7 @@ func TestDiagLayer0Matmuls(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// эталон в float64 по деквантованным весам: кто ближе - CPU или GPU
+		// float64 reference from dequantized weights: which is closer - CPU or GPU
 		f32, err := w.Floats(name)
 		if err != nil {
 			t.Fatal(err)

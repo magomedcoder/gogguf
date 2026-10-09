@@ -2,7 +2,7 @@ package tokenizer
 
 import "fmt"
 
-// encodeGreedyVocab кодирует текст жадным longest-match по vocab (Mistral / SentencePiece без merges)
+// encodeGreedyVocab encodes text with greedy longest-match over vocab (Mistral / SentencePiece without merges)
 func (t *Tokenizer) encodeGreedyVocab(text string) ([]int, error) {
 	if text == "" {
 		return nil, nil

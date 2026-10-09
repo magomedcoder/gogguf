@@ -8,13 +8,13 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/gpu/cuda"
 )
 
-// OpenCUDA инициализирует CUDA через Driver API (libcuda) на устройстве 0
+// OpenCUDA initializes CUDA via Driver API (libcuda) on device 0
 func OpenCUDA() (Backend, error) {
 	return cuda.Open()
 }
 
-// OpenCUDADevice инициализирует CUDA на устройстве с ordinal device (флаг -dev).
-// Нумерация - после фильтра CUDA_VISIBLE_DEVICES
+// OpenCUDADevice initializes CUDA on device with ordinal ( -dev flag).
+// Numbering - after CUDA_VISIBLE_DEVICES filter
 func OpenCUDADevice(device int) (Backend, error) {
 	if device < 0 {
 		return nil, fmt.Errorf("%w: %d", ErrInvalidDevice, device)
@@ -23,13 +23,13 @@ func OpenCUDADevice(device int) (Backend, error) {
 	return cuda.OpenDevice(device)
 }
 
-// OpenCUDADevices открывает несколько устройств и распределяет слои между ними.
-// Один элемент в списке = обычный однокарточный backend без обёртки
+// OpenCUDADevices opens multiple devices and splits layers between them.
+// One list entry = normal single-GPU backend without wrapper
 func OpenCUDADevices(devices []int) (Backend, error) {
 	return OpenCUDADevicesSplit(devices, nil)
 }
 
-// OpenCUDADevicesSplit как OpenCUDADevices, но с пропорциями слоёв (-tensor-split)
+// OpenCUDADevicesSplit like OpenCUDADevices but with layer proportions (-tensor-split)
 func OpenCUDADevicesSplit(devices []int, split []float64) (Backend, error) {
 	devices, err := normalizeDeviceList(devices)
 	if err != nil {

@@ -1,6 +1,6 @@
 package chat
 
-// Message - одно сообщение диалога для chat template
+// Message is one dialog message for the chat template.
 type Message struct {
 	Role       string
 	Content    string

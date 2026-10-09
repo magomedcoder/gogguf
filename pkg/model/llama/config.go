@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// Config - гиперпараметры Llama из метаданных GGUF
+// Config - Llama hyperparameters from GGUF metadata
 type Config struct {
 	ContextLength int
 	EmbeddingDim  int
@@ -20,7 +20,7 @@ type Config struct {
 	RopeFreqBase  float32
 }
 
-// ParseConfig читает конфиг из метаданных GGUF (префикс llama.)
+// ParseConfig reads config from GGUF metadata (llama. prefix)
 func ParseConfig(r *format.Reader) (Config, error) {
 	prefix := "llama."
 	getInt := func(key string) (int, error) {
@@ -76,7 +76,7 @@ func ParseConfig(r *format.Reader) (Config, error) {
 		return Config{}, err
 	}
 
-	// Llama 2 ≈ 32k vocab / rope 10k; Llama 3 ≈ 128k / 500k - если ключ отсутствует
+	// Llama 2 ≈ 32k vocab / rope 10k; Llama 3 ≈ 128k / 500k - when the key is missing
 	freqBase := float32(10000)
 	if vocab >= 100000 {
 		freqBase = 500000

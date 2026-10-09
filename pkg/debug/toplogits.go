@@ -1,12 +1,12 @@
 package debug
 
-// Logit - token id и значение logit
+// Logit is a token id and logit value.
 type Logit struct {
 	ID    int     `json:"id"`
 	Logit float32 `json:"logit"`
 }
 
-// TopLogits возвращает top-N logits по убыванию значения
+// TopLogits returns top-N logits sorted by descending value.
 func TopLogits(logits []float32, n int) []Logit {
 	if n <= 0 || len(logits) == 0 {
 		return nil

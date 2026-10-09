@@ -13,12 +13,12 @@ const (
 	imStart = "<|im_start|>"
 	imEnd   = "<|im_end|>"
 
-	// Стандартные Qwen3 thinking-токены - при наличии metadata берутся из vocab
+	// Default Qwen3 thinking tokens; taken from vocab when metadata is present.
 	defaultThinkingOpen  = " "
 	defaultThinkingClose = " "
 )
 
-// Render форматирует диалог через Jinja2 tokenizer.chat_template из метаданных
+// Render formats a dialog via Jinja2 tokenizer.chat_template from metadata.
 func Render(meta format.Metadata, messages []Message, addGenerationPrompt bool, opts Options) (string, error) {
 	tmpl, err := SelectChatTemplate(meta, opts)
 	if err != nil {
@@ -42,7 +42,7 @@ func Render(meta format.Metadata, messages []Message, addGenerationPrompt bool, 
 	return out, nil
 }
 
-// RenderFromReader рендерит prompt из GGUF reader
+// RenderFromReader renders the prompt from a GGUF reader.
 func RenderFromReader(r *format.Reader, messages []Message, addGenerationPrompt bool, opts Options) (string, error) {
 	return Render(r.Metadata, messages, addGenerationPrompt, opts)
 }
@@ -63,7 +63,7 @@ func renderChatML(messages []Message, addGenerationPrompt bool, opts Options) st
 			}
 
 			if msg.Role == "tool" && msg.ToolCallID != "" && content != "" {
-				// ChatML: tool_call_id можно указать в начале блока
+				// ChatML: tool_call_id may be placed at the start of the block.
 				content = "tool_call_id=" + msg.ToolCallID + "\n" + content
 			}
 
@@ -80,7 +80,7 @@ func renderChatML(messages []Message, addGenerationPrompt bool, opts Options) st
 
 func toolsSystemPreamble(opts Options) string {
 	var b strings.Builder
-	// инглиш мазафака
+	// English tool preamble for ChatML fallback.
 	b.WriteString("You may call one or more functions to assist with the user query.\n")
 	b.WriteString("Available tools:\n")
 

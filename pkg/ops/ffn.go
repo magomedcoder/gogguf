@@ -2,7 +2,7 @@ package ops
 
 import "math"
 
-// SwiGLU вычисляет silu(gate) * up поэлементно
+// SwiGLU computes silu(gate) * up element-wise
 func SwiGLU(gate, up []float32) []float32 {
 	out := make([]float32, len(gate))
 	copy(out, gate)
@@ -19,7 +19,7 @@ const (
 	sqrt2OverPi = 0.7978845608028654 // sqrt(2/π)
 )
 
-// GELUInPlace - ggml gelu (tanh-аппроксимация) in-place
+// GELUInPlace - ggml gelu (tanh approximation) in-place
 func GELUInPlace(x []float32) {
 	for i, v := range x {
 		xf := float64(v)

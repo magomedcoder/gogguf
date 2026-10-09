@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/debug"
 )
 
-// runCompareLayers сравнивает два dump или CPU vs GPU hidden по слоям
+// runCompareLayers compares two dumps or CPU vs GPU hidden states by layer.
 func runCompareLayers(args []string) error {
 	fs := flag.NewFlagSet("comparelayers", flag.ContinueOnError)
 	aPath := fs.String("a", "", "dump A")

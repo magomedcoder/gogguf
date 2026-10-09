@@ -8,16 +8,16 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
-// forwardBatch - multi-token prefill (n_batch): один проход слоёв на chunk.
-// При -ngl matmul идёт loop-B MatMulVec*Cached (веса резидентны на GPU), attention -
-// loop AttentionScoresKV по GPU KV; иначе CPU GEMM + CPU causal attn (§4).
+// forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
+// With -ngl matmul uses loop-B MatMulVec*Cached (weights resident on GPU), attention -
+// loop AttentionScoresKV over GPU KV; otherwise CPU GEMM + CPU causal attn (§4).
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
 	b := len(tokenIDs)
 	if b == 0 {
 		return fmt.Errorf("qwen3: пустой batch")
 	}
 
-	// host-буферы batch-пути: резидентный hidden с устройства больше не нужен
+	// batch-path host buffers: resident hidden from device is no longer needed
 	if err := m.syncHiddenFromDevice(); err != nil {
 		return err
 	}
@@ -106,7 +106,7 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	pastLen := m.cache.Len()
 	m.cache.AppendN(layer, k, v, batch)
 
-	// §4: зеркалим K/V чанка в GPU KV-cache, иначе decode после batch-prefill увидит неполный кеш.
+	// §4: mirror chunk K/V into GPU KV-cache, else decode after batch-prefill sees incomplete cache.
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
 		if err := m.gpu.KVCacheAppendN(layer, pastLen, k, v, batch); err != nil {
 			m.gpuKVStale = true
@@ -155,8 +155,8 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	return nil
 }
 
-// attentionBatchCausalInto: causal multi-query attention для batch.
-// На GPU - loop AttentionScoresKV с seqLen=past+i+1; иначе CPU эталон.
+// attentionBatchCausalInto: causal multi-query attention for batch.
+// On GPU - loop AttentionScoresKV with seqLen=past+i+1; else CPU reference.
 func (m *Model) attentionBatchCausalInto(attn, q []float32, layer, pastLen, batch int) error {
 	qDim := m.cfg.NumHeads * m.cfg.HeadDim
 
@@ -180,7 +180,7 @@ func (m *Model) attentionBatchCausalInto(attn, q []float32, layer, pastLen, batc
 }
 
 // matmulBatchInto: W * X[batch].
-// При -ngl - loop MatMulVec*Cached (веса уже на GPU).
+// With -ngl - loop MatMulVec*Cached (weights already on GPU).
 func (m *Model) matmulBatchInto(name string, rows, cols int, x, out []float32, batch, layer int) error {
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.matmulBatchGPU(name, rows, cols, x, out, batch); err == nil {

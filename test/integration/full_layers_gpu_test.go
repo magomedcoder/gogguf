@@ -11,8 +11,8 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/debug"
 )
 
-// TestFullLayersCPUVsGPU сверяет embed + hidden по слоям CPU vs CUDA.
-// GPU approx (softmax ex2, residency) накапливает drift к последнему слою (~0.3 abs);
+// TestFullLayersCPUVsGPU compares embed + hidden by layer CPU vs CUDA.
+// GPU approx (softmax ex2, residency) accumulates drift toward the last layer (~0.3 abs);
 // override: GGUF_GPU_LAYERS_TOL (default 0.35).
 func TestFullLayersCPUVsGPU(t *testing.T) {
 	model := modelPath(t)

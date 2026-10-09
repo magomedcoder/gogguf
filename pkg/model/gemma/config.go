@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// Variant - семейство Gemma
+// Variant - Gemma family
 type Variant int
 
 const (
@@ -15,7 +15,7 @@ const (
 	VariantGemma2
 )
 
-// Config - гиперпараметры Gemma / Gemma2 из метаданных GGUF
+// Config - Gemma / Gemma2 hyperparameters from GGUF metadata
 type Config struct {
 	Variant           Variant
 	ContextLength     int
@@ -29,19 +29,19 @@ type Config struct {
 	RMSNormEps        float32
 	RopeFreqBase      float32
 	RopeFreqBaseSWA   float32 // gemma2 SWA layers; 0 -> RopeFreqBase
-	SlidingWindow     int     // gemma2; 0 = без SWA
+	SlidingWindow     int     // gemma2; 0 = no SWA
 	SWAPeriod         int     // gemma2 pattern; 0/2: even=SWA
 	AttnLogitSoftcap  float32 // gemma2; 0 = off
 	FinalLogitSoftcap float32 // gemma2; 0 = off
-	EmbedScale        float32 // sqrt(embd); задаётся при парсинге
+	EmbedScale        float32 // sqrt(embd); set during parsing
 }
 
-// ParseConfigGemma читает gemma.*
+// ParseConfigGemma reads gemma.*
 func ParseConfigGemma(r *format.Reader) (Config, error) {
 	return parseConfig(r, "gemma.", VariantGemma)
 }
 
-// ParseConfigGemma2 читает gemma2.*
+// ParseConfigGemma2 reads gemma2.*
 func ParseConfigGemma2(r *format.Reader) (Config, error) {
 	return parseConfig(r, "gemma2.", VariantGemma2)
 }
@@ -150,7 +150,7 @@ func parseConfig(r *format.Reader, prefix string, variant Variant) (Config, erro
 	return cfg, nil
 }
 
-// IsSWALayer: gemma2, period=2 -> чётные слои SWA (как llama.cpp set_swa_pattern)
+// IsSWALayer: gemma2, period=2 -> even layers are SWA (like llama.cpp set_swa_pattern)
 func (c Config) IsSWALayer(layer int) bool {
 	if c.Variant != VariantGemma2 || c.SlidingWindow <= 0 {
 		return false

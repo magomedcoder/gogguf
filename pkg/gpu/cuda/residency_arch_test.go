@@ -10,7 +10,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
-// §5: fused FFN GeGLU (Gemma) на Q8_0-весах совпадает с CPU-путём
+// §5: fused FFN GeGLU (Gemma) on Q8_0 weights matches CPU path
 func TestFFNGeGLUQuantQ8(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -60,7 +60,7 @@ func TestFFNGeGLUQuantQ8(t *testing.T) {
 	}
 }
 
-// §5: fused QKV в режиме RoPE NORM без QK-norm (Llama / Mistral) совпадает с CPU-путём на тех же деквантованных весах
+// §5: fused QKV in RoPE NORM mode without QK-norm (Llama / Mistral) matches CPU path on same dequant weights
 func TestQKVRoPENormWithoutQKNorm(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -97,7 +97,7 @@ func TestQKVRoPENormWithoutQKNorm(t *testing.T) {
 	sin := make([]float32, half)
 	ops.RoPECosSin(cos, sin, headDim, pos, freqBase)
 
-	// CPU-эталон: QKV -> RoPE NORM -> attention по единственному токену
+	// CPU reference: QKV -> RoPE NORM -> attention for a single token
 	wantQ, err := ops.MatMulVec(wq, qDim, embd, h)
 	if err != nil {
 		t.Fatal(err)

@@ -12,7 +12,7 @@ const (
 	llamaDefaultDate   = "26 Jul 2024"
 )
 
-// formatLlamaFallback выбирает Llama 3 Instruct или Llama 2 [INST]
+// formatLlamaFallback picks Llama 3 Instruct or Llama 2 [INST] formatting.
 func formatLlamaFallback(messages []Message, opts Options) string {
 	if isLlama3Family(opts.Metadata) {
 		return formatLlama3(messages, opts)
@@ -21,7 +21,7 @@ func formatLlamaFallback(messages []Message, opts Options) string {
 	return formatLlama2Instruct(messages, opts)
 }
 
-// formatLlama3 форматирует диалог в стиле Llama 3 Instruct
+// formatLlama3 formats a dialog in Llama 3 Instruct style.
 func formatLlama3(messages []Message, opts Options) string {
 	meta := opts.Metadata
 	startHeader := tokenFromVocab(meta, llamaStartHeaderID)
@@ -146,7 +146,7 @@ func formatLlama2Instruct(messages []Message, opts Options) string {
 	return b.String()
 }
 
-// collectSystemPrompt: system из messages; opts.System - только если system-сообщений нет
+// collectSystemPrompt: system from messages; opts.System only when there are no system messages.
 func collectSystemPrompt(messages []Message, opts Options) string {
 	var parts []string
 	for _, msg := range messages {
@@ -185,7 +185,7 @@ func isLlamaArchitecture(meta format.Metadata) bool {
 	return err == nil && arch == "llama"
 }
 
-// isLlama3Family: header tokens / llama-bpe / большой vocab / высокий rope.freq_base
+// isLlama3Family: header tokens / llama-bpe / large vocab / high rope.freq_base.
 func isLlama3Family(meta format.Metadata) bool {
 	if !isLlamaArchitecture(meta) {
 		return false

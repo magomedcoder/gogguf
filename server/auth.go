@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// withAPIKey требует Authorization: Bearer <key> или X-API-Key, кроме /v1/health
+// withAPIKey requires Authorization: Bearer <key> or X-API-Key, except for /v1/health.
 func withAPIKey(next http.Handler, apiKey string) http.Handler {
 	if apiKey == "" {
 		return next

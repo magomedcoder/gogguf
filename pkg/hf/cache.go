@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-// CacheDir возвращает каталог HF Hub cache.
-// Порядок: LLAMA_CACHE -> HF_HUB_CACHE -> HUGGINGFACE_HUB_CACHE -> HF_HOME/hub -> XDG_CACHE_HOME/huggingface/hub -> ~/.cache/huggingface/hub.
+// CacheDir returns the HF Hub cache directory.
+// Order: LLAMA_CACHE -> HF_HUB_CACHE -> HUGGINGFACE_HUB_CACHE -> HF_HOME/hub -> XDG_CACHE_HOME/huggingface/hub -> ~/.cache/huggingface/hub.
 func CacheDir() (string, error) {
 	type entry struct {
 		env  string
-		tail string // относительно значения env; пусто = использовать как есть
+		tail string // relative to env value; empty = use as-is
 	}
 	entries := []entry{
 		{"LLAMA_CACHE", ""},
@@ -39,12 +39,12 @@ func CacheDir() (string, error) {
 	return filepath.Join(home, ".cache", "huggingface", "hub"), nil
 }
 
-// RepoFolderName преобразует "owner/repo" в "models--owner--repo"
+// RepoFolderName converts "owner/repo" to "models--owner--repo".
 func RepoFolderName(repoID string) string {
 	return "models--" + strings.ReplaceAll(repoID, "/", "--")
 }
 
-// RepoPath возвращает путь к каталогу репозитория в кэше
+// RepoPath returns the repository directory path in cache.
 func RepoPath(repoID string) (string, error) {
 	base, err := CacheDir()
 	if err != nil {

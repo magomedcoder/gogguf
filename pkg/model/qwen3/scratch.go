@@ -2,7 +2,7 @@ package qwen3
 
 import "github.com/magomedcoder/gogguf/pkg/mempool"
 
-// scratch - переиспользуемые буферы forward pass из одного Arena
+// scratch - reusable forward pass buffers from one Arena
 type scratch struct {
 	x      []float32
 	h      []float32

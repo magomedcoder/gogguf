@@ -1,6 +1,6 @@
 package sampler
 
-// Greedy выбирает индекс с максимальным logit
+// Greedy picks index with maximum logit
 func Greedy(logits []float32) int {
 	if len(logits) == 0 {
 		return -1

@@ -14,7 +14,7 @@ type greedyOutput struct {
 	Tokens []int  `json:"tokens"`
 }
 
-// runGreedy генерирует N токенов greedy и печатает JSON
+// runGreedy generates N tokens greedily and prints JSON.
 func runGreedy(args []string) error {
 	fs := flag.NewFlagSet("greedy", flag.ContinueOnError)
 	model := fs.String("m", "", "путь к GGUF")

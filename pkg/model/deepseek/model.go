@@ -19,8 +19,8 @@ type Model struct {
 	gpu          gpu.Backend
 	ngl          int
 	gpuMaxSeq    int
-	fused        *gpuresid.Runner // fused GPU-пути: FFN, эксперты MoE (§6)
-	moeGPU       []bool           // слой умеет считать экспертов на GPU
+	fused        *gpuresid.Runner // fused GPU paths: FFN, MoE experts (§6)
+	moeGPU       []bool           // layer can run experts on GPU
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
@@ -28,7 +28,7 @@ type Model struct {
 	lmHeadName   string
 }
 
-// Load создаёт DeepSeek из весов
+// Load creates DeepSeek from weights
 func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
@@ -77,7 +77,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	return m, nil
 }
 
-// initFused готовит GPU-пути слоя (§6). DeepSeek v1: RoPE NORM, эксперты через ExpertFFN
+// initFused sets up GPU layer paths (§6). DeepSeek v1: RoPE NORM, experts via ExpertFFN
 func (m *Model) initFused() {
 	if m.gpu == nil || m.ngl <= 0 {
 		return
@@ -109,12 +109,12 @@ func (m *Model) initGPUKVCache() error {
 	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
-// Config возвращает конфигурацию модели
+// Config returns the model configuration
 func (m *Model) Config() Config {
 	return m.cfg
 }
 
-// ResetCache сбрасывает KV-cache
+// ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
 	if m.gpu != nil {
@@ -122,7 +122,7 @@ func (m *Model) ResetCache() {
 	}
 }
 
-// Close освобождает GPU-ресурсы модели
+// Close releases GPU resources held by the model
 func (m *Model) Close() error {
 	if m.gpu == nil {
 		return nil
@@ -133,7 +133,7 @@ func (m *Model) Close() error {
 	return err
 }
 
-// Forward выполняет forward pass для последовательности tokenIDs начиная с startPos
+// Forward runs forward pass for tokenIDs starting at startPos
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("deepseek: пустой ввод")
@@ -153,12 +153,12 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	return m.scratch.out, nil
 }
 
-// EmbeddingDim возвращает размер скрытого состояния
+// EmbeddingDim returns the hidden state dimension
 func (m *Model) EmbeddingDim() int {
 	return m.cfg.EmbeddingDim
 }
 
-// Embed - last-token RMSNorm(hidden) до lm_head (сбрасывает KV)
+// Embed - last-token RMSNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("deepseek: пустой ввод")
@@ -328,7 +328,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	nExp := m.cfg.ExpertCount
 	ffn := m.cfg.ExpertFFN
 
-	// §6: router matmul на GPU через MatMulInto (тот же кеш квантов)
+	// §6: router matmul on GPU via MatMulInto (same quant cache)
 	if err := m.matmulInto(lt.gateInp, nExp, embd, m.scratch.h, m.scratch.router[:nExp], layer); err != nil {
 		return err
 	}
@@ -337,7 +337,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 
 	clear(m.scratch.moeAcc)
 
-	// §6: выбранные эксперты - fused FFN на GPU по срезу raw-весов
+	// §6: selected experts - fused FFN on GPU from raw weight slice
 	if m.moeExpertsGPU(lt, layer, idxs, weights) {
 		return m.sharedExpert(lt, layer)
 	}
@@ -387,8 +387,8 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	return m.sharedExpert(lt, layer)
 }
 
-// moeExpertsGPU считает выбранных экспертов на GPU и аккумулирует их в moeAcc.
-// false - слой на GPU не идёт (нет offload или тип весов вне fused-путей)
+// moeExpertsGPU runs selected experts on GPU and accumulates them in moeAcc.
+// false - layer does not run on GPU (no offload or weight type outside fused paths)
 func (m *Model) moeExpertsGPU(lt layerTensors, layer int, idxs []int, weights []float32) bool {
 	if !m.layerOnGPU(layer) || layer >= len(m.moeGPU) || !m.moeGPU[layer] {
 		return false
@@ -411,7 +411,7 @@ func (m *Model) moeExpertsGPU(lt layerTensors, layer int, idxs []int, weights []
 	return true
 }
 
-// sharedExpert добавляет общий эксперт слоя в moeAcc (если он есть)
+// sharedExpert adds layer shared expert into moeAcc (if present)
 func (m *Model) sharedExpert(lt layerTensors, layer int) error {
 	if m.cfg.ExpertShared <= 0 || lt.gateShexp == "" {
 		return nil

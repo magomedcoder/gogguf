@@ -5,11 +5,11 @@ import "github.com/magomedcoder/gogguf/pkg/mempool"
 type scratch struct {
 	x      []float32
 	h      []float32
-	qFull  []float32 // nHeads*(qkNope+rope) до absorb
+	qFull  []float32 // nHeads*(qkNope+rope) before absorb
 	qAbs   []float32 // nHeads*(kvLora+rope)
 	kvPe   []float32 // kvLora + rope
-	kCache []float32 // K одного токена
-	vCache []float32 // V одного токена
+	kCache []float32 // K for one token
+	vCache []float32 // V for one token
 	attn   []float32 // nHeads*vHead
 	scores []float32
 	gate   []float32

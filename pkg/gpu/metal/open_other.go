@@ -4,10 +4,10 @@ package metal
 
 import "errors"
 
-// ErrNotDarwin: Metal существует только на macOS
+// ErrNotDarwin: Metal exists only on macOS
 var ErrNotDarwin = errors.New("metal: доступен только на macOS (darwin)")
 
-// Open вне macOS всегда возвращает ошибку
+// Open outside macOS always returns an error
 func Open() (*Backend, error) {
 	return nil, ErrNotDarwin
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/debug"
 )
 
-// runDumpLogits пишет полный vocab logits после prefill (.bin + .json)
+// runDumpLogits writes full-vocab logits after prefill (.bin + .json).
 func runDumpLogits(args []string) error {
 	fs := flag.NewFlagSet("dumplogits", flag.ContinueOnError)
 	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")

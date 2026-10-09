@@ -2,18 +2,18 @@ package ops
 
 const maxRoPEPairs = 128
 
-// RoPEMode - раскладка пар RoPE в голове
+// RoPEMode - RoPE pair layout within a head
 type RoPEMode int
 
 const (
-	// RoPENeoX - пары (i, i+head_dim/2): Qwen / NeoX / Gemma
+	// RoPENeoX - pairs (i, i+head_dim/2): Qwen / NeoX / Gemma
 	RoPENeoX RoPEMode = iota
 
-	// RoPENorm - пары соседних (2i, 2i+1): Llama
+	// RoPENorm - adjacent pairs (2i, 2i+1): Llama
 	RoPENorm
 )
 
-// ApplyRoPEHeadsMode применяет RoPE выбранного режима
+// ApplyRoPEHeadsMode applies RoPE in the selected mode
 func ApplyRoPEHeadsMode(mode RoPEMode, v []float32, nHeads, headDim, pos int, freqBase float32) {
 	if mode == RoPENorm {
 		ApplyRoPEHeadsNorm(v, nHeads, headDim, pos, freqBase)
@@ -23,22 +23,22 @@ func ApplyRoPEHeadsMode(mode RoPEMode, v []float32, nHeads, headDim, pos int, fr
 	ApplyRoPEHeads(v, nHeads, headDim, pos, freqBase)
 }
 
-// MaxRoPEPairs максимальный headDim/2 для batched RoPE на CPU/GPU
+// MaxRoPEPairs maximum headDim/2 for batched RoPE on CPU/GPU
 func MaxRoPEPairs() int {
 	return maxRoPEPairs
 }
 
-// ApplyRoPEHeads применяет NeoX RoPE к nHeads головам в v; sin/cos вычисляются один раз на позицию
+// ApplyRoPEHeads applies NeoX RoPE to nHeads heads in v; sin/cos computed once per position
 func ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) {
 	ApplyRoPEHeadsPartial(v, nHeads, headDim, headDim, pos, freqBase)
 }
 
-// ApplyRoPEHeadsPartial применяет NeoX RoPE к первым nRot dim каждой головы (Phi-3 partial rotary)
+// ApplyRoPEHeadsPartial applies NeoX RoPE to first nRot dims of each head (Phi-3 partial rotary)
 func ApplyRoPEHeadsPartial(v []float32, nHeads, headDim, nRot, pos int, freqBase float32) {
 	ApplyRoPEHeadsPartialScaled(v, nHeads, headDim, nRot, pos, freqBase, RoPEScale{})
 }
 
-// ApplyRoPEHeadsPartialScaled как ApplyRoPEHeadsPartial + LongRoPE factors
+// ApplyRoPEHeadsPartialScaled like ApplyRoPEHeadsPartial + LongRoPE factors
 func ApplyRoPEHeadsPartialScaled(v []float32, nHeads, headDim, nRot, pos int, freqBase float32, scale RoPEScale) {
 	if nHeads <= 0 || headDim <= 0 {
 		return

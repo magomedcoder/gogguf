@@ -26,7 +26,7 @@ type layerLogitsFile struct {
 	Cases []layerLogitsCase `json:"cases"`
 }
 
-// runLayerLogits печатает greedy next и top logits после каждого слоя
+// runLayerLogits prints greedy next and top logits after each layer.
 func runLayerLogits(args []string) error {
 	fs := flag.NewFlagSet("layerlogits", flag.ContinueOnError)
 	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")

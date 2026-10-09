@@ -12,7 +12,7 @@ import (
 	chattmpl "github.com/magomedcoder/gogguf/pkg/chat"
 )
 
-// runRun выполняет генерацию текста
+// runRun runs text generation.
 func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	var modelPath, hfRepo string

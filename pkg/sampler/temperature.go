@@ -5,15 +5,15 @@ import (
 	"math/rand/v2"
 )
 
-// Func выбирает следующий token ID из logits
+// Func picks next token ID from logits
 type Func func(logits []float32) int
 
-// GreedyFunc возвращает greedy sampler
+// GreedyFunc returns greedy sampler
 func GreedyFunc() Func {
 	return Greedy
 }
 
-// Temperature возвращает sampler с температурой; temp <= 0 эквивалентен greedy
+// Temperature returns sampler with temperature; temp <= 0 equivalent to greedy
 func Temperature(temp float32, rng *rand.Rand) Func {
 	if temp <= 0 {
 		return Greedy

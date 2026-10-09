@@ -60,13 +60,13 @@ func TestMatMulVecCachedGraphReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Первый вызов: HtoD + capture full graph
+	// First call: HtoD + capture full graph
 	got1, err := b.MatMulVecCached("graph-fp32", matrix, rows, cols, vec)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Второй: same vec -> kernel-only graph (без HtoD)
+	// Second: same vec -> kernel-only graph (no HtoD)
 	got2, err := b.MatMulVecCached("graph-fp32", matrix, rows, cols, vec)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestMatMulVecCachedGraphReplay(t *testing.T) {
 		}
 	}
 
-	// Другой vec - staging + тот же graph
+	// Different vec - staging + same graph
 	vec2 := make([]float32, cols)
 	for i := range vec2 {
 		vec2[i] = float32(cols - i)
@@ -108,7 +108,7 @@ func TestMatMulVecCachedGraphReplay(t *testing.T) {
 	}
 }
 
-// TestMatMulVecCachedKernelOnlySameVec: один h -> две матрицы (как Q/K), второй matmul без HtoD
+// TestMatMulVecCachedKernelOnlySameVec: one h -> two matrices (like Q/K), second matmul without HtoD
 func TestMatMulVecCachedKernelOnlySameVec(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -159,7 +159,7 @@ func TestMatMulVecCachedKernelOnlySameVec(t *testing.T) {
 		}
 	}
 
-	// повтор K: снова kernel-only replay
+	// repeat K: kernel-only replay again
 	gotK2, err := b.MatMulVecCached("ko-k", wk, rows, cols, h)
 	if err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func BenchmarkMatMulVecCachedGPU(b *testing.B) {
 		vec[i] = 1
 	}
 
-	// прогрев: upload + graph capture
+	// warmup: upload + graph capture
 	if _, err := be.MatMulVecCached("bench", matrix, rows, cols, vec); err != nil {
 		b.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestMatMulVecQ8_0GPU(t *testing.T) {
 		}
 	}
 
-	// путь к графу воспроизведения
+	// path to replay graph
 	got2, err := b.MatMulVecQ8_0Cached("test", raw, rows, cols, vec)
 	if err != nil {
 		t.Fatal(err)

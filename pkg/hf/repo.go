@@ -5,13 +5,13 @@ import (
 	"strings"
 )
 
-// RepoSpec - репозиторий Hugging Face с опциональным тегом квантизации
+// RepoSpec is a Hugging Face repository with an optional quantization tag.
 type RepoSpec struct {
 	Repo string // owner/name
-	Tag  string // например Q8_0; пусто = автовыбор
+	Tag  string // e.g. Q8_0; empty = auto-select
 }
 
-// SplitRepoTag разбирает "owner/repo[:quant]"
+// SplitRepoTag parses "owner/repo[:quant]".
 func SplitRepoTag(hfRepoWithTag string) (RepoSpec, error) {
 	s := strings.TrimSpace(hfRepoWithTag)
 	if s == "" {
@@ -34,14 +34,14 @@ func SplitRepoTag(hfRepoWithTag string) (RepoSpec, error) {
 	}, nil
 }
 
-// ValidRepoID проверяет формат owner/repo (ровно один '/', допустимые символы)
+// ValidRepoID validates owner/repo format (exactly one '/', allowed characters).
 func ValidRepoID(repoID string) bool {
 	if repoID == "" || len(repoID) > 256 {
 		return false
 	}
 
 	slash := 0
-	special := true // предыдущий символ - «специальный» или начало
+	special := true // previous char was "special" or start of string
 	for _, c := range repoID {
 		switch {
 		case isAlphanum(c) || c == '_':

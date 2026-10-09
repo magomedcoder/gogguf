@@ -2,12 +2,12 @@ package phi3
 
 import "github.com/magomedcoder/gogguf/pkg/mempool"
 
-// KVCache хранит K/V для autoregressive decode (фиксированные буферы, без append)
+// KVCache stores K/V for autoregressive decode (fixed buffers, no append)
 type KVCache struct {
 	*mempool.KV
 }
 
-// NewKVCache создаёт пустой KV-cache ёмкостью ContextLength
+// NewKVCache creates an empty KV-cache with capacity ContextLength
 func NewKVCache(cfg Config) *KVCache {
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
 	return &KVCache{

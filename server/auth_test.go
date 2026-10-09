@@ -28,7 +28,7 @@ func TestAPIKeyRequired(t *testing.T) {
 		t.Fatalf("type=%q", errBody.Error.Type)
 	}
 
-	// health без ключа
+	// health without API key
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
 	if rec.Code != http.StatusOK {
@@ -53,7 +53,7 @@ func TestAPIKeyRequired(t *testing.T) {
 		t.Fatalf("X-API-Key: статус=%d", rec.Code)
 	}
 
-	// неверный ключ
+	// wrong API key
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
@@ -92,7 +92,7 @@ func TestRateLimit(t *testing.T) {
 		t.Fatalf("ok=%d limited=%d, ожидали оба >0", ok, limited)
 	}
 
-	// health не лимитируется
+	// health is not rate-limited
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
 	req.RemoteAddr = "10.0.0.1:1234"

@@ -61,7 +61,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Embed сбрасывает KV - сбрасываем и conversation, чтобы chat не расходился с кешем
+	// Embed resets KV-cache; reset conversation too so chat stays consistent with cache.
 	if s.conv != nil {
 		s.conv.Reset()
 	}

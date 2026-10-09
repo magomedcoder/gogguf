@@ -2,18 +2,18 @@ package model
 
 import "github.com/magomedcoder/gogguf/pkg/gpu"
 
-// Options задаёт параметры загрузки модели
+// Options sets model load parameters
 type Options struct {
-	NGL         int         // число transformer-слоёв для offload на GPU (-ngl)
-	GPUMaxSeq   int         // макс. длина KV на GPU (0 = min(context, 4096))
-	NBatch      int         // размер chunk prefill (0/1 = по токену; Qwen3 CPU)
-	GPUDevice   int         // ordinal CUDA-устройства (-dev N); учитывается при пустом GPUDevices
-	GPUDevices  []int       // устройства для layer split (-dev 0,1); nil = одно GPUDevice
-	TensorSplit []float64   // пропорции слоёв по устройствам (-tensor-split); nil = равномерно
-	GPU         gpu.Backend // backend; если nil и NGL > 0, будет попытка открыть CUDA
+	NGL         int         // number of transformer layers to offload to GPU (-ngl)
+	GPUMaxSeq   int         // max KV length on GPU (0 = min(context, 4096))
+	NBatch      int         // chunk prefill size (0/1 = per token; Qwen3 CPU)
+	GPUDevice   int         // CUDA device ordinal (-dev N); used when GPUDevices is empty
+	GPUDevices  []int       // devices for layer split (-dev 0,1); nil = single GPUDevice
+	TensorSplit []float64   // layer proportions per device (-tensor-split); nil = even split
+	GPU         gpu.Backend // backend; if nil and NGL > 0, CUDA will be opened
 }
 
-// Devices возвращает список устройств для offload (всегда непустой при NGL > 0)
+// Devices returns the device list for offload (always non-empty when NGL > 0)
 func (o Options) Devices() []int {
 	if len(o.GPUDevices) > 0 {
 		return o.GPUDevices
@@ -22,7 +22,7 @@ func (o Options) Devices() []int {
 	return []int{o.GPUDevice}
 }
 
-// Normalize проверяет опции и при необходимости открывает CUDA
+// Normalize validates options and opens CUDA when needed
 func (o *Options) Normalize() error {
 	if o.NGL < 0 {
 		return gpu.ErrInvalidNGL

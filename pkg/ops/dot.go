@@ -1,6 +1,6 @@
 package ops
 
-// dot - скалярное произведение двух векторов (SIMD при наличии)
+// dot - dot product of two vectors (SIMD when available)
 var dot = dotPure
 
 func dotPure(a, b []float32) float32 {

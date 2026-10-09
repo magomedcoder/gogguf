@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
-// RoPEMode - режим RoPE во fused QKV-пути (NeoX для Qwen/Mistral/Gemma, NORM для Llama)
+// RoPEMode - RoPE mode in fused QKV path (NeoX for Qwen/Mistral/Gemma, NORM for Llama)
 type RoPEMode = ops.RoPEMode
 
 const (
@@ -15,13 +15,13 @@ const (
 	RoPENorm = ops.RoPENorm
 )
 
-// ErrKVCacheUnavailable означает, что backend не поддерживает GPU KV-cache
+// ErrKVCacheUnavailable means the backend does not support GPU KV-cache
 var ErrKVCacheUnavailable = errors.New("gpu: kv cache unavailable")
 
-// ErrHiddenUnavailable означает, что backend не умеет держать hidden на устройстве
+// ErrHiddenUnavailable means the backend cannot keep hidden on device
 var ErrHiddenUnavailable = errors.New("gpu: device-resident hidden unavailable")
 
-// FusedQuantSupported сообщает, умеют ли fused-пути (FFN/QKV/residual/lm_head) работать с этим типом весов нативно, без деквантизации всей матрицы в FP32
+// FusedQuantSupported reports whether fused paths (FFN/QKV/residual/lm_head) support this weight type natively without dequantizing the full matrix to FP32
 func FusedQuantSupported(t format.GGML) bool {
 	switch t {
 	case format.GgmlQ8_0, format.GgmlQ4_0, format.GgmlQ4_K, format.GgmlQ5_K, format.GgmlQ6_K:
@@ -31,121 +31,121 @@ func FusedQuantSupported(t format.GGML) bool {
 	}
 }
 
-// Backend выполняет вычисления на GPU (CUDA)
+// Backend runs compute on GPU (CUDA)
 type Backend interface {
-	// Name возвращает имя устройства, например "CUDA:0 NVIDIA ..."
+	// Name returns device name, e.g. "CUDA:0 NVIDIA ..."
 	Name() string
 
-	// VRAMInfo возвращает занятую и общую видеопамять устройства в байтах.
-	// Backend без видеопамяти (CPU) возвращает 0, 0, nil
+	// VRAMInfo returns used and total device VRAM in bytes.
+	// Backend without VRAM (CPU) returns 0, 0, nil
 	VRAMInfo() (used, total uint64, err error)
 
-	// MatMulVec умножает matrix[rows*cols] на vec[cols]
+	// MatMulVec multiplies matrix[rows*cols] by vec[cols]
 	MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, error)
 
-	// MatMulVecCached как MatMulVec, но matrix загружается на GPU один раз по name
+	// MatMulVecCached like MatMulVec, but matrix is uploaded to GPU once by name
 	MatMulVecCached(name string, matrix []float32, rows, cols int, vec []float32) ([]float32, error)
 
-	// MatMulVecQ8_0Cached matmul Q8_0-матрицы без деквантизации в FP32
+	// MatMulVecQ8_0Cached matmul Q8_0 matrix without dequant to FP32
 	MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
-	// MatMulVecQ4_0Cached matmul Q4_0-матрицы без полной деквантизации в FP32
+	// MatMulVecQ4_0Cached matmul Q4_0 matrix without full dequant to FP32
 	MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
-	// MatMulVecQ4_KCached matmul Q4_K-матрицы (K-quant)
+	// MatMulVecQ4_KCached matmul Q4_K matrix (K-quant)
 	MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
-	// MatMulVecQ5_KCached matmul Q5_K-матрицы (K-quant)
+	// MatMulVecQ5_KCached matmul Q5_K matrix (K-quant)
 	MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
-	// MatMulVecQ6_KCached matmul Q6_K-матрицы (K-quant)
+	// MatMulVecQ6_KCached matmul Q6_K matrix (K-quant)
 	MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
-	// RMSNormInto записывает RMS-нормализацию в dst (GPU или CPU)
+	// RMSNormInto writes RMS normalization to dst (GPU or CPU)
 	RMSNormInto(dst, x, weight []float32, eps float32) error
 
-	// ApplyRoPEHeads применяет NeoX/Qwen RoPE к nHeads головам в v (in-place)
+	// ApplyRoPEHeads applies NeoX/Qwen RoPE to nHeads heads in v (in-place)
 	ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error
 
-	// ApplyRoPEHeadsNorm применяет Llama RoPE (пары соседних dim) к nHeads головам в v
+	// ApplyRoPEHeadsNorm applies Llama RoPE (adjacent dim pairs) to nHeads heads in v
 	ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error
 
-	// SwiGLUInPlace вычисляет silu(gate)*up, результат в gate
+	// SwiGLUInPlace computes silu(gate)*up, result in gate
 	SwiGLUInPlace(gate, up []float32) error
 
-	// FFNSwiGLUCached gate/up/down matmul + SwiGLU; на CUDA активации остаются на GPU
+	// FFNSwiGLUCached gate/up/down matmul + SwiGLU; on CUDA activations stay on GPU
 	FFNSwiGLUCached(gateName, upName, downName string, gateW, upW, downW, x, out []float32, embd, ffn int) error
 
-	// FFNSwiGLUQ8_0Cached то же для Q8_0 весов
+	// FFNSwiGLUQ8_0Cached same for Q8_0 weights
 	FFNSwiGLUQ8_0Cached(gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error
 
-	// AttnFFNResidualCached WO(attn)+residual+RMSNorm+FFN+residual на GPU
+	// AttnFFNResidualCached WO(attn)+residual+RMSNorm+FFN+residual on GPU
 	AttnFFNResidualCached(woName, ffnNormName, gateName, upName, downName string, woW, ffnNorm, gateW, upW, downW, x, attn []float32, embd, attnDim, ffn int, eps float32) error
 
-	// AttnFFNResidualQ8_0Cached то же для Q8_0 matmul-весов (norm - FP32)
+	// AttnFFNResidualQ8_0Cached same for Q8_0 matmul weights (norm is FP32)
 	AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error
 
-	// QKVRoPEAttentionCached: h->QKV->head RMSNorm->RoPE->KV append->attention на GPU
+	// QKVRoPEAttentionCached: h->QKV->head RMSNorm->RoPE->KV append->attention on GPU
 	QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormName string, qW, kW, vW, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error
 
-	// QKVRoPEAttentionQ8_0Cached то же для Q8_0 matmul-весов (norm - FP32)
+	// QKVRoPEAttentionQ8_0Cached same for Q8_0 matmul weights (norm is FP32)
 	QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error
 
-	// FFNSwiGLUQuantCached FFN SwiGLU для Q8_0/Q4_0/Q4_K/Q5_K/Q6_K весов
+	// FFNSwiGLUQuantCached FFN SwiGLU for Q8_0/Q4_0/Q4_K/Q5_K/Q6_K weights
 	FFNSwiGLUQuantCached(t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error
 
-	// FFNGeGLUQuantCached FFN GeGLU (Gemma) для тех же типов весов
+	// FFNGeGLUQuantCached FFN GeGLU (Gemma) for the same weight types
 	FFNGeGLUQuantCached(t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error
 
-	// AttnFFNResidualQuantCached WO+residual+RMSNorm+FFN+residual для квантованных весов.
-	// Если hidden резидентен (HiddenUpload), x не грузится на GPU и остаётся на устройстве: host-буфер x в этом случае не обновляется.
+	// AttnFFNResidualQuantCached WO+residual+RMSNorm+FFN+residual for quantized weights.
+	// If hidden resident (HiddenUpload), x is not uploaded to GPU and stays on device: host buffer x is not updated in that case.
 	AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error
 
-	// QKVRoPEAttentionQuantCached QKV+RoPE+attn для квантованных весов.
-	// Если hidden резидентен, h считается на GPU как RMSNorm(resid, attnNorm) и host h не читается.
-	// mode - раскладка RoPE; пустые qNormName/kNormName - слой без QK-norm (Llama / Mistral).
+	// QKVRoPEAttentionQuantCached QKV+RoPE+attn for quantized weights.
+	// If hidden resident, h computed on GPU as RMSNorm(resid, attnNorm) and host h is not read.
+	// mode - RoPE layout; empty qNormName/kNormName - layer without QK-norm (Llama / Mistral).
 	QKVRoPEAttentionQuantCached(t format.GGML, mode RoPEMode, qName, kName, vName, qNormName, kNormName, attnNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, attnNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error
 
-	// HiddenResident сообщает, поддерживает ли backend device-resident hidden state
+	// HiddenResident reports whether the backend supports device-resident hidden state
 	HiddenResident() bool
 
-	// HiddenActive сообщает, лежит ли актуальный hidden state на устройстве.
-	// После ошибки fused-слоя: true - hidden цел (можно HiddenDownload и уйти на CPU), false - residual был частично изменён, актуального hidden нет нигде.
+	// HiddenActive reports whether the current hidden state is on device.
+	// After fused layer error: true - hidden intact (can HiddenDownload and fall back to CPU), false - residual partially modified, no valid hidden anywhere.
 	HiddenActive() bool
 
-	// HiddenUpload кладёт hidden state на устройство (один HtoD на токен)
+	// HiddenUpload puts hidden state on device (one HtoD per token)
 	HiddenUpload(x []float32) error
 
-	// HiddenDownload забирает device-resident hidden state в dst и выключает residency
+	// HiddenDownload fetches device-resident hidden state into dst and disables residency
 	HiddenDownload(dst []float32) error
 
-	// LogitsFromDevice считает RMSNorm(resident hidden) + lm_head на GPU; на host копируются только logits. Для FP32-головы используется headF32, иначе headRaw.
+	// LogitsFromDevice computes RMSNorm(resident hidden) + lm_head on GPU; only logits are copied to host. Use headF32 for FP32 head, else headRaw.
 	LogitsFromDevice(t format.GGML, normName string, norm []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error
 
-	// AttentionScoresInto записывает scaled dot-product attention в dst
+	// AttentionScoresInto writes scaled dot-product attention to dst
 	AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error
 
-	// KVCacheInit выделяет GPU-буферы K/V для offloaded слоёв
+	// KVCacheInit allocates GPU K/V buffers for offloaded layers
 	KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error
 
-	// KVCacheReset сбрасывает GPU KV-cache
+	// KVCacheReset resets GPU KV-cache
 	KVCacheReset()
 
-	// KVCacheAppend добавляет K/V одного токена в позицию pos
+	// KVCacheAppend adds K/V for one token at position pos
 	KVCacheAppend(layer, pos int, k, v []float32) error
 
-	// KVCacheAppendN добавляет K/V n токенов начиная с позиции pos (batch prefill)
+	// KVCacheAppendN adds K/V for n tokens starting at position pos (batch prefill)
 	KVCacheAppendN(layer, pos int, k, v []float32, n int) error
 
-	// AttentionScoresKV attention с K/V из GPU KV-cache
+	// AttentionScoresKV attention with K/V from GPU KV-cache
 	AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error
 
 	Close() error
 }
 
-// LayerOnGPU возвращает true, если transformer-слой layer должен выполняться на GPU
+// LayerOnGPU returns true if transformer layer should run on GPU
 // layer: 0..totalLayers-1
-// ngl: число слоёв для offload (как -ngl в llama.cpp)
+// ngl: number of layers to offload (like -ngl in llama.cpp)
 func LayerOnGPU(layer, ngl, totalLayers int) bool {
 	if ngl <= 0 || layer < 0 {
 		return false

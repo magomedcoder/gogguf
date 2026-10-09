@@ -5,10 +5,10 @@ import (
 	"fmt"
 )
 
-// QK_K - число значений в K-quant блоке
+// QK_K - number of values in a K-quant block
 const QK_K = 256
 
-// BlockQ4_KSize - размер блока Q4_K в байтах
+// BlockQ4_KSize - Q4_K block size in bytes
 const BlockQ4_KSize = 144
 
 func getScaleMinK4(j int, scales []byte) (uint8, uint8) {
@@ -21,7 +21,7 @@ func getScaleMinK4(j int, scales []byte) (uint8, uint8) {
 	return d, m
 }
 
-// DequantBlockQ4_K деквантизирует один блок Q4_K в 256 float32
+// DequantBlockQ4_K dequantizes one Q4_K block to 256 float32
 func DequantBlockQ4_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ4_KSize {
 		return [QK_K]float32{}, fmt.Errorf("quant: блок Q4_K слишком короткий: %d байт", len(block))
@@ -60,7 +60,7 @@ func DequantBlockQ4_K(block []byte) ([QK_K]float32, error) {
 	return out, nil
 }
 
-// DequantQ4_K деквантизирует буфер Q4_K в n float32
+// DequantQ4_K dequantizes Q4_K buffer to n float32
 func DequantQ4_K(data []byte, n int) ([]float32, error) {
 	out := make([]float32, n)
 	if err := DequantQ4_KInto(out, data, n); err != nil {
@@ -70,7 +70,7 @@ func DequantQ4_K(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
-// DequantQ4_KInto деквантизирует буфер Q4_K в dst [n]
+// DequantQ4_KInto dequantizes Q4_K buffer to dst [n]
 func DequantQ4_KInto(dst []float32, data []byte, n int) error {
 	if n < 0 {
 		return fmt.Errorf("quant: n=%d", n)
@@ -101,7 +101,7 @@ func DequantQ4_KInto(dst []float32, data []byte, n int) error {
 	return nil
 }
 
-// DotBlockQ4_K - dot product блока Q4_K на 256 float32
+// DotBlockQ4_K - dot product of Q4_K block with 256 float32
 func DotBlockQ4_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
 		return 0, fmt.Errorf("quant: вектор короче блока Q4_K")

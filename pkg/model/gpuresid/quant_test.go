@@ -32,7 +32,7 @@ func TestQuantBytes(t *testing.T) {
 	}
 }
 
-// срез эксперта должен требовать кратности cols размеру блока и известного типа
+// expert slice must require cols divisible by block size and known type
 func TestQuantBytesErrors(t *testing.T) {
 	if _, err := QuantBytes(format.GgmlQ4_K, 2, 300); err == nil {
 		t.Fatal("ожидали ошибку на cols не кратном QK_K")

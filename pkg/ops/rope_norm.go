@@ -2,7 +2,7 @@ package ops
 
 import "math"
 
-// ApplyRoPENorm применяет RoPE в стиле llama (пары соседних dim: 0-1, 2-3, ...)
+// ApplyRoPENorm applies Llama-style RoPE (adjacent dim pairs: 0-1, 2-3, ...)
 func ApplyRoPENorm(v []float32, pos int, freqBase float32) {
 	n := len(v)
 	half := n / 2
@@ -16,7 +16,7 @@ func ApplyRoPENorm(v []float32, pos int, freqBase float32) {
 	}
 }
 
-// ApplyRoPEHeadsNorm применяет Llama RoPE к nHeads головам в v
+// ApplyRoPEHeadsNorm applies Llama RoPE to nHeads heads in v
 func ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) {
 	if nHeads <= 0 || headDim <= 0 {
 		return

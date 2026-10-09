@@ -10,7 +10,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/sampler"
 )
 
-// Парсинг GGUF (pkg/format)
+// GGUF parsing (pkg/format)
 
 type (
 	Reader       = format.Reader
@@ -22,17 +22,17 @@ type (
 	Filetype     = format.Filetype
 )
 
-// OpenFile открывает GGUF-файл по пути на диске
+// OpenFile opens a GGUF file at a path on disk.
 func OpenFile(filename string) (*Reader, error) {
 	return format.OpenFile(filename)
 }
 
-// OpenFileMapped открывает GGUF через memory-map (zero-copy доступ к весам)
+// OpenFileMapped opens GGUF via memory-map (zero-copy access to weights).
 func OpenFileMapped(filename string) (*MappedReader, error) {
 	return format.OpenFileMapped(filename)
 }
 
-// Open парсит GGUF из потока для чтения тензоров источник должен реализовать io.ReaderAt
+// Open parses GGUF from a stream; the source must implement io.ReaderAt to read tensors.
 func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 	return format.Open(readSeeker)
 }
@@ -50,22 +50,22 @@ type (
 	SamplerConfig     = sampler.Config
 )
 
-// Load загружает модель и tokenizer из GGUF-файла
+// Load loads the model and tokenizer from a GGUF file.
 func Load(path string, opts LoadOptions) (*Engine, error) {
 	return runtime.Load(path, opts)
 }
 
-// LoadMapped загружает модель через mmap (zero-copy веса)
+// LoadMapped loads the model via mmap (zero-copy weights).
 func LoadMapped(path string, opts LoadOptions) (*Engine, error) {
 	return runtime.LoadMapped(path, opts)
 }
 
-// ParseGPUDevices разбирает флаги -dev ("1" / "0,1") и -tensor-split ("0.6,0.4") в список устройств и пропорции слоёв для LoadOptions
+// ParseGPUDevices parses -dev ("1" / "0,1") and -tensor-split ("0.6,0.4") into device list and layer splits for LoadOptions.
 func ParseGPUDevices(devices, tensorSplit string) ([]int, []float64, error) {
 	return gpu.ParseDevices(devices, tensorSplit)
 }
 
-// NewSampler возвращает функцию выбора следующего токена (greedy, temperature, top-k, top-p)
+// NewSampler returns a next-token selection function (greedy, temperature, top-k, top-p).
 func NewSampler(cfg SamplerConfig) SamplerFunc {
 	return sampler.New(cfg)
 }
@@ -74,15 +74,15 @@ func NewSampler(cfg SamplerConfig) SamplerFunc {
 
 type ChatOptions = chat.Options
 
-// FormatChatUser оборачивает промпт в chat template (Jinja из метаданных или fallback)
+// FormatChatUser wraps the prompt in a chat template (Jinja from metadata or fallback).
 func FormatChatUser(user string, opts ChatOptions) (string, error) {
 	return chat.FormatUser(user, opts)
 }
 
-// HasChatTemplate проверяет наличие tokenizer.chat_template в GGUF
+// HasChatTemplate reports whether tokenizer.chat_template is present in GGUF.
 func HasChatTemplate(r *Reader) bool {
 	return chat.HasTemplate(r)
 }
 
-// Greedy выбирает токен с максимальным logit
+// Greedy selects the token with the maximum logit.
 var Greedy = sampler.Greedy

@@ -16,7 +16,7 @@ func TestParseDeviceList(t *testing.T) {
 		{"1", []int{1}},
 		{"0,1", []int{0, 1}},
 		{" 2 , 0 ", []int{2, 0}},
-		{"1,1,0", []int{1, 0}}, // дубликаты убираются
+		{"1,1,0", []int{1, 0}}, // duplicates removed
 	}
 
 	for _, tc := range cases {
@@ -74,7 +74,7 @@ func TestParseDevices(t *testing.T) {
 		t.Fatalf("ParseDevices = %v, %v", devs, split)
 	}
 
-	// -tensor-split без -dev задаёт устройства 0..N-1
+	// -tensor-split without -dev assigns devices 0..N-1
 	devs, split, err = ParseDevices("", "0.5,0.3,0.2")
 	if err != nil {
 		t.Fatalf("ParseDevices без -dev: %v", err)
@@ -84,7 +84,7 @@ func TestParseDevices(t *testing.T) {
 		t.Fatalf("ParseDevices без -dev = %v, %v", devs, split)
 	}
 
-	// Пустые флаги: устройство по умолчанию
+	// Empty flags: default device
 	if devs, split, err = ParseDevices("", ""); err != nil || devs != nil || split != nil {
 		t.Fatalf("ParseDevices(\"\", \"\") = %v, %v, %v", devs, split, err)
 	}
@@ -107,7 +107,7 @@ func TestLayerSplitBounds(t *testing.T) {
 		{28, 2, []float64{24, 4}, []int{0, 24, 28}},
 		{1, 2, nil, []int{0, 1, 1}},
 		{0, 2, nil, []int{0, 0, 0}},
-		{28, 2, []float64{0, 0}, []int{0, 14, 28}}, // нулевая сумма = равномерно
+		{28, 2, []float64{0, 0}, []int{0, 14, 28}}, // zero sum = even split
 	}
 
 	for _, tc := range cases {

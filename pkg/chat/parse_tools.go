@@ -12,18 +12,18 @@ var (
 	thinkBlockRe    = regexp.MustCompile(`(?s)<think>.*?</think>`)
 )
 
-// ParsedAssistant - разобранный ответ assistant (текст + tool_calls)
+// ParsedAssistant is a parsed assistant reply (text + tool_calls).
 type ParsedAssistant struct {
 	Content   string
 	ToolCalls []ToolCall
 }
 
-// HasToolCalls сообщает, есть ли вызовы инструментов
+// HasToolCalls reports whether tool calls are present.
 func (p ParsedAssistant) HasToolCalls() bool {
 	return len(p.ToolCalls) > 0
 }
 
-// FinishReason возвращает finish_reason для OpenAI-совместимого ответа
+// FinishReason returns finish_reason for an OpenAI-compatible response.
 func (p ParsedAssistant) FinishReason() string {
 	if p.HasToolCalls() {
 		return "tool_calls"
@@ -32,7 +32,7 @@ func (p ParsedAssistant) FinishReason() string {
 	return "stop"
 }
 
-// ParseAssistantOutput извлекает tool_calls из текста модели (Hermes/Qwen <tool_call> JSON)
+// ParseAssistantOutput extracts tool_calls from model text (Hermes/Qwen <tool_call> JSON).
 func ParseAssistantOutput(text string) ParsedAssistant {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -90,7 +90,7 @@ func parseToolCallJSON(raw string, index int) (ToolCall, bool) {
 	args := "{}"
 	if len(argsRaw) > 0 {
 		args = string(argsRaw)
-		// если arguments пришли строкой json - разворачиваем
+		// if arguments arrived as a JSON string, unwrap them
 		var asString string
 		if err := json.Unmarshal(argsRaw, &asString); err == nil {
 			args = asString

@@ -6,7 +6,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// Config - гиперпараметры DeepSeek / DeepSeek-MoE из метаданных GGUF
+// Config - DeepSeek / DeepSeek-MoE hyperparameters from GGUF metadata
 type Config struct {
 	ContextLength     int
 	EmbeddingDim      int
@@ -18,7 +18,7 @@ type Config struct {
 	VocabSize         int
 	RMSNormEps        float32
 	RopeFreqBase      float32
-	DenseLeadLayers   int     // leading_dense_block_count; слои [0, DenseLead) - dense
+	DenseLeadLayers   int     // leading_dense_block_count; layers [0, DenseLead) are dense
 	ExpertCount       int     // expert_count
 	ExpertUsedCount   int     // expert_used_count (top-k)
 	ExpertShared      int     // expert_shared_count
@@ -26,7 +26,7 @@ type Config struct {
 	ExpertWeightScale float32 // expert_weights_scale; 0 -> 1
 }
 
-// ParseConfig читает deepseek.*
+// ParseConfig reads deepseek.*
 func ParseConfig(r *format.Reader) (Config, error) {
 	prefix := "deepseek."
 	getInt := func(key string) (int, error) {

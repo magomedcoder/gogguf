@@ -12,7 +12,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
-// makeQ8Matrix собирает детерминированную Q8_0-матрицу rows x cols и возвращает её raw-байты вместе с точными деквантованными значениями (для эталона на CPU)
+// makeQ8Matrix builds deterministic Q8_0 matrix rows x cols and returns raw bytes with exact dequant values (for CPU reference)
 func makeQ8Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 	t.Helper()
 
@@ -20,7 +20,7 @@ func makeQ8Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 		t.Fatalf("cols=%d не кратно %d", cols, quant.QK8_0)
 	}
 
-	// точные fp16-масштабы (2^-7, 2^-6, 2^-5), чтобы эталон на CPU совпадал побитово
+	// exact fp16 scales (2^-7, 2^-6, 2^-5) so CPU reference matches bit-for-bit
 	scales := []uint16{0x2000, 0x2400, 0x2800}
 
 	blocks := cols / quant.QK8_0
@@ -43,7 +43,7 @@ func makeQ8Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 	return raw, ref
 }
 
-// §1: HiddenUpload/HiddenDownload - hidden state переживает roundtrip через d_resid
+// §1: HiddenUpload/HiddenDownload - hidden state survives roundtrip via d_resid
 func TestHiddenUploadDownloadRoundtrip(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -76,7 +76,7 @@ func TestHiddenUploadDownloadRoundtrip(t *testing.T) {
 		}
 	}
 
-	// повторная загрузка другого вектора перезаписывает d_resid
+	// re-uploading another vector overwrites d_resid
 	for i := range x {
 		x[i] = -x[i]
 	}
@@ -96,7 +96,7 @@ func TestHiddenUploadDownloadRoundtrip(t *testing.T) {
 	}
 }
 
-// §1+§3: attn+ffn residual с keep-on-device даёт тот же x, что и хостовый путь
+// §1+§3: attn+ffn residual with keep-on-device gives same x as host path
 func TestAttnFFNResidualDeviceResident(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -127,7 +127,7 @@ func TestAttnFFNResidualDeviceResident(t *testing.T) {
 		attn[i] = float32((i%5)+1) * 0.05
 	}
 
-	// эталон на CPU
+	// reference on CPU
 	want := append([]float32(nil), x...)
 	h := make([]float32, embd)
 	if err := ops.MatMulVecInto(wo, embd, attnDim, attn, h); err != nil {
@@ -158,7 +158,7 @@ func TestAttnFFNResidualDeviceResident(t *testing.T) {
 
 	ops.AddInPlace(want, downV)
 
-	// host-путь: x на входе и выходе живёт в памяти хоста
+	// host path: x at input and output lives in host memory
 	host := append([]float32(nil), x...)
 	if err := b.AttnFFNResidualQuantCached(format.GgmlQ8_0, "wo", "norm", "g", "u", "d",
 		woRaw, gateRaw, upRaw, downRaw,
@@ -172,7 +172,7 @@ func TestAttnFFNResidualDeviceResident(t *testing.T) {
 		}
 	}
 
-	// device-resident: x приходит через HiddenUpload, результат остаётся в d_resid
+	// device-resident: x via HiddenUpload, result stays in d_resid
 	if err := b.HiddenUpload(x); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestAttnFFNResidualDeviceResident(t *testing.T) {
 		}
 	}
 
-	// host-вызов после resident сбрасывает residency: источник истины снова хост
+	// host call after resident clears residency: host is source of truth again
 	host2 := append([]float32(nil), x...)
 	if err := b.AttnFFNResidualQuantCached(format.GgmlQ8_0, "wo", "norm", "g", "u", "d",
 		woRaw, gateRaw, upRaw, downRaw,
@@ -217,7 +217,7 @@ func TestAttnFFNResidualDeviceResident(t *testing.T) {
 	}
 }
 
-// makeQ4Matrix собирает Q4_0-матрицу rows x cols: raw + точные деквант. значения
+// makeQ4Matrix builds Q4_0 matrix rows x cols: raw + exact dequant values
 func makeQ4Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 	t.Helper()
 
@@ -249,7 +249,7 @@ func makeQ4Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 	return raw, ref
 }
 
-// §3: fused FFN SwiGLU на Q4_0-весах совпадает с CPU по деквантованным весам
+// §3: fused FFN SwiGLU on Q4_0 weights matches CPU on dequant weights
 func TestFFNSwiGLUQuantQ4_0(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -299,7 +299,7 @@ func TestFFNSwiGLUQuantQ4_0(t *testing.T) {
 	}
 }
 
-// §1: QKV с h из d_resid (RMSNorm на устройстве) совпадает с host-путём, где тот же RMSNorm посчитан на CPU
+// §1: QKV with h from d_resid (RMSNorm on device) matches host path with same RMSNorm on CPU
 func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -344,7 +344,7 @@ func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 	sin := make([]float32, half)
 	ops.RoPECosSin(cos, sin, headDim, 0, freqBase)
 
-	// host-путь: RMSNorm(x, attnNorm) на CPU, h передаём в GPU
+	// host path: RMSNorm(x, attnNorm) on CPU, pass h to GPU
 	h := make([]float32, embd)
 	if err := ops.RMSNormInto(h, x, attnNorm, eps); err != nil {
 		t.Fatal(err)
@@ -359,7 +359,7 @@ func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// resident-путь: x лежит в d_resid, RMSNorm считает GPU
+	// resident path: x in d_resid, GPU computes RMSNorm
 	if err := b.HiddenUpload(x); err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// QKV не меняет residual, hidden должен остаться на устройстве
+	// QKV does not change residual, hidden should stay on device
 	if !b.HiddenActive() {
 		t.Fatal("после resident QKV ожидали HiddenActive() == true")
 	}
@@ -394,7 +394,7 @@ func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 		}
 	}
 
-	// hidden в d_resid не испорчен
+	// hidden in d_resid not corrupted
 	back := make([]float32, embd)
 	if err := b.HiddenDownload(back); err != nil {
 		t.Fatal(err)
@@ -407,7 +407,7 @@ func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 	}
 }
 
-// §2: LogitsFromDevice = rmsnorm(d_resid) + lm_head без выгрузки hidden на хост
+// §2: LogitsFromDevice = rmsnorm(d_resid) + lm_head without downloading hidden to host
 func TestLogitsFromDeviceFP32(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -465,7 +465,7 @@ func TestLogitsFromDeviceFP32(t *testing.T) {
 	}
 }
 
-// §2: тот же путь, но lm_head квантован в Q8_0
+// §2: same path but lm_head quantized as Q8_0
 func TestLogitsFromDeviceQ8(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -514,7 +514,7 @@ func TestLogitsFromDeviceQ8(t *testing.T) {
 	}
 }
 
-// §4: KVCacheAppendN кладёт n токенов и attention видит их все
+// §4: KVCacheAppendN stores n tokens and attention sees them all
 func TestKVCacheAppendN(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -532,7 +532,7 @@ func TestKVCacheAppendN(t *testing.T) {
 		t.Skip(err)
 	}
 
-	// два чанка подряд: AppendN должен уложить их плотно с pos=0 и pos=n1
+	// two consecutive chunks: AppendN should pack tightly at pos=0 and pos=n1
 	n1, n2 := 3, 4
 	seq := n1 + n2
 	k := make([]float32, seq*kvDim)

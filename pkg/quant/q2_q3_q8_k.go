@@ -6,10 +6,10 @@ import (
 	"math"
 )
 
-// BlockQ2_KSize - размер блока Q2_K (scales+qs+d+dmin)
+// BlockQ2_KSize - Q2_K block size (scales+qs+d+dmin)
 const BlockQ2_KSize = 84
 
-// DequantBlockQ2_K деквантизирует один блок Q2_K в 256 float32
+// DequantBlockQ2_K dequantizes one Q2_K block to 256 float32
 // layout: scales[16], qs[64], d(fp16), dmin(fp16)
 func DequantBlockQ2_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ2_KSize {
@@ -53,7 +53,7 @@ func DequantBlockQ2_K(block []byte) ([QK_K]float32, error) {
 	return out, nil
 }
 
-// DequantQ2_K деквантизирует буфер Q2_K в n float32
+// DequantQ2_K dequantizes Q2_K buffer to n float32
 func DequantQ2_K(data []byte, n int) ([]float32, error) {
 	out := make([]float32, n)
 	if err := DequantQ2_KInto(out, data, n); err != nil {
@@ -63,7 +63,7 @@ func DequantQ2_K(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
-// DequantQ2_KInto деквантизирует буфер Q2_K в dst [n]
+// DequantQ2_KInto dequantizes Q2_K buffer to dst [n]
 func DequantQ2_KInto(dst []float32, data []byte, n int) error {
 	if n < 0 {
 		return fmt.Errorf("quant: n=%d", n)
@@ -94,7 +94,7 @@ func DequantQ2_KInto(dst []float32, data []byte, n int) error {
 	return nil
 }
 
-// DotBlockQ2_K - dot product блока Q2_K на 256 float32
+// DotBlockQ2_K - dot product of Q2_K block with 256 float32
 func DotBlockQ2_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
 		return 0, fmt.Errorf("quant: вектор короче блока Q2_K")
@@ -113,10 +113,10 @@ func DotBlockQ2_K(block []byte, x []float32) (float32, error) {
 	return sum, nil
 }
 
-// BlockQ3_KSize - размер блока Q3_K (hmask+qs+scales+d)
+// BlockQ3_KSize - Q3_K block size (hmask+qs+scales+d)
 const BlockQ3_KSize = 110
 
-// DequantBlockQ3_K деквантизирует один блок Q3_K в 256 float32
+// DequantBlockQ3_K dequantizes one Q3_K block to 256 float32
 // layout: hmask[32], qs[64], scales[12], d(fp16)
 func DequantBlockQ3_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ3_KSize {
@@ -194,7 +194,7 @@ func unpackQ3KScales(scales []byte) [16]int8 {
 	return out
 }
 
-// DequantQ3_K деквантизирует буфер Q3_K в n float32
+// DequantQ3_K dequantizes Q3_K buffer to n float32
 func DequantQ3_K(data []byte, n int) ([]float32, error) {
 	out := make([]float32, n)
 	if err := DequantQ3_KInto(out, data, n); err != nil {
@@ -204,7 +204,7 @@ func DequantQ3_K(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
-// DequantQ3_KInto деквантизирует буфер Q3_K в dst [n]
+// DequantQ3_KInto dequantizes Q3_K buffer to dst [n]
 func DequantQ3_KInto(dst []float32, data []byte, n int) error {
 	if n < 0 {
 		return fmt.Errorf("quant: n=%d", n)
@@ -235,7 +235,7 @@ func DequantQ3_KInto(dst []float32, data []byte, n int) error {
 	return nil
 }
 
-// DotBlockQ3_K - dot product блока Q3_K на 256 float32
+// DotBlockQ3_K - dot product of Q3_K block with 256 float32
 func DotBlockQ3_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
 		return 0, fmt.Errorf("quant: вектор короче блока Q3_K")
@@ -254,10 +254,10 @@ func DotBlockQ3_K(block []byte, x []float32) (float32, error) {
 	return sum, nil
 }
 
-// BlockQ8_KSize - размер блока Q8_K (d float32 + qs + bsums)
+// BlockQ8_KSize - Q8_K block size (d float32 + qs + bsums)
 const BlockQ8_KSize = 292
 
-// DequantBlockQ8_K деквантизирует один блок Q8_K в 256 float32
+// DequantBlockQ8_K dequantizes one Q8_K block to 256 float32
 // layout: d(float32), qs[256]int8, bsums[16]int16
 func DequantBlockQ8_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ8_KSize {
@@ -275,7 +275,7 @@ func DequantBlockQ8_K(block []byte) ([QK_K]float32, error) {
 	return out, nil
 }
 
-// DequantQ8_K деквантизирует буфер Q8_K в n float32
+// DequantQ8_K dequantizes Q8_K buffer to n float32
 func DequantQ8_K(data []byte, n int) ([]float32, error) {
 	out := make([]float32, n)
 	if err := DequantQ8_KInto(out, data, n); err != nil {
@@ -285,7 +285,7 @@ func DequantQ8_K(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
-// DequantQ8_KInto деквантизирует буфер Q8_K в dst [n]
+// DequantQ8_KInto dequantizes Q8_K buffer to dst [n]
 func DequantQ8_KInto(dst []float32, data []byte, n int) error {
 	if n < 0 {
 		return fmt.Errorf("quant: n=%d", n)
@@ -316,7 +316,7 @@ func DequantQ8_KInto(dst []float32, data []byte, n int) error {
 	return nil
 }
 
-// DotBlockQ8_K - dot product блока Q8_K на 256 float32
+// DotBlockQ8_K - dot product of Q8_K block with 256 float32
 func DotBlockQ8_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
 		return 0, fmt.Errorf("quant: вектор короче блока Q8_K")

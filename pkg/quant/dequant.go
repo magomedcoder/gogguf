@@ -8,7 +8,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// ToFloat32 деквантизирует сырые байты GGML-тензора в float32
+// ToFloat32 dequantizes raw GGML tensor bytes to float32
 func ToFloat32(typ format.GGML, data []byte, n int) ([]float32, error) {
 	switch typ {
 	case format.GgmlFloat32:
@@ -44,7 +44,7 @@ func ToFloat32(typ format.GGML, data []byte, n int) ([]float32, error) {
 	}
 }
 
-// dequantF32 читает n float32 из буфера
+// dequantF32 reads n float32 from buffer
 func dequantF32(data []byte, n int) ([]float32, error) {
 	want := n * 4
 	if len(data) < want {
@@ -59,7 +59,7 @@ func dequantF32(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
-// dequantF16 конвертирует n fp16 в float32
+// dequantF16 converts n fp16 to float32
 func dequantF16(data []byte, n int) ([]float32, error) {
 	want := n * 2
 	if len(data) < want {
@@ -74,7 +74,7 @@ func dequantF16(data []byte, n int) ([]float32, error) {
 	return out, nil
 }
 
-// dequantI32 читает n int32 и приводит к float32
+// dequantI32 reads n int32 and converts to float32
 func dequantI32(data []byte, n int) ([]float32, error) {
 	want := n * 4
 	if len(data) < want {

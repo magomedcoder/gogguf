@@ -13,7 +13,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
-// runDumpLayers пишет embed + hidden после каждого слоя (.bin/.json)
+// runDumpLayers writes embed + hidden after each layer (.bin/.json).
 func runDumpLayers(args []string) error {
 	fs := flag.NewFlagSet("dumplayers", flag.ContinueOnError)
 	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")

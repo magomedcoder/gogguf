@@ -24,17 +24,17 @@ type Model struct {
 	outNorm      []float32
 	lmHeadName   string
 
-	fused     *gpuresid.Runner   // fused GPU-пути слоя (§5)
-	fusedDims gpuresid.Dims      // размерности для fused FFN
-	gpuLayers []gpuresid.Tensors // имена весов слоя для fused-путей
+	fused     *gpuresid.Runner   // fused GPU layer paths (§5)
+	fusedDims gpuresid.Dims      // dimensions for fused FFN
+	gpuLayers []gpuresid.Tensors // layer weight names for fused paths
 }
 
-// LoadGemma создаёт Gemma 1
+// LoadGemma creates Gemma 1
 func LoadGemma(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	return load(w, g, ngl, gpuMaxSeq, ParseConfigGemma)
 }
 
-// LoadGemma2 создаёт Gemma 2
+// LoadGemma2 creates Gemma 2
 func LoadGemma2(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	return load(w, g, ngl, gpuMaxSeq, ParseConfigGemma2)
 }
@@ -81,7 +81,7 @@ func load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int, parse func(*forma
 	return m, nil
 }
 
-// initFused готовит fused GPU-FFN слоя (§5). Gemma: GeGLU вместо SwiGLU; residency пока не включается - её блокируют post-norm, softcap и SWA
+// initFused sets up fused GPU layer FFN (§5). Gemma: GeGLU instead of SwiGLU; residency not enabled yet - blocked by post-norm, softcap, and SWA
 func (m *Model) initFused() {
 	if m.gpu == nil {
 		return
@@ -117,10 +117,10 @@ func (m *Model) initGPUKVCache() error {
 	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
-// Config возвращает конфигурацию
+// Config returns the configuration
 func (m *Model) Config() Config { return m.cfg }
 
-// ResetCache сбрасывает KV-cache
+// ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
 	if m.gpu != nil {
@@ -128,7 +128,7 @@ func (m *Model) ResetCache() {
 	}
 }
 
-// Close освобождает GPU-ресурсы
+// Close releases GPU resources
 func (m *Model) Close() error {
 	if m.gpu == nil {
 		return nil
@@ -139,7 +139,7 @@ func (m *Model) Close() error {
 	return err
 }
 
-// Forward выполняет forward pass
+// Forward runs the forward pass
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("gemma: пустой ввод")
@@ -167,12 +167,12 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	return m.scratch.out, nil
 }
 
-// EmbeddingDim возвращает размер скрытого состояния
+// EmbeddingDim returns the hidden state dimension
 func (m *Model) EmbeddingDim() int {
 	return m.cfg.EmbeddingDim
 }
 
-// Embed - last-token RMSNorm(hidden) до lm_head (сбрасывает KV)
+// Embed - last-token RMSNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("gemma: пустой ввод")
@@ -325,7 +325,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	return nil
 }
 
-// ffnInto: gate/up + GeGLU + down. На GPU - одним fused-вызовом (§5), иначе по частям
+// ffnInto: gate/up + GeGLU + down. On GPU - one fused call (§5), otherwise piecewise
 func (m *Model) ffnInto(layer int, lt layerTensors, x, out []float32) error {
 	if m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.fused.FFNGeGLU(m.gpuLayers[layer], m.fusedDims, x, out); err == nil {

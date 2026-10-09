@@ -1,7 +1,7 @@
 package mempool
 
-// KV - фиксированный CPU KV-cache: буферы maxSeq*kvDim, запись без append.
-// На каждый слой свой счётчик токенов (как у append); Len/Advance - отдельно
+// KV - fixed CPU KV-cache: maxSeq*kvDim buffers, append-free writes.
+// Per-layer token counter (like append); Len/Advance are separate
 type KV struct {
 	layers []kvLayer
 	kvDim  int
@@ -12,11 +12,11 @@ type KV struct {
 type kvLayer struct {
 	k []float32
 	v []float32
-	n int // число записанных токенов
+	n int // number of written tokens
 }
 
-// NewKV выделяет KV на numLayers слоёв.
-// arena может быть nil - тогда отдельные make
+// NewKV allocates KV for numLayers layers.
+// arena may be nil - then separate make
 func NewKV(numLayers, maxSeq, kvDim int, arena *Arena) *KV {
 	if numLayers < 0 {
 		numLayers = 0
@@ -49,17 +49,17 @@ func NewKV(numLayers, maxSeq, kvDim int, arena *Arena) *KV {
 	}
 }
 
-// Len - число завершённых токенов (счётчик Advance).
+// Len - number of completed tokens (Advance counter).
 func (c *KV) Len() int {
 	return c.length
 }
 
-// Append дописывает K/V одного токена в слой.
+// Append appends K/V of one token to layer.
 func (c *KV) Append(layer int, k, v []float32) {
 	c.AppendN(layer, k, v, 1)
 }
 
-// AppendN дописывает K/V n токенов в слой (k/v: [n*kvDim]).
+// AppendN appends K/V of n tokens to layer (k/v: [n*kvDim]).
 func (c *KV) AppendN(layer int, k, v []float32, n int) {
 	if n < 1 || layer < 0 || layer >= len(c.layers) {
 		return
@@ -79,12 +79,12 @@ func (c *KV) AppendN(layer int, k, v []float32, n int) {
 	}
 }
 
-// Advance отмечает завершение токена.
+// Advance marks token completion.
 func (c *KV) Advance() {
 	c.AdvanceN(1)
 }
 
-// AdvanceN отмечает завершение n токенов (n_batch prefill).
+// AdvanceN marks completion of n tokens (n_batch prefill).
 func (c *KV) AdvanceN(n int) {
 	if n < 1 {
 		return
@@ -93,19 +93,19 @@ func (c *KV) AdvanceN(n int) {
 	c.length += n
 }
 
-// KLayer возвращает K слоя [n*kvDim].
+// KLayer returns layer K [n*kvDim].
 func (c *KV) KLayer(layer int) []float32 {
 	l := &c.layers[layer]
 	return l.k[:l.n*c.kvDim]
 }
 
-// VLayer возвращает V слоя.
+// VLayer returns layer V.
 func (c *KV) VLayer(layer int) []float32 {
 	l := &c.layers[layer]
 	return l.v[:l.n*c.kvDim]
 }
 
-// Reset очищает длину и счётчики слоёв.
+// Reset clears length and layer counters.
 func (c *KV) Reset() {
 	c.length = 0
 	for i := range c.layers {

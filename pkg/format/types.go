@@ -2,7 +2,7 @@ package format
 
 import "fmt"
 
-// Type - тип значения метаданных GGUF
+// Type - GGUF metadata value type
 type Type uint32
 
 const (
@@ -37,7 +37,7 @@ var typeNames = map[Type]string{
 	Float64: "float64",
 }
 
-// String возвращает имя типа метаданных
+// String returns metadata type name
 func (t Type) String() string {
 	if name, ok := typeNames[t]; ok {
 		return name
@@ -45,7 +45,7 @@ func (t Type) String() string {
 	return fmt.Sprintf("неизвестный-тип-%d", t)
 }
 
-// Filetype - тип большинства тензоров в файле
+// Filetype - type of majority of tensors in file
 type Filetype uint32
 
 const (
@@ -88,7 +88,7 @@ var filetypeNames = map[Filetype]string{
 	MostlyQ6_K:        "в основном Q6_K",
 }
 
-// String возвращает описание типа квантизации файла
+// String returns file quantization type description
 func (f Filetype) String() string {
 	if name, ok := filetypeNames[f]; ok {
 		return name

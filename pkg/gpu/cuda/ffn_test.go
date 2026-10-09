@@ -66,7 +66,7 @@ func TestFFNSwiGLUGPU(t *testing.T) {
 		}
 	}
 
-	// повторный вызов (кеш весов)
+	// repeat call (weight cache)
 	out2 := make([]float32, embd)
 	if err := b.FFNSwiGLUCached("g", "u", "d", gateW, upW, downW, x, out2, embd, ffn); err != nil {
 		t.Fatal(err)

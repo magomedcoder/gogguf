@@ -11,8 +11,8 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/debug"
 )
 
-// TestFullLogitsCPUVsGPU сверяет полный vocab prefill CPU vs CUDA.
-// GPU softmax approx (ex2) -> допуск выше raw 1e-4; override: GGUF_GPU_LOGITS_TOL
+// TestFullLogitsCPUVsGPU compares full-vocab prefill CPU vs CUDA.
+// GPU softmax approx (ex2) -> tolerance above raw 1e-4; override: GGUF_GPU_LOGITS_TOL
 func TestFullLogitsCPUVsGPU(t *testing.T) {
 	model := modelPath(t)
 
@@ -49,7 +49,7 @@ func TestFullLogitsCPUVsGPU(t *testing.T) {
 	}
 
 	if st.OverTol > 0 {
-		// log-softmax часто ближе для sampling
+		// log-softmax is often closer for sampling
 		lpCPU := append([]float32(nil), cpu...)
 		lpGPU := append([]float32(nil), gpu...)
 		debug.LogSoftmaxInPlace(lpCPU, lpCPU)

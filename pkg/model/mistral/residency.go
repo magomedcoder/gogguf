@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 )
 
-// initFused готовит fused GPU-пути слоя (§5). Mistral / Qwen2: NeoX RoPE, без QK-norm
+// initFused sets up fused GPU layer paths (§5). Mistral / Qwen2: NeoX RoPE, no QK-norm
 func (m *Model) initFused() {
 	if m.gpu == nil {
 		return
@@ -48,21 +48,21 @@ func (m *Model) initFused() {
 
 		m.layerQuant[i] = gpu.FusedQuantSupported(gpuresid.LayerQuant(m.weights, names...))
 
-		// §6: эксперты идут на GPU только при нативно поддерживаемом кванте
+		// §6: experts on GPU only with natively supported quant
 		if lt.moe && !m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps) {
 			m.moeGPU = false
 		}
 	}
 }
 
-// initResidency включает device-resident hidden state (§1, §5).
-// MoE-слой считается на host (эксперты), поэтому residency только для dense-моделей
+// initResidency enables device-resident hidden state (§1, §5).
+// MoE layers run on host (experts), so residency is only for dense models
 func (m *Model) initResidency() {
 	if m.gpu == nil || m.ngl < m.cfg.NumLayers || m.fused == nil || m.cfg.isMoE() {
 		return
 	}
 
-	// SWA: fused QKV считает attention по всему GPU KV-cache, окно он не умеет
+	// SWA: fused QKV attends over the full GPU KV-cache; it does not apply the window
 	if m.cfg.SlidingWindow > 0 && m.cfg.SlidingWindow < m.cfg.ContextLength {
 		return
 	}
@@ -85,14 +85,14 @@ func (m *Model) initResidency() {
 	m.logitsOnGPU = true
 }
 
-// gpuAttnFull: attention по полному GPU KV-cache корректен только когда окно SWA покрывает всю последовательность
+// gpuAttnFull: full GPU KV-cache attention is correct only when the SWA window covers the full sequence
 func (m *Model) gpuAttnFull(seqLen int) bool {
 	w := m.cfg.SlidingWindow
 
 	return w <= 0 || seqLen <= w
 }
 
-// uploadHidden кладёт hidden state на устройство перед слоями (один HtoD на токен)
+// uploadHidden uploads hidden state before layers (one HtoD per token)
 func (m *Model) uploadHidden() {
 	if !m.residency || m.debug != nil || m.gpuKVStale || !m.gpuAttnFull(m.cache.Len()+1) {
 		return
@@ -106,7 +106,7 @@ func (m *Model) uploadHidden() {
 	m.residDevice = true
 }
 
-// forwardBlockDevice считает слой на GPU поверх резидентного hidden state
+// forwardBlockDevice runs the layer on GPU over resident hidden state
 func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []float32) error {
 	if err := m.qkvAttnGPU(layer, pos, ln, nil, k, v, attn); err != nil {
 		return err
@@ -116,20 +116,20 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []f
 	return m.attnFFNGPU(layer, ln, nil, attn)
 }
 
-// qkvAttnGPU: QKV + RoPE + KV append + attention на GPU.
-// h == nil - hidden резидентен: attn_norm считается на устройстве из residual
+// qkvAttnGPU: QKV + RoPE + KV append + attention on GPU.
+// h == nil - hidden resident: attn_norm computed on device from residual
 func (m *Model) qkvAttnGPU(layer, pos int, ln layerNorms, h, kOut, vOut, attn []float32) error {
 	kvPos := m.cache.Len()
 
 	return m.fused.QKVAttn(m.gpuLayers[layer], m.fusedDims, nil, nil, ln.attnNorm, h, attn, kOut, vOut, layer, pos, kvPos, kvPos+1)
 }
 
-// attnFFNGPU: WO + residual + ffn_norm + FFN + residual на GPU
+// attnFFNGPU: WO + residual + ffn_norm + FFN + residual on GPU
 func (m *Model) attnFFNGPU(layer int, ln layerNorms, x, attn []float32) error {
 	return m.fused.AttnFFN(m.gpuLayers[layer], m.fusedDims, ln.ffnNorm, x, attn)
 }
 
-// recoverHiddenFromDevice возвращает hidden state на host после сбоя device-слоя
+// recoverHiddenFromDevice brings hidden state back to host after a device-layer failure
 func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	m.residDevice = false
 	m.residency = false
@@ -145,7 +145,7 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	return nil
 }
 
-// syncHiddenFromDevice забирает hidden state с устройства, если он там
+// syncHiddenFromDevice pulls hidden state from device when resident there
 func (m *Model) syncHiddenFromDevice() error {
 	if !m.residDevice {
 		return nil
@@ -156,7 +156,7 @@ func (m *Model) syncHiddenFromDevice() error {
 	return m.gpu.HiddenDownload(m.scratch.x)
 }
 
-// logitsDevice считает RMSNorm(resident hidden) + lm_head на GPU без DtoH hidden (§2)
+// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH hidden (§2)
 func (m *Model) logitsDevice() error {
 	return m.fused.LogitsDevice("output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 }

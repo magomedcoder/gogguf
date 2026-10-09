@@ -7,7 +7,7 @@ const (
 	qwenThinkingCloseID = 151668
 )
 
-// ThinkingTags возвращает строки thinking-токенов Qwen3 (ids 151667/151668)
+// ThinkingTags returns Qwen3 thinking token strings (ids 151667/151668).
 func ThinkingTags(meta format.Metadata) (open, close string) {
 	open = defaultThinkingOpen
 	close = defaultThinkingClose
@@ -30,7 +30,7 @@ func ThinkingTags(meta format.Metadata) (open, close string) {
 	return open, close
 }
 
-// EmptyThinkingBlock - hard switch Qwen3: пустой thinking-блок отключает размышление
+// EmptyThinkingBlock is Qwen3 hard switch: an empty thinking block disables thinking mode.
 func EmptyThinkingBlock(meta format.Metadata) string {
 	open, close := ThinkingTags(meta)
 	return open + "\n\n" + close + "\n\n"

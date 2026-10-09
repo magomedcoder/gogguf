@@ -5,7 +5,7 @@
 #include "textflag.h"
 
 // func dotNEONAsm(a []float32, b []float32, n int) float32
-// n кратно 4
+// n is a multiple of 4
 TEXT ·dotNEONAsm(SB), NOSPLIT, $0-60
 	MOVD	a_base+0(FP), R0
 	MOVD	b_base+24(FP), R1

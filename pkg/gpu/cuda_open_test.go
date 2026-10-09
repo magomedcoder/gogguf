@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// С тегом cuda OpenCUDA либо отдаёт backend (есть GPU), либо ErrUnavailable
+// With cuda tag OpenCUDA returns backend (GPU present) or ErrUnavailable
 func TestOpenCUDATagged(t *testing.T) {
 	b, err := OpenCUDA()
 	if err != nil {
@@ -25,7 +25,7 @@ func TestOpenCUDATagged(t *testing.T) {
 	}
 }
 
-// -dev N: устройство 0 открывается, заведомо несуществующий ordinal отклоняется
+// -dev N: device 0 opens; an out-of-range ordinal is rejected
 func TestOpenCUDADeviceTagged(t *testing.T) {
 	b, err := OpenCUDADevice(0)
 	if err != nil {
@@ -53,7 +53,7 @@ func TestOpenCUDADeviceTagged(t *testing.T) {
 	}
 }
 
-// Список из одного устройства даёт обычный однокарточный backend (без обёртки multi)
+// Single-device list gives normal single-GPU backend (no multi wrapper)
 func TestOpenCUDADevicesSingle(t *testing.T) {
 	b, err := OpenCUDADevices([]int{0})
 	if err != nil {

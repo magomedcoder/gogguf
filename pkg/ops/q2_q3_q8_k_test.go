@@ -8,7 +8,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
-// TestMatMulVecQ2_K сверяет MatMulVecQ2_K с суммой деквантизированного блока (вектор из единиц -> результат = сумма весов строки)
+// TestMatMulVecQ2_K compares MatMulVecQ2_K to sum of dequantized block (all-ones vector -> result = row weight sum)
 func TestMatMulVecQ2_K(t *testing.T) {
 	rows, cols := 2, quant.QK_K
 	raw := make([]byte, rows*quant.BlockQ2_KSize)
@@ -19,12 +19,12 @@ func TestMatMulVecQ2_K(t *testing.T) {
 
 	for r := range rows {
 		block := raw[r*quant.BlockQ2_KSize:]
-		// scales[16]: младшие 4 бита - scale, старшие - min
+		// scales[16]: low 4 bits - scale, high bits - min
 		for i := range 16 {
 			block[i] = byte(0x11 + r)
 		}
 
-		// qs[64]: 2-битные кванты (0x55 = 01 01 01 01)
+		// qs[64]: 2-bit quants (0x55 = 01 01 01 01)
 		for i := 16; i < 80; i++ {
 			block[i] = 0x55
 		}
@@ -54,7 +54,7 @@ func TestMatMulVecQ2_K(t *testing.T) {
 	}
 }
 
-// TestMatMulVecQ8_K сверяет MatMulVecQ8_K с суммой деквантизированного блока.
+// TestMatMulVecQ8_K compares MatMulVecQ8_K to sum of dequantized block.
 func TestMatMulVecQ8_K(t *testing.T) {
 	rows, cols := 2, quant.QK_K
 	raw := make([]byte, rows*quant.BlockQ8_KSize)
@@ -67,7 +67,7 @@ func TestMatMulVecQ8_K(t *testing.T) {
 		block := raw[r*quant.BlockQ8_KSize:]
 		binary.LittleEndian.PutUint32(block[0:4], math.Float32bits(1)) // d = 1.0
 		for i := range quant.QK_K {
-			block[4+i] = byte(i%7 + r) // qs[i] как int8
+			block[4+i] = byte(i%7 + r) // qs[i] as int8
 		}
 	}
 

@@ -11,28 +11,28 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-// MultiBackend распределяет transformer-слои между несколькими устройствами:
-// слои 0..n1-1 считает первое GPU, n1..n2-1 - второе и т.д.
-// На границе устройств hidden state переезжает через host (HiddenDownload + HiddenUpload), внутри диапазона одного устройства residual остаётся резидентным.
+// MultiBackend distributes transformer layers across multiple devices:
+// layers 0..n1-1 on first GPU, n1..n2-1 on second, etc.
+// At device boundaries hidden state moves via host (HiddenDownload + HiddenUpload); within one device's range residual stays resident.
 //
-// Ограничение: веса и KV каждого устройства кешируются независимо, поэтому общий расход VRAM равен сумме по устройствам, а не «делится» между ними.
-// Слои считаются последовательно (pipeline parallelism без параллельного выполнения).
+// Limitation: each device's weights and KV are cached independently, so total VRAM is sum per device, not shared.
+// Layers run sequentially (pipeline parallelism without parallel execution).
 type MultiBackend struct {
 	devs  []Backend
 	split []float64
 
 	mu        sync.Mutex
-	bounds    []int // bounds[i] - первый слой устройства i, len = len(devs)+1
+	bounds    []int // bounds[i] - first layer of device i, len = len(devs)+1
 	layers    int
-	cur       int       // индекс устройства с актуальным hidden state
-	hidden    []float32 // буфер переноса hidden на границе устройств
+	cur       int       // index of device with current hidden state
+	hidden    []float32 // buffer for hidden transfer at device boundaries
 	hiddenLen int
 }
 
 var _ Backend = (*MultiBackend)(nil)
 
-// NewMultiBackend объединяет устройства в один Backend с layer split.
-// split задаёт пропорции слоёв по устройствам (как -tensor-split); nil = равномерно
+// NewMultiBackend combines devices into one Backend with layer split.
+// split sets layer proportions per device (like -tensor-split); nil = even
 func NewMultiBackend(devs []Backend, split []float64) (*MultiBackend, error) {
 	if len(devs) == 0 {
 		return nil, errors.New("gpu: multi: пустой список устройств")
@@ -51,9 +51,9 @@ func NewMultiBackend(devs []Backend, split []float64) (*MultiBackend, error) {
 	return &MultiBackend{devs: devs, split: split}, nil
 }
 
-// LayerSplitBounds распределяет layers слоёв по n устройствам.
-// Возвращает n+1 границ: устройство i считает слои bounds[i]..bounds[i+1]-1.
-// split - веса пропорций (nil/некорректный = равномерно)
+// LayerSplitBounds splits layers across n devices.
+// Returns n+1 bounds: device i computes layers bounds[i]..bounds[i+1]-1.
+// split - proportion weights (nil/invalid = even)
 func LayerSplitBounds(layers, n int, split []float64) []int {
 	if n <= 0 {
 		return nil
@@ -75,7 +75,7 @@ func LayerSplitBounds(layers, n int, split []float64) []int {
 	}
 
 	if total <= 0 {
-		// Равномерно: первые layers%n устройств получают на слой больше
+		// Even split: first layers%n devices get one extra layer
 		base, rem := layers/n, layers%n
 		pos := 0
 		for i := range n {
@@ -105,12 +105,12 @@ func LayerSplitBounds(layers, n int, split []float64) []int {
 	return bounds
 }
 
-// Devices возвращает устройства в порядке слоёв
+// Devices returns devices in layer order
 func (m *MultiBackend) Devices() []Backend {
 	return m.devs
 }
 
-// Plan описывает распределение слоёв по устройствам (для логов)
+// Plan describes layer distribution across devices (for logs)
 func (m *MultiBackend) Plan() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -147,7 +147,7 @@ func (m *MultiBackend) Name() string {
 	return fmt.Sprintf("MULTI[%s]", strings.Join(names, " | "))
 }
 
-// VRAMInfo суммирует память всех устройств
+// VRAMInfo sums memory of all devices
 func (m *MultiBackend) VRAMInfo() (used, total uint64, err error) {
 	for _, d := range m.devs {
 		u, t, err := d.VRAMInfo()
@@ -162,7 +162,7 @@ func (m *MultiBackend) VRAMInfo() (used, total uint64, err error) {
 	return used, total, nil
 }
 
-// deviceForLayer возвращает индекс устройства, считающего слой layer (под m.mu)
+// deviceForLayer returns device index computing layer (under m.mu)
 func (m *MultiBackend) deviceForLayer(layer int) int {
 	if m.bounds == nil || layer < 0 {
 		return 0
@@ -174,7 +174,7 @@ func (m *MultiBackend) deviceForLayer(layer int) int {
 		}
 	}
 
-	// Слой вне плана (например KV шире ngl): отдаём последнему непустому устройству
+	// Layer outside plan (e.g. KV wider than ngl): assign to last non-empty device
 	for i := range slices.Backward(m.devs) {
 		if m.bounds[i+1] > m.bounds[i] {
 			return i
@@ -184,7 +184,7 @@ func (m *MultiBackend) deviceForLayer(layer int) int {
 	return 0
 }
 
-// localLayer переводит глобальный индекс слоя в индекс внутри KV-cache устройства
+// localLayer maps global layer index to index within device KV-cache
 func (m *MultiBackend) localLayer(idx, layer int) int {
 	if m.bounds == nil {
 		return layer
@@ -193,7 +193,7 @@ func (m *MultiBackend) localLayer(idx, layer int) int {
 	return layer - m.bounds[idx]
 }
 
-// route выбирает устройство для слоя, перенося hidden state при смене устройства
+// route selects device for layer, transferring hidden state on device change
 func (m *MultiBackend) route(layer int) (Backend, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -208,7 +208,7 @@ func (m *MultiBackend) route(layer int) (Backend, int, error) {
 	return m.devs[idx], m.localLayer(idx, layer), nil
 }
 
-// moveHiddenLocked переносит резидентный hidden state с текущего устройства на dst
+// moveHiddenLocked transfers resident hidden state from current device to dst
 func (m *MultiBackend) moveHiddenLocked(dst int) error {
 	src := m.devs[m.cur]
 	if m.hiddenLen > 0 && src.HiddenActive() {
@@ -231,7 +231,7 @@ func (m *MultiBackend) moveHiddenLocked(dst int) error {
 	return nil
 }
 
-// current возвращает устройство, на котором лежит актуальный hidden state
+// current returns the device holding the current hidden state
 func (m *MultiBackend) current() Backend {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -311,7 +311,7 @@ func (m *MultiBackend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNorm
 	return m.current().AttnFFNResidualQuantCached(t, woName, ffnNormName, gateName, upName, downName, woRaw, gateRaw, upRaw, downRaw, ffnNorm, x, attn, embd, attnDim, ffn, eps)
 }
 
-// QKVRoPEAttentionCached маршрутизирует слой на его устройство (границы - перенос hidden)
+// QKVRoPEAttentionCached routes layer to its device (boundaries - hidden transfer)
 func (m *MultiBackend) QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormName string, qW, kW, vW, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
 	dev, local, err := m.route(layer)
 	if err != nil {
@@ -339,7 +339,7 @@ func (m *MultiBackend) QKVRoPEAttentionQuantCached(t format.GGML, mode RoPEMode,
 	return dev.QKVRoPEAttentionQuantCached(t, mode, qName, kName, vName, qNormName, kNormName, attnNormName, qRaw, kRaw, vRaw, qNorm, kNorm, attnNorm, h, cos, sin, attn, kOut, vOut, embd, nHeads, nKVHeads, headDim, local, kvPos, seqLen, eps)
 }
 
-// HiddenResident: residency возможна, только если её держат все устройства (иначе hidden не перенести через границу)
+// HiddenResident: residency is possible only if all devices support it (otherwise hidden cannot cross boundaries)
 func (m *MultiBackend) HiddenResident() bool {
 	for _, d := range m.devs {
 		if !d.HiddenResident() {
@@ -354,7 +354,7 @@ func (m *MultiBackend) HiddenActive() bool {
 	return m.current().HiddenActive()
 }
 
-// HiddenUpload кладёт hidden на устройство первого слоя; остальные сбрасывают residency
+// HiddenUpload puts hidden on the first layer's device; others clear residency
 func (m *MultiBackend) HiddenUpload(x []float32) error {
 	if len(x) == 0 {
 		return fmt.Errorf("gpu: multi: HiddenUpload: пустой x")
@@ -366,7 +366,7 @@ func (m *MultiBackend) HiddenUpload(x []float32) error {
 	m.hiddenLen = len(x)
 	first := m.deviceForLayer(0)
 
-	// Устаревший residual на других устройствах сбрасываем через download в scratch
+	// Stale residual on other devices cleared via download to scratch
 	for i, d := range m.devs {
 		if i == first || !d.HiddenActive() {
 			continue
@@ -396,7 +396,7 @@ func (m *MultiBackend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLe
 	return m.current().AttentionScoresInto(dst, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim)
 }
 
-// KVCacheInit строит план слоёв и выделяет KV на каждом устройстве под его диапазон
+// KVCacheInit builds the layer plan and allocates KV on each device for its range
 func (m *MultiBackend) KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -464,7 +464,7 @@ func (m *MultiBackend) Close() error {
 	return errors.Join(errs...)
 }
 
-// Describe возвращает имя backend'а, а для multi-GPU - план по слоям
+// Describe returns the backend name; for multi-GPU, the layer plan
 func Describe(b Backend) string {
 	if b == nil {
 		return "CPU"

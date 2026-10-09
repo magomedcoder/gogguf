@@ -2,7 +2,7 @@ package quant
 
 import "math"
 
-// FP16ToFP32 конвертирует IEEE 754 half в float32
+// FP16ToFP32 converts IEEE 754 half to float32
 func FP16ToFP32(h uint16) float32 {
 	sign := uint32(h&0x8000) << 16
 	exp := (h >> 10) & 0x1f
@@ -13,8 +13,8 @@ func FP16ToFP32(h uint16) float32 {
 		if mant == 0 {
 			return math.Float32frombits(sign)
 		}
-		// subnormal fp16 -> нормализуем в float32 (как CUDA fp16_to_fp32 / IEEE)
-		e := uint32(127 - 15 + 1) // bias float32 − bias half + скрытый бит
+		// subnormal fp16 -> normalize to float32 (like CUDA fp16_to_fp32 / IEEE)
+		e := uint32(127 - 15 + 1) // float32 bias − half bias + implicit bit
 		for (mant & 0x400) == 0 {
 			mant <<= 1
 			e--

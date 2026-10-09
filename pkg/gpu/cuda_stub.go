@@ -2,12 +2,12 @@
 
 package gpu
 
-// OpenCUDA возвращает CUDA-backend или ErrUnavailable если сборка без тега cuda
+// OpenCUDA returns CUDA backend or ErrUnavailable if built without cuda tag
 func OpenCUDA() (Backend, error) {
 	return nil, ErrUnavailable
 }
 
-// OpenCUDADevice: без тега cuda устройство выбрать нельзя
+// OpenCUDADevice: without cuda tag device cannot be selected
 func OpenCUDADevice(device int) (Backend, error) {
 	if device < 0 {
 		return nil, ErrInvalidDevice
@@ -16,12 +16,12 @@ func OpenCUDADevice(device int) (Backend, error) {
 	return nil, ErrUnavailable
 }
 
-// OpenCUDADevices: без тега cuda multi-GPU недоступен
+// OpenCUDADevices: without cuda tag multi-GPU unavailable
 func OpenCUDADevices(devices []int) (Backend, error) {
 	return OpenCUDADevicesSplit(devices, nil)
 }
 
-// OpenCUDADevicesSplit: без тега cuda multi-GPU недоступен
+// OpenCUDADevicesSplit: without cuda tag multi-GPU unavailable
 func OpenCUDADevicesSplit(devices []int, _ []float64) (Backend, error) {
 	if _, err := normalizeDeviceList(devices); err != nil {
 		return nil, err

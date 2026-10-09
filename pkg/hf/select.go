@@ -6,18 +6,18 @@ import (
 	"strings"
 )
 
-// FileInfo - файл в репозитории HF
+// FileInfo is a file in an HF repository.
 type FileInfo struct {
 	RepoID    string
-	Path      string // путь внутри репо, например "model-Q8_0.gguf"
+	Path      string // path inside repo, e.g. "model-Q8_0.gguf"
 	OID       string
 	Size      int64
 	URL       string
-	LocalPath string // blobs/{oid} или snapshots/... если уже финализирован
+	LocalPath string // blobs/{oid} or snapshots/... if already finalized
 	FinalPath string // snapshots/{commit}/{path}
 }
 
-// IsModelGGUF - основной GGUF модели (не mmproj/imatrix/и т.п.)
+// IsModelGGUF is the main model GGUF (not mmproj/imatrix/etc.).
 func IsModelGGUF(filepath string) bool {
 	if !strings.HasSuffix(strings.ToLower(filepath), ".gguf") {
 		return false
@@ -34,8 +34,8 @@ func IsModelGGUF(filepath string) bool {
 	return true
 }
 
-// FindBestModel выбирает GGUF по тегу квантизации.
-// Без тега: Q4_K_M, затем Q8_0, иначе первый подходящий .gguf.
+// FindBestModel picks a GGUF by quantization tag.
+// Without a tag: Q4_K_M, then Q8_0, otherwise the first suitable .gguf.
 func FindBestModel(files []FileInfo, tag string) (FileInfo, bool) {
 	var tags []string
 	if tag != "" {
@@ -68,7 +68,7 @@ func FindBestModel(files []FileInfo, tag string) (FileInfo, bool) {
 	return FileInfo{}, false
 }
 
-// ListModelGGUF возвращает пути всех основных GGUF в списке
+// ListModelGGUF returns paths of all main GGUF files in the list.
 func ListModelGGUF(files []FileInfo) []string {
 	var out []string
 	for _, f := range files {
