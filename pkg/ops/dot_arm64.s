@@ -1,6 +1,6 @@
 // NEON dot product для arm64
 
-//go:build arm64
+//go:build arm64 && !darwin
 
 #include "textflag.h"
 

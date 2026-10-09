@@ -1,6 +1,6 @@
 // NEON scale-mul для RMSNorm: dst[i] = x[i] * scale * weight[i]
 
-//go:build arm64
+//go:build arm64 && !darwin
 
 #include "textflag.h"
 
