@@ -1,13 +1,11 @@
 # CLI
 
-[English version](cli.md)
-
 ## `gguf info`
 
 Краткая сводка о модели: версия GGUF, архитектура, имя, число тензоров, размер весов, длина контекста.
 
 ```bash
-./build/gogguf info -m ./models/Qwen3-0.6B-Q8_0.gguf
+./build/gogguf info -m ./models/Qwen3-4B-Q8_0.gguf
 ```
 
 | Флаг | Описание             |
@@ -19,7 +17,7 @@
 Полный дамп метаданных и списка тензоров (имя, тип, размерности, размер в байтах).
 
 ```bash
-./build/gogguf inspect ./models/Qwen3-0.6B-Q8_0.gguf
+./build/gogguf inspect ./models/Qwen3-4B-Q8_0.gguf
 ```
 
 Аргумент - путь к файлу, без флагов.
@@ -29,13 +27,13 @@
 Генерация текста: prefill промпта -> autoregressive decode -> вывод в stdout.
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -n 64
 ```
 
 Скачать с Hugging Face (кэш `~/.cache/huggingface/hub`):
 
 ```bash
-./build/gogguf run -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --chat -p "Привет" -n 64
+./build/gogguf run -hf Qwen/Qwen3-4B-GGUF:Q8_0 --chat -p "Привет" -n 64
 ```
 
 | Флаг                | По умолчанию | Описание                                               |
@@ -67,25 +65,25 @@ Hub: `MODEL_ENDPOINT`.
 Пример с sampling:
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64 --temp 0.7 --top-k 40 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.1 --seed 42
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -n 64 --temp 0.7 --top-k 40 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.1 --seed 42
 ```
 
 С размышлением:
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat --thinking -p "Привет" -n 64
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat --thinking -p "Привет" -n 64
 ```
 
-С GPU offload (28 слоёв, CUDA-сборка):
+С GPU offload (все 36 слоёв Qwen3-4B, CUDA-сборка):
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -ngl 28
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -ngl 36
 ```
 
 Интерактивный режим (с `--chat` история диалога сохраняется между репликами; `/clear` - сброс):
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -i
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -i
 ```
 
 ## `gguf serve`
@@ -95,13 +93,13 @@ HTTP-сервер для генерации текста по API.
 Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 
 ```bash
-./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --host 127.0.0.1:8000
+./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000
 ```
 
 Или с Hugging Face:
 
 ```bash
-./build/gogguf serve -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --host 127.0.0.1:8000
+./build/gogguf serve -hf Qwen/Qwen3-4B-GGUF:Q8_0 --host 127.0.0.1:8000
 ```
 
 | Флаг                | По умолчанию     | Описание                                        |
@@ -116,4 +114,4 @@ Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 | `--api-key`         | пусто            | auth Bearer / X-API-Key (`/v1/health` открыт)   |
 | `--rate-limit`      | `0`              | запросов в минуту на IP (`0` = без лимита)      |
 
-Подробнее об эндпоинтах: [HTTP API](api-ru.md).
+Подробнее об эндпоинтах: [HTTP API](api.md).

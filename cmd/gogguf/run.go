@@ -17,7 +17,7 @@ func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	var modelPath, hfRepo string
 	fs.StringVar(&modelPath, "m", "", "path to GGUF file")
-	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], e.g. Qwen/Qwen3-0.6B-GGUF:Q8_0")
+	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], e.g. Qwen/Qwen3-4B-GGUF:Q8_0")
 	fs.StringVar(&hfRepo, "hf-repo", "", "alias for -hf")
 	prompt := fs.String("p", "", "prompt text")
 	maxTokens := fs.Int("n", 128, "max new tokens")

@@ -1,7 +1,5 @@
 # GGUF - Technical Specification of the Binary Format
 
-[Русская версия](GGUF-FORMAT-ru.md)
-
 GGUF is a binary container for storing ML model parameters, metadata, and tensor weights.
 
 A single file contains the complete dataset needed to load a model: no external configs, vocabularies, or index files are required.
@@ -55,13 +53,13 @@ The data section is aligned for `mmap`: when mapping a file into memory, the OS 
 
 The value is specified in `general.alignment`.
 
-| Symbol              | Type     | Description                                                    |
-|---------------------|----------|----------------------------------------------------------------|
-| `ALIGNMENT`         | `uint32` | Alignment boundary size; default 32, multiple of 8             |
-| `align_up(x, a)`    | formula  | Round `x` up to a multiple of `a`                              |
-| `tensor_data_start` | `uint64` | Absolute offset of the weight zone start in the file           |
-| `file_offset(T)`    | `uint64` | Absolute offset of tensor `T` in the file                      |
-| `T.offset`          | `uint64` | Tensor offset from `tensor_data_start`, not from file start    |
+| Symbol              | Type     | Description                                                 |
+|---------------------|----------|-------------------------------------------------------------|
+| `ALIGNMENT`         | `uint32` | Alignment boundary size; default 32, multiple of 8          |
+| `align_up(x, a)`    | formula  | Round `x` up to a multiple of `a`                           |
+| `tensor_data_start` | `uint64` | Absolute offset of the weight zone start in the file        |
+| `file_offset(T)`    | `uint64` | Absolute offset of tensor `T` in the file                   |
+| `T.offset`          | `uint64` | Tensor offset from `tensor_data_start`, not from file start |
 
 ```go
 // default 32 - value from the spec if general.alignment is absent
@@ -100,7 +98,7 @@ func fileOffset(dataStart int64, t TensorInfo) int64 {
 
 Between tensors - padding up to `ALIGNMENT`, so each tensor starts on an aligned boundary.
 
-Sections 1–3 (header, metadata, tensor info) are written **densely, without padding** - their size is usually small compared to the weights.
+Sections 1-3 (header, metadata, tensor info) are written **densely, without padding** - their size is usually small compared to the weights.
 
 ---
 
@@ -110,12 +108,12 @@ The version in the header (`uint32`) changes only on **structural** format chang
 
 Adding new metadata keys does not increase the version.
 
-| Field               | v1       | v2       | v3        | Description                         |
-|---------------------|----------|----------|-----------|-------------------------------------|
-| `tensor_count`      | `uint32` | `uint64` | `uint64`  | Number of tensors in the file       |
-| `metadata_kv_count` | `uint32` | `uint64` | `uint64`  | Number of metadata pairs            |
-| `dimensions[i]`     | `uint32` | `uint64` | `uint64`  | i-th tensor dimension               |
-| Endianness          | LE       | LE       | LE or BE  | Byte order of multi-byte fields     |
+| Field               | v1       | v2       | v3       | Description                     |
+|---------------------|----------|----------|----------|---------------------------------|
+| `tensor_count`      | `uint32` | `uint64` | `uint64` | Number of tensors in the file   |
+| `metadata_kv_count` | `uint32` | `uint64` | `uint64` | Number of metadata pairs        |
+| `dimensions[i]`     | `uint32` | `uint64` | `uint64` | i-th tensor dimension           |
+| Endianness          | LE       | LE       | LE or BE | Byte order of multi-byte fields |
 
 **v2** - extension to 64 bits for large models.  
 **v3** - same layout + big-endian definition (section 3.2).  
@@ -164,11 +162,11 @@ v3 adds big-endian support. There is no separate "byte order" field: the order i
 | 5    | `seek -4`               | Return to start of `version` field (offset 4)  |
 | 6    | `version = read uint32` | Read version with selected byte order          |
 
-| `version` | bytes [4..7]  | marker [7] | byte order | Description            |
-|-----------|---------------|------------|------------|------------------------|
-| 2         | `02 00 00 00` | `0x00`     | LE         | Standard LE file v2    |
-| 3         | `03 00 00 00` | `0x00`     | LE         | Standard LE file v3    |
-| 3         | `00 00 00 03` | `0x03`     | BE         | BE file v3             |
+| `version` | bytes [4..7]  | marker [7] | byte order | Description         |
+|-----------|---------------|------------|------------|---------------------|
+| 2         | `02 00 00 00` | `0x00`     | LE         | Standard LE file v2 |
+| 3         | `03 00 00 00` | `0x00`     | LE         | Standard LE file v3 |
+| 3         | `00 00 00 03` | `0x03`     | BE         | BE file v3          |
 
 v2: always little-endian.
 
@@ -203,7 +201,7 @@ func detectEndianness(r io.ReadSeeker) (binary.ByteOrder, error) {
 }
 ```
 
-Endianness applies to all fields in sections 1–3.
+Endianness applies to all fields in sections 1-3.
 
 Inside quant blocks (section 10) scale and quants may be stored in a fixed order (usually LE) - this is a property of `ggml_type`, not the container.
 
@@ -215,12 +213,12 @@ Inside quant blocks (section 10) scale and quants may be stored in a fixed order
 
 All multi-byte types are read in the file's byte order (section 3.2).
 
-| Type                           | Size | Description                              |
-|--------------------------------|------|------------------------------------------|
-| `uint8` / `int8`               | 1    | Unsigned / signed 8-bit integer          |
-| `uint16` / `int16`             | 2    | 16-bit integer                           |
-| `uint32` / `int32` / `float32` | 4    | 32-bit integer or IEEE 754 float         |
-| `uint64` / `int64` / `float64` | 8    | 64-bit integer or IEEE 754 double        |
+| Type                           | Size | Description                       |
+|--------------------------------|------|-----------------------------------|
+| `uint8` / `int8`               | 1    | Unsigned / signed 8-bit integer   |
+| `uint16` / `int16`             | 2    | 16-bit integer                    |
+| `uint32` / `int32` / `float32` | 4    | 32-bit integer or IEEE 754 float  |
+| `uint64` / `int64` / `float64` | 8    | 64-bit integer or IEEE 754 double |
 
 ```go
 // readUint32/readUint64 - binary.Read wrappers with file byte order (section 3.2)
@@ -278,10 +276,10 @@ func readScalar(vtype ValueType, r io.Reader, order binary.ByteOrder) (any, erro
 
 Strings are **not null-terminated** - length is specified explicitly.
 
-| Field  | Type     | Description                              |
-|--------|----------|------------------------------------------|
-| `len`  | `uint64` | String length in bytes (not characters)  |
-| `data` | `[]byte` | String body in UTF-8, no trailing `\0`   |
+| Field  | Type     | Description                             |
+|--------|----------|-----------------------------------------|
+| `len`  | `uint64` | String length in bytes (not characters) |
+| `data` | `[]byte` | String body in UTF-8, no trailing `\0`  |
 
 ```go
 // gguf_string: uint64 len + len bytes UTF-8, not null-terminated
@@ -318,11 +316,11 @@ Metadata is a self-describing dictionary: each value is preceded by `value_type`
 
 ### 5.1. Entry
 
-| Field        | Type          | Description                                    |
-|--------------|---------------|------------------------------------------------|
-| `key`        | `gguf_string` | Unique hierarchical field identifier           |
-| `value_type` | `uint32`      | Value type (enum section 5.2)                  |
-| `value`      | by type       | Scalar or array                                |
+| Field        | Type          | Description                          |
+|--------------|---------------|--------------------------------------|
+| `key`        | `gguf_string` | Unique hierarchical field identifier |
+| `value_type` | `uint32`      | Value type (enum section 5.2)        |
+| `value`      | by type       | Scalar or array                      |
 
 Repeated `metadata_kv_count` times, immediately after header.
 
@@ -339,21 +337,21 @@ type MetadataKV struct {
 
 ### 5.2. `ValueType`
 
-| ID  | Name      | Payload       | Description                            |
-|-----|-----------|---------------|----------------------------------------|
-| 0   | `UINT8`   | `uint8`       | 8-bit unsigned integer                 |
-| 1   | `INT8`    | `int8`        | 8-bit signed integer                   |
-| 2   | `UINT16`  | `uint16`      | 16-bit unsigned                        |
-| 3   | `INT16`   | `int16`       | 16-bit signed                          |
-| 4   | `UINT32`  | `uint32`      | 32-bit unsigned                        |
-| 5   | `INT32`   | `int32`       | 32-bit signed                          |
-| 6   | `FLOAT32` | `float32`     | 32-bit float                           |
-| 7   | `BOOL`    | `uint8`       | Logical: `0` = false, `1` = true       |
-| 8   | `STRING`  | `gguf_string` | Text string                            |
-| 9   | `ARRAY`   | section 5.3   | Homogeneous array of elements          |
-| 10  | `UINT64`  | `uint64`      | 64-bit unsigned                        |
-| 11  | `INT64`   | `int64`       | 64-bit signed                          |
-| 12  | `FLOAT64` | `float64`     | 64-bit float                           |
+| ID  | Name      | Payload       | Description                      |
+|-----|-----------|---------------|----------------------------------|
+| 0   | `UINT8`   | `uint8`       | 8-bit unsigned integer           |
+| 1   | `INT8`    | `int8`        | 8-bit signed integer             |
+| 2   | `UINT16`  | `uint16`      | 16-bit unsigned                  |
+| 3   | `INT16`   | `int16`       | 16-bit signed                    |
+| 4   | `UINT32`  | `uint32`      | 32-bit unsigned                  |
+| 5   | `INT32`   | `int32`       | 32-bit signed                    |
+| 6   | `FLOAT32` | `float32`     | 32-bit float                     |
+| 7   | `BOOL`    | `uint8`       | Logical: `0` = false, `1` = true |
+| 8   | `STRING`  | `gguf_string` | Text string                      |
+| 9   | `ARRAY`   | section 5.3   | Homogeneous array of elements    |
+| 10  | `UINT64`  | `uint64`      | 64-bit unsigned                  |
+| 11  | `INT64`   | `int64`       | 64-bit signed                    |
+| 12  | `FLOAT64` | `float64`     | 64-bit float                     |
 
 ```go
 // gguf_metadata_value_type, ID 0..12
@@ -380,11 +378,11 @@ const (
 
 ### 5.3. Array (`ARRAY`)
 
-| Field          | Type     | Description                                   |
-|----------------|----------|-----------------------------------------------|
-| `element_type` | `uint32` | Type of each element (0..12, not ARRAY)       |
-| `length`       | `uint64` | Number of elements (not bytes)                |
-| `payload`      | `[]T`    | Sequence of `element_type` values             |
+| Field          | Type     | Description                             |
+|----------------|----------|-----------------------------------------|
+| `element_type` | `uint32` | Type of each element (0..12, not ARRAY) |
+| `length`       | `uint64` | Number of elements (not bytes)          |
+| `payload`      | `[]T`    | Sequence of `element_type` values       |
 
 ```go
 // ARRAY payload: element_type(uint32) + length(uint64) + elements[]
@@ -455,11 +453,11 @@ Nested arrays: `element_type = ARRAY`.
 
 ### 6.1. Required
 
-| Key                            | Type   | Description                                                       |
-|--------------------------------|--------|-------------------------------------------------------------------|
-| `general.architecture`         | string | Architecture name; defines `<arch>.*` prefix and loader           |
-| `general.quantization_version` | uint32 | Quantization scheme version; required for quantized tensors       |
-| `general.alignment`            | uint32 | Data alignment; default **32**; multiple of 8                     |
+| Key                            | Type   | Description                                                 |
+|--------------------------------|--------|-------------------------------------------------------------|
+| `general.architecture`         | string | Architecture name; defines `<arch>.*` prefix and loader     |
+| `general.quantization_version` | uint32 | Quantization scheme version; required for quantized tensors |
+| `general.alignment`            | uint32 | Data alignment; default **32**; multiple of 8               |
 
 ### 6.2. `general.*`
 
@@ -485,18 +483,18 @@ Transformer hyperparameters.
 
 Numbers may be `uint32` or `uint64`.
 
-| Key                                       | Type            | Description                                   |
-|-------------------------------------------|-----------------|-----------------------------------------------|
-| `<arch>.context_length`                   | uint32 \ uint64 | Maximum number of tokens in context           |
-| `<arch>.embedding_length`                 | uint32 \ uint64 | Embedding dimension (hidden size)             |
-| `<arch>.block_count`                      | uint32 \ uint64 | Number of transformer blocks (layers)         |
-| `<arch>.feed_forward_length`              | uint32 \ uint64 | Intermediate FFN layer dimension              |
-| `<arch>.attention.head_count`             | uint32 \ uint64 | Number of query heads in attention            |
-| `<arch>.attention.head_count_kv`          | uint32 \ uint64 | Number of key/value heads (GQA/MQA)           |
-| `<arch>.attention.key_length`             | uint32 \ uint64 | K/V dimension per head (head_dim)             |
-| `<arch>.attention.layer_norm_rms_epsilon` | float32         | Epsilon in RMSNorm                            |
-| `<arch>.rope.freq_base`                   | float32         | Base frequency of Rotary Position Embedding   |
-| `<arch>.rope.freq_scale`                  | float32         | RoPE scale factor (long context)              |
+| Key                                       | Type            | Description                                 |
+|-------------------------------------------|-----------------|---------------------------------------------|
+| `<arch>.context_length`                   | uint32 \ uint64 | Maximum number of tokens in context         |
+| `<arch>.embedding_length`                 | uint32 \ uint64 | Embedding dimension (hidden size)           |
+| `<arch>.block_count`                      | uint32 \ uint64 | Number of transformer blocks (layers)       |
+| `<arch>.feed_forward_length`              | uint32 \ uint64 | Intermediate FFN layer dimension            |
+| `<arch>.attention.head_count`             | uint32 \ uint64 | Number of query heads in attention          |
+| `<arch>.attention.head_count_kv`          | uint32 \ uint64 | Number of key/value heads (GQA/MQA)         |
+| `<arch>.attention.key_length`             | uint32 \ uint64 | K/V dimension per head (head_dim)           |
+| `<arch>.attention.layer_norm_rms_epsilon` | float32         | Epsilon in RMSNorm                          |
+| `<arch>.rope.freq_base`                   | float32         | Base frequency of Rotary Position Embedding |
+| `<arch>.rope.freq_scale`                  | float32         | RoPE scale factor (long context)            |
 
 ### 6.4. `tokenizer.*`
 
@@ -520,27 +518,27 @@ Numbers may be `uint32` or `uint64`.
 
 Summary indicator of the file's dominant quantization.
 
-| ID  | Name                   | Description                                     |
-|-----|------------------------|-------------------------------------------------|
-| 0   | `ALL_F32`              | All tensors in FP32                             |
-| 1   | `MOSTLY_F16`           | Most tensors FP16                               |
-| 2   | `MOSTLY_Q4_0`          | Most tensors Q4_0 (4-bit, symmetric)            |
-| 3   | `MOSTLY_Q4_1`          | Most tensors Q4_1 (4-bit, with min)             |
-| 4   | `MOSTLY_Q4_1_SOME_F16` | Q4_1 + separate FP16 tensors                    |
-| 5   | `MOSTLY_Q4_2`          | Deprecated; removed from llama.cpp              |
-| 6   | `MOSTLY_Q4_3`          | Deprecated; removed from llama.cpp              |
-| 7   | `MOSTLY_Q8_0`          | Most tensors Q8_0 (8-bit)                       |
-| 8   | `MOSTLY_Q5_0`          | Most tensors Q5_0 (5-bit)                       |
-| 9   | `MOSTLY_Q5_1`          | Most tensors Q5_1                               |
-| 10  | `MOSTLY_Q2_K`          | Most tensors Q2_K (K-quant, 2-bit)              |
-| 11  | `MOSTLY_Q3_K_S`        | Q3_K small                                      |
-| 12  | `MOSTLY_Q3_K_M`        | Q3_K medium                                     |
-| 13  | `MOSTLY_Q3_K_L`        | Q3_K large                                      |
-| 14  | `MOSTLY_Q4_K_S`        | Q4_K small                                      |
-| 15  | `MOSTLY_Q4_K_M`        | Q4_K medium                                     |
-| 16  | `MOSTLY_Q5_K_S`        | Q5_K small                                      |
-| 17  | `MOSTLY_Q5_K_M`        | Q5_K medium                                     |
-| 18  | `MOSTLY_Q6_K`          | Most tensors Q6_K                               |
+| ID  | Name                   | Description                          |
+|-----|------------------------|--------------------------------------|
+| 0   | `ALL_F32`              | All tensors in FP32                  |
+| 1   | `MOSTLY_F16`           | Most tensors FP16                    |
+| 2   | `MOSTLY_Q4_0`          | Most tensors Q4_0 (4-bit, symmetric) |
+| 3   | `MOSTLY_Q4_1`          | Most tensors Q4_1 (4-bit, with min)  |
+| 4   | `MOSTLY_Q4_1_SOME_F16` | Q4_1 + separate FP16 tensors         |
+| 5   | `MOSTLY_Q4_2`          | Deprecated; removed from llama.cpp   |
+| 6   | `MOSTLY_Q4_3`          | Deprecated; removed from llama.cpp   |
+| 7   | `MOSTLY_Q8_0`          | Most tensors Q8_0 (8-bit)            |
+| 8   | `MOSTLY_Q5_0`          | Most tensors Q5_0 (5-bit)            |
+| 9   | `MOSTLY_Q5_1`          | Most tensors Q5_1                    |
+| 10  | `MOSTLY_Q2_K`          | Most tensors Q2_K (K-quant, 2-bit)   |
+| 11  | `MOSTLY_Q3_K_S`        | Q3_K small                           |
+| 12  | `MOSTLY_Q3_K_M`        | Q3_K medium                          |
+| 13  | `MOSTLY_Q3_K_L`        | Q3_K large                           |
+| 14  | `MOSTLY_Q4_K_S`        | Q4_K small                           |
+| 15  | `MOSTLY_Q4_K_M`        | Q4_K medium                          |
+| 16  | `MOSTLY_Q5_K_S`        | Q5_K small                           |
+| 17  | `MOSTLY_Q5_K_M`        | Q5_K medium                          |
+| 18  | `MOSTLY_Q6_K`          | Most tensors Q6_K                    |
 
 ---
 
@@ -560,11 +558,11 @@ Repeated `tensor_count` times, after metadata.
 | `type`         | `uint32`      | Storage type (`ggml_type`, section 9)                    |
 | `offset`       | `uint64`      | Offset from `tensor_data_start`; multiple of `ALIGNMENT` |
 
-| Field           | Constraint         | Description                              |
-|-----------------|--------------------|------------------------------------------|
-| `n_dimensions`  | >= 1               | Tensor rank; spec allows <= 4            |
-| `dimensions[i]` | > 0                | Each axis has positive size              |
-| `offset`        | `% ALIGNMENT == 0` | Tensor start on aligned boundary         |
+| Field           | Constraint         | Description                      |
+|-----------------|--------------------|----------------------------------|
+| `n_dimensions`  | >= 1               | Tensor rank; spec allows <= 4    |
+| `dimensions[i]` | > 0                | Each axis has positive size      |
+| `offset`        | `% ALIGNMENT == 0` | Tensor start on aligned boundary |
 
 ```go
 // tensor info entry (section 3): name + n_dimensions + dimensions[] + type + offset
@@ -601,42 +599,42 @@ Type defines interpretation of raw bytes.
 
 Quantized types store weights in blocks with a shared scale.
 
-| ID  | Name      | `block_values` | `block_bytes` | Description                                 |
-|-----|-----------|----------------|---------------|---------------------------------------------|
-| 0   | `F32`     | 1              | 4             | Full precision IEEE 754                     |
-| 1   | `F16`     | 1              | 2             | Half precision                              |
-| 2   | `Q4_0`    | 32             | 18            | 4-bit symmetric, 32 weights/block           |
-| 3   | `Q4_1`    | 32             | 20            | 4-bit with min, 32 weights/block            |
-| -   | `Q4_2`    | -              | -             | Removed (id 4)                              |
-| -   | `Q4_3`    | -              | -             | Removed (id 5)                              |
-| 6   | `Q5_0`    | 32             | 22            | 5-bit symmetric                             |
-| 7   | `Q5_1`    | 32             | 26            | 5-bit with min                              |
-| 8   | `Q8_0`    | 32             | 34            | 8-bit symmetric; ~4x compression from F32   |
-| 9   | `Q8_1`    | 32             | 36            | 8-bit + sum field for dot-product           |
-| 10  | `Q2_K`    | 256            | 84            | K-quant 2-bit, block 256                    |
-| 11  | `Q3_K`    | 256            | 110           | K-quant 3-bit                               |
-| 12  | `Q4_K`    | 256            | 144           | K-quant 4-bit                               |
-| 13  | `Q5_K`    | 256            | 176           | K-quant 5-bit                               |
-| 14  | `Q6_K`    | 256            | 210           | K-quant 6-bit                               |
-| 15  | `Q8_K`    | 256            | 292           | K-quant 8-bit                               |
-| 16  | `IQ2_XXS` | -              | var           | Importance quant 2-bit extra-extra-small    |
-| 17  | `IQ2_XS`  | -              | var           | Importance quant 2-bit extra-small          |
-| 18  | `IQ3_XXS` | -              | var           | Importance quant 3-bit extra-extra-small    |
-| 19  | `IQ1_S`   | -              | var           | Importance quant 1-bit small                |
-| 20  | `IQ4_NL`  | -              | var           | Importance quant 4-bit non-linear           |
-| 21  | `IQ3_S`   | -              | var           | Importance quant 3-bit small                |
-| 22  | `IQ2_S`   | -              | var           | Importance quant 2-bit small                |
-| 23  | `IQ4_XS`  | -              | var           | Importance quant 4-bit extra-small          |
-| 24  | `I8`      | 1              | 1             | 8-bit integer                               |
-| 25  | `I16`     | 1              | 2             | 16-bit integer                              |
-| 26  | `I32`     | 1              | 4             | 32-bit integer                              |
-| 27  | `I64`     | 1              | 8             | 64-bit integer                              |
-| 28  | `F64`     | 1              | 8             | Double precision                            |
-| 29  | `IQ1_M`   | -              | var           | Importance quant 1-bit medium               |
-| 30  | `BF16`    | 1              | 2             | Brain float 16                              |
-| 34  | `TQ1_0`   | -              | var           | Ternary quant 1.0                           |
-| 35  | `TQ2_0`   | -              | var           | Ternary quant 2.0                           |
-| 39  | `MXFP4`   | -              | var           | Microscaling FP4                            |
+| ID  | Name      | `block_values` | `block_bytes` | Description                               |
+|-----|-----------|----------------|---------------|-------------------------------------------|
+| 0   | `F32`     | 1              | 4             | Full precision IEEE 754                   |
+| 1   | `F16`     | 1              | 2             | Half precision                            |
+| 2   | `Q4_0`    | 32             | 18            | 4-bit symmetric, 32 weights/block         |
+| 3   | `Q4_1`    | 32             | 20            | 4-bit with min, 32 weights/block          |
+| -   | `Q4_2`    | -              | -             | Removed (id 4)                            |
+| -   | `Q4_3`    | -              | -             | Removed (id 5)                            |
+| 6   | `Q5_0`    | 32             | 22            | 5-bit symmetric                           |
+| 7   | `Q5_1`    | 32             | 26            | 5-bit with min                            |
+| 8   | `Q8_0`    | 32             | 34            | 8-bit symmetric; ~4x compression from F32 |
+| 9   | `Q8_1`    | 32             | 36            | 8-bit + sum field for dot-product         |
+| 10  | `Q2_K`    | 256            | 84            | K-quant 2-bit, block 256                  |
+| 11  | `Q3_K`    | 256            | 110           | K-quant 3-bit                             |
+| 12  | `Q4_K`    | 256            | 144           | K-quant 4-bit                             |
+| 13  | `Q5_K`    | 256            | 176           | K-quant 5-bit                             |
+| 14  | `Q6_K`    | 256            | 210           | K-quant 6-bit                             |
+| 15  | `Q8_K`    | 256            | 292           | K-quant 8-bit                             |
+| 16  | `IQ2_XXS` | -              | var           | Importance quant 2-bit extra-extra-small  |
+| 17  | `IQ2_XS`  | -              | var           | Importance quant 2-bit extra-small        |
+| 18  | `IQ3_XXS` | -              | var           | Importance quant 3-bit extra-extra-small  |
+| 19  | `IQ1_S`   | -              | var           | Importance quant 1-bit small              |
+| 20  | `IQ4_NL`  | -              | var           | Importance quant 4-bit non-linear         |
+| 21  | `IQ3_S`   | -              | var           | Importance quant 3-bit small              |
+| 22  | `IQ2_S`   | -              | var           | Importance quant 2-bit small              |
+| 23  | `IQ4_XS`  | -              | var           | Importance quant 4-bit extra-small        |
+| 24  | `I8`      | 1              | 1             | 8-bit integer                             |
+| 25  | `I16`     | 1              | 2             | 16-bit integer                            |
+| 26  | `I32`     | 1              | 4             | 32-bit integer                            |
+| 27  | `I64`     | 1              | 8             | 64-bit integer                            |
+| 28  | `F64`     | 1              | 8             | Double precision                          |
+| 29  | `IQ1_M`   | -              | var           | Importance quant 1-bit medium             |
+| 30  | `BF16`    | 1              | 2             | Brain float 16                            |
+| 34  | `TQ1_0`   | -              | var           | Ternary quant 1.0                         |
+| 35  | `TQ2_0`   | -              | var           | Ternary quant 2.0                         |
+| 39  | `MXFP4`   | -              | var           | Microscaling FP4                          |
 
 ```go
 // ggml_type (uint32), defines tensor data layout
@@ -688,10 +686,10 @@ A quant block is the minimum unit of dequantization.
 
 ### 10.1. Q4_0 - 18 bytes, 32 values
 
-| Offset | Size | Field | Type     | Description                       |
-|--------|------|-------|----------|-----------------------------------|
-| 0      | 2    | `d`   | float16  | Block scale                       |
-| 2      | 16   | `qs`  | `[]byte` | 32 * 4-bit, 2 nibbles per byte    |
+| Offset | Size | Field | Type     | Description                    |
+|--------|------|-------|----------|--------------------------------|
+| 0      | 2    | `d`   | float16  | Block scale                    |
+| 2      | 16   | `qs`  | `[]byte` | 32 * 4-bit, 2 nibbles per byte |
 
 ```go
 // Q4_0 block: d(float16) + qs[16]; 18 bytes -> 32 float32
@@ -713,11 +711,11 @@ func dequantQ4_0(block []byte) ([32]float32, error) {
 
 ### 10.2. Q4_1 - 20 bytes, 32 values
 
-| Offset | Size | Field | Type     | Description       |
-|--------|------|-------|----------|-------------------|
-| 0      | 2    | `d`   | float16  | Scale             |
-| 2      | 2    | `m`   | float16  | Offset (min)      |
-| 4      | 16   | `qs`  | `[]byte` | 32 * 4-bit        |
+| Offset | Size | Field | Type     | Description  |
+|--------|------|-------|----------|--------------|
+| 0      | 2    | `d`   | float16  | Scale        |
+| 2      | 2    | `m`   | float16  | Offset (min) |
+| 4      | 16   | `qs`  | `[]byte` | 32 * 4-bit   |
 
 ```go
 // Q4_1 block: d(float16) + m(float16) + qs[16]; 20 bytes -> 32 float32
@@ -739,18 +737,18 @@ func dequantQ4_1(block []byte) ([32]float32, error) {
 
 ### 10.3. Q5_0 - 22 bytes, 32 values
 
-| Offset | Size | Field | Type      | Description                      |
-|--------|------|-------|-----------|----------------------------------|
-| 0      | 2    | `d`   | float16   | Scale                            |
-| 2      | 4    | `qh`  | uint8[4]  | Upper bits of 5-bit quants       |
-| 6      | 16   | `qs`  | uint8[16] | Lower 4 bits of each quant       |
+| Offset | Size | Field | Type      | Description                |
+|--------|------|-------|-----------|----------------------------|
+| 0      | 2    | `d`   | float16   | Scale                      |
+| 2      | 4    | `qh`  | uint8[4]  | Upper bits of 5-bit quants |
+| 6      | 16   | `qs`  | uint8[16] | Lower 4 bits of each quant |
 
 ### 10.4. Q8_0 - 34 bytes, 32 values
 
-| Offset | Size | Field | Type     | Description                 |
-|--------|------|-------|----------|-----------------------------|
-| 0      | 2    | `d`   | float16  | Block scale                 |
-| 2      | 32   | `qs`  | `[]int8` | 32 signed 8-bit quants      |
+| Offset | Size | Field | Type     | Description            |
+|--------|------|-------|----------|------------------------|
+| 0      | 2    | `d`   | float16  | Block scale            |
+| 2      | 32   | `qs`  | `[]int8` | 32 signed 8-bit quants |
 
 ```go
 // Q8_0 block: d(float16) + qs[int8;32]; 34 bytes -> 32 float32
@@ -769,11 +767,11 @@ func dequantQ8_0(block []byte) ([32]float32, error) {
 
 ### 10.5. Q8_1 - 36 bytes, 32 values
 
-| Offset | Size | Field | Type     | Description                                   |
-|--------|------|-------|----------|-----------------------------------------------|
-| 0      | 2    | `d`   | float16  | Scale                                         |
-| 2      | 2    | `s`   | float16  | Precomputed sum of quants (for matmul)        |
-| 4      | 32   | `qs`  | int8[32] | 32 signed quants                              |
+| Offset | Size | Field | Type     | Description                            |
+|--------|------|-------|----------|----------------------------------------|
+| 0      | 2    | `d`   | float16  | Scale                                  |
+| 2      | 2    | `s`   | float16  | Precomputed sum of quants (for matmul) |
+| 4      | 32   | `qs`  | int8[32] | 32 signed quants                       |
 
 ### 10.6. K-quants (Q2_K ... Q8_K)
 
@@ -787,12 +785,12 @@ Direct storage without dequantization: one element = one block.
 
 ## 11. Tensor Data
 
-| Element          | Description                                           |
-|------------------|-------------------------------------------------------|
+| Element          | Description                                             |
+|------------------|---------------------------------------------------------|
 | Padding          | Zero bytes `0x00` from end of tensor info to `align_up` |
-| `tensor_data`    | Continuous zone of raw bytes of all tensors           |
+| `tensor_data`    | Continuous zone of raw bytes of all tensors             |
 | `T.offset`       | Tensor start inside `tensor_data`                       |
-| Inter-tensor gap | Padding `0x00` to next aligned `offset`               |
+| Inter-tensor gap | Padding `0x00` to next aligned `offset`                 |
 
 Data may differ from the source model due to quantization or transposition - interpretation is defined by tensor info + metadata.
 
@@ -815,17 +813,17 @@ func skipPadding(r io.ReadSeeker, pos, align int64) (int64, error) {
 
 Two stages: (1) descriptive part, (2) lazy access to weights.
 
-| Step | Action                  | Description                            |
-|------|-------------------------|----------------------------------------|
-| 1    | Verify `magic`          | Format validation                      |
-| 2    | Determine byte order    | section 3.2                            |
-| 3    | Read `version`          | Accept 2 or 3                          |
-| 4    | Read counters           | `tensor_count`, `metadata_kv_count`    |
-| 5    | Parse metadata          | `metadata_kv_count` KV pairs           |
-| 6    | Get `alignment`         | From metadata, default 32              |
-| 7    | Parse tensor info       | `tensor_count` descriptors             |
-| 8    | Compute `data_start`    | `align_up` of current position         |
-| 9    | Read weights on demand  | `slice(data_start + offset, size)`     |
+| Step | Action                 | Description                         |
+|------|------------------------|-------------------------------------|
+| 1    | Verify `magic`         | Format validation                   |
+| 2    | Determine byte order   | section 3.2                         |
+| 3    | Read `version`         | Accept 2 or 3                       |
+| 4    | Read counters          | `tensor_count`, `metadata_kv_count` |
+| 5    | Parse metadata         | `metadata_kv_count` KV pairs        |
+| 6    | Get `alignment`        | From metadata, default 32           |
+| 7    | Parse tensor info      | `tensor_count` descriptors          |
+| 8    | Compute `data_start`   | `align_up` of current position      |
+| 9    | Read weights on demand | `slice(data_start + offset, size)`  |
 
 ```go
 // Parse: sections 1-3 (header, metadata, tensor info); tensor data - lazy
@@ -957,25 +955,25 @@ func (f *File) TensorData(r io.ReaderAt, t TensorInfo) (io.Reader, error) {
 
 ## 13. Complete Structure (Go)
 
-| Structure / field        | Description                                 |
-|--------------------------|---------------------------------------------|
-| `File`                   | Root layout of entire file                  |
-| `Header.Magic`           | `"GGUF"` signature                          |
-| `Header.Version`         | Format version: 2 or 3                      |
-| `Header.TensorCount`     | Number of tensors                           |
-| `Header.MetadataKVCount` | Number of KV pairs                          |
-| `Metadata`               | `map[string]any` of metadata                |
-| `Tensors`                | Slice of tensor descriptors                 |
-| `TensorOffset`           | Absolute offset of `tensor_data` start      |
-| `MetadataKV.Key`         | Metadata field name                         |
-| `MetadataKV.ValueType`   | Value type                                  |
-| `MetadataKV.Value`       | Scalar or array                             |
-| `TensorInfo.Name`        | Tensor name                                 |
-| `TensorInfo.Dimensions`  | Sizes along axes                            |
-| `TensorInfo.Type`        | `GGMLType`                                  |
-| `TensorInfo.Offset`      | Offset in `tensor_data`                     |
-| `String.Len`             | String length in bytes                      |
-| `String.Data`            | UTF-8 string body                           |
+| Structure / field        | Description                            |
+|--------------------------|----------------------------------------|
+| `File`                   | Root layout of entire file             |
+| `Header.Magic`           | `"GGUF"` signature                     |
+| `Header.Version`         | Format version: 2 or 3                 |
+| `Header.TensorCount`     | Number of tensors                      |
+| `Header.MetadataKVCount` | Number of KV pairs                     |
+| `Metadata`               | `map[string]any` of metadata           |
+| `Tensors`                | Slice of tensor descriptors            |
+| `TensorOffset`           | Absolute offset of `tensor_data` start |
+| `MetadataKV.Key`         | Metadata field name                    |
+| `MetadataKV.ValueType`   | Value type                             |
+| `MetadataKV.Value`       | Scalar or array                        |
+| `TensorInfo.Name`        | Tensor name                            |
+| `TensorInfo.Dimensions`  | Sizes along axes                       |
+| `TensorInfo.Type`        | `GGMLType`                             |
+| `TensorInfo.Offset`      | Offset in `tensor_data`                |
+| `String.Len`             | String length in bytes                 |
+| `String.Data`            | UTF-8 string body                      |
 
 ```go
 // Logic: File is Parse() result; links metadata, tensor catalog and weight entry point; without TensorOffset cannot compute absolute address of any tensor
@@ -1043,9 +1041,9 @@ v1 format is **not read** by modern parsers. A file with `version == 1` is rejec
 
 v1 vs v2 differences (reference, for identifying obsolete files):
 
-| Field               | v1       | Description                   |
-|---------------------|----------|-------------------------------|
-| `tensor_count`      | `uint32` | 32-bit tensor counter         |
-| `metadata_kv_count` | `uint32` | 32-bit KV counter             |
-| `dimensions[i]`     | `uint32` | 32-bit dimensions             |
-| endianness          | LE only  | Little-endian only            |
+| Field               | v1       | Description           |
+|---------------------|----------|-----------------------|
+| `tensor_count`      | `uint32` | 32-bit tensor counter |
+| `metadata_kv_count` | `uint32` | 32-bit KV counter     |
+| `dimensions[i]`     | `uint32` | 32-bit dimensions     |
+| endianness          | LE only  | Little-endian only    |

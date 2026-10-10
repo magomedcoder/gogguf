@@ -1,17 +1,15 @@
 # CLI
 
-[Русская версия](cli-ru.md)
-
 ## `gguf info`
 
 Short model summary: GGUF version, architecture, name, tensor count, weight size, context length.
 
 ```bash
-./build/gogguf info -m ./models/Qwen3-0.6B-Q8_0.gguf
+./build/gogguf info -m ./models/Qwen3-4B-Q8_0.gguf
 ```
 
 | Flag | Description          |
-| ---- | -------------------- |
+|------|----------------------|
 | `-m` | path to `.gguf` file |
 
 ## `gguf inspect`
@@ -19,7 +17,7 @@ Short model summary: GGUF version, architecture, name, tensor count, weight size
 Full dump of metadata and tensor list (name, type, dimensions, size in bytes).
 
 ```bash
-./build/gogguf inspect ./models/Qwen3-0.6B-Q8_0.gguf
+./build/gogguf inspect ./models/Qwen3-4B-Q8_0.gguf
 ```
 
 Positional argument - file path, no flags.
@@ -29,13 +27,13 @@ Positional argument - file path, no flags.
 Text generation: prompt prefill -> autoregressive decode -> stdout.
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 64
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Hello" -n 64
 ```
 
 Download from Hugging Face (cached under `~/.cache/huggingface/hub`):
 
 ```bash
-./build/gogguf run -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --chat -p "Hello" -n 64
+./build/gogguf run -hf Qwen/Qwen3-4B-GGUF:Q8_0 --chat -p "Hello" -n 64
 ```
 
 | Flag                | Default | Description                                             |
@@ -67,25 +65,25 @@ For **Qwen3 Instruct** use `--chat`, otherwise the model will respond incorrectl
 Sampling example:
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -n 64 --temp 0.7 --top-k 40 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.1 --seed 42
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Hello" -n 64 --temp 0.7 --top-k 40 --top-p 0.9 --min-p 0.05 --repeat-penalty 1.1 --seed 42
 ```
 
 With thinking mode:
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat --thinking -p "Hello" -n 64
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat --thinking -p "Hello" -n 64
 ```
 
-With GPU offload (28 layers, CUDA build):
+With GPU offload (all 36 layers of Qwen3-4B, CUDA build):
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Hello" -ngl 28
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Hello" -ngl 36
 ```
 
 Interactive mode (with `--chat`, history is kept across turns; `/clear` resets it):
 
 ```bash
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -i
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -i
 ```
 
 ## `gguf serve`
@@ -95,13 +93,13 @@ HTTP server for text generation API.
 Graceful shutdown on `Ctrl+C` (SIGINT/SIGTERM).
 
 ```bash
-./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --host 127.0.0.1:8000
+./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000
 ```
 
 Or from Hugging Face:
 
 ```bash
-./build/gogguf serve -hf Qwen/Qwen3-0.6B-GGUF:Q8_0 --host 127.0.0.1:8000
+./build/gogguf serve -hf Qwen/Qwen3-4B-GGUF:Q8_0 --host 127.0.0.1:8000
 ```
 
 | Flag                | Default          | Description                                          |

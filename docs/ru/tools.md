@@ -1,13 +1,11 @@
 # Утилиты
 
-[English version](tools.md)
-
 ## `debugtok`
 
 Проверяет encode промпта и logits после prefill: top-5 токенов и greedy-следующий.
 
 ```bash
-go run ./cmd/tools debugtok ./models/Qwen3-0.6B-Q8_0.gguf "Привет"
+go run ./cmd/tools debugtok ./models/Qwen3-4B-Q8_0.gguf "Привет"
 ```
 
 ## `vocab`
@@ -15,7 +13,7 @@ go run ./cmd/tools debugtok ./models/Qwen3-0.6B-Q8_0.gguf "Привет"
 Показывает конфиг Qwen3 (`head_dim`, число heads) и id special tokens в словаре.
 
 ```bash
-go run ./cmd/tools vocab ./models/Qwen3-0.6B-Q8_0.gguf
+go run ./cmd/tools vocab ./models/Qwen3-4B-Q8_0.gguf
 ```
 
 ## `bench`
@@ -26,11 +24,11 @@ go run ./cmd/tools vocab ./models/Qwen3-0.6B-Q8_0.gguf
 # сборка с CUDA
 CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 
-./build/tools bench -m ./models/Qwen3-0.6B-Q8_0.gguf -p "Привет" -n 128 --chat
+./build/tools bench -m ./models/Qwen3-4B-Q8_0.gguf -p "Привет" -n 128 --chat
 
 ./build/tools bench -m model.gguf -p "Привет" -n 64 -ngl 28 --runs 3 --json
 
-./build/tools bench -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 32 --compare -c 2048 --runs 2 --warmup 1
+./build/tools bench -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -n 32 --compare -c 2048 --runs 2 --warmup 1
 ```
 
 | Флаг            | По умолчанию | Описание                                         |
@@ -57,7 +55,7 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 Greedy decode N токенов в JSON (token IDs) для сверки с golden.
 
 ```bash
-go run ./cmd/tools greedy -m models/Qwen3-0.6B-Q8_0.gguf --chat "Привет" -n 50
+go run ./cmd/tools greedy -m models/Qwen3-4B-Q8_0.gguf --chat "Привет" -n 50
 ```
 
 ## `debuglayers`
@@ -65,7 +63,7 @@ go run ./cmd/tools greedy -m models/Qwen3-0.6B-Q8_0.gguf --chat "Привет" -
 Послойный RMS после embed/каждого слоя + итоговые top logits.
 
 ```bash
-go run ./cmd/tools debuglayers -m ./models/Qwen3-0.6B-Q8_0.gguf -p "Привет"
+go run ./cmd/tools debuglayers -m ./models/Qwen3-4B-Q8_0.gguf -p "Привет"
 ```
 
 ## `layerlogits`
@@ -73,7 +71,7 @@ go run ./cmd/tools debuglayers -m ./models/Qwen3-0.6B-Q8_0.gguf -p "Привет
 Greedy next и top-k logits по слоям (генератор JSON fixture).
 
 ```bash
-go run ./cmd/tools layerlogits -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -top 5
+go run ./cmd/tools layerlogits -m models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -top 5
 ```
 
 ## `dumplogits`
@@ -81,9 +79,9 @@ go run ./cmd/tools layerlogits -m models/Qwen3-0.6B-Q8_0.gguf --chat -p "При�
 Полный vocab logits после prefill -> `prefix.bin` + `prefix.json`.
 
 ```bash
-go run ./cmd/tools dumplogits -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_logits
+go run ./cmd/tools dumplogits -m models/Qwen3-4B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_logits
 
-go run ./cmd/tools dumplogits -m models/Qwen3-0.6B-Q8_0.gguf --chat -p Hello -o test/fixtures/qwen3_chat_hello_logits
+go run ./cmd/tools dumplogits -m models/Qwen3-4B-Q8_0.gguf --chat -p Hello -o test/fixtures/qwen3_chat_hello_logits
 ```
 
 ## `comparelogits`
@@ -93,7 +91,7 @@ go run ./cmd/tools dumplogits -m models/Qwen3-0.6B-Q8_0.gguf --chat -p Hello -o 
 ```bash
 go run ./cmd/tools comparelogits -a test/fixtures/qwen3_raw_hello_logits -b test/fixtures/qwen3_raw_hello_logits
 
-CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelogits -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -tol 0.01 -align
+CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelogits -m models/Qwen3-4B-Q8_0.gguf -p Hello -tol 0.01 -align
 ```
 
 ## `dumplayers`
@@ -101,9 +99,9 @@ CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelogits -m models/Qwen3-0.6B-Q
 Embed + hidden после каждого слоя -> `prefix.bin` + `prefix.json`.
 
 ```bash
-go run ./cmd/tools dumplayers -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_layers
+go run ./cmd/tools dumplayers -m models/Qwen3-4B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_layers
 
-go run ./cmd/tools dumplayers -m models/Qwen3-0.6B-Q8_0.gguf --chat -p Hello -o test/fixtures/qwen3_chat_hello_layers
+go run ./cmd/tools dumplayers -m models/Qwen3-4B-Q8_0.gguf --chat -p Hello -o test/fixtures/qwen3_chat_hello_layers
 ```
 
 ## `comparelayers`
@@ -113,5 +111,5 @@ go run ./cmd/tools dumplayers -m models/Qwen3-0.6B-Q8_0.gguf --chat -p Hello -o 
 ```bash
 go run ./cmd/tools comparelayers -a test/fixtures/qwen3_raw_hello_layers -b test/fixtures/qwen3_raw_hello_layers
 
-CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelayers -m models/Qwen3-0.6B-Q8_0.gguf -p Hello -tol 0.01
+CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelayers -m models/Qwen3-4B-Q8_0.gguf -p Hello -tol 0.01
 ```

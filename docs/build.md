@@ -1,7 +1,5 @@
 # Build
 
-[Русская версия](build-ru.md)
-
 ## Local build
 
 ```bash
@@ -26,7 +24,7 @@ Verify GPU matmul:
 CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
 ```
 
-`-ngl N` - offload the first N transformer layers to GPU (max `block_count`; Qwen3-0.6B - 28).
+`-ngl N` - offload the first N transformer layers to GPU (max `block_count`; Qwen3-1.7B - 28, Qwen3-4B - 36).
 
 On GPU: matmul (FP32, Q8_0, Q4_0, Q4_K, Q5_K, Q6_K) with CUDA Graphs (full HtoD+kernel+DtoH, or kernel-only when the same vec is already resident), layer graphs for FFN, attn/FFN residual, QKV+RoPE prefix, and attention (keyed by `seq_len`; KV append stays discrete), FFN residency, QKV+RoPE+attn residency, attn+FFN residual (WO+RMSNorm+FFN, parallel RMSNorm apply), attention (+ softmax), KV-cache. Disable with `GGUF_QKV_RESIDENCY=0` / `GGUF_ATTN_FFN_RESIDENCY=0`. Call `Engine.Close()` to free VRAM between loads.
 
@@ -84,7 +82,7 @@ Download a model:
 ```bash
 mkdir -p models
 
-curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
+curl -L -o models/Qwen3-4B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q8_0.gguf
 ```
 
 **CPU (default)**:
@@ -92,7 +90,7 @@ curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GG
 ```bash
 docker build -t gogguf .
 
-docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /models/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0:8000
+docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /models/Qwen3-4B-Q8_0.gguf --host 0.0.0.0:8000
 ```
 
 **CUDA** (NVIDIA GPU, `linux/amd64` only):
@@ -100,5 +98,5 @@ docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /mode
 ```bash
 docker build --target runtime-cuda -t gogguf-cuda .
 
-docker run --rm --gpus all -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf-cuda serve -m /models/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0:8000 -ngl 28
+docker run --rm --gpus all -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf-cuda serve -m /models/Qwen3-4B-Q8_0.gguf --host 0.0.0.0:8000 -ngl 36
 ```

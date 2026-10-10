@@ -1,8 +1,6 @@
 # HTTP API
 
-[English version](api.md)
-
-Сервер запускается через `gogguf serve` (см. [CLI](cli-ru.md)).
+Сервер запускается через `gogguf serve` (см. [CLI](cli.md)).
 
 ## Auth и rate limit
 

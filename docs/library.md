@@ -1,13 +1,11 @@
 # Library usage
 
-[Русская версия](library-ru.md)
-
 ## Inference
 
 ```go
 import "github.com/magomedcoder/gogguf"
 
-engine, err := gogguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{
+engine, err := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 0, // matmul N layers on GPU; <= block_count, CUDA build required
 })
 ctx, err := engine.NewContext()
@@ -56,7 +54,7 @@ text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 ## Load via mmap (zero-copy weights)
 
 ```go
-engine, err := gogguf.LoadMapped("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{
+engine, err := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 0,
 })
 ```
@@ -64,7 +62,7 @@ engine, err := gogguf.LoadMapped("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOpt
 ## GPU offload from code
 
 ```go
-engine, err := gogguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{
+engine, err := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 28, // requires build with -tags cuda
 })
 ```
@@ -74,7 +72,7 @@ engine, err := gogguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{
 ```go
 import "github.com/magomedcoder/gogguf"
 
-r, err := gogguf.OpenFile("./models/Qwen3-0.6B-Q8_0.gguf")
+r, err := gogguf.OpenFile("./models/Qwen3-4B-Q8_0.gguf")
 
 arch, _ := r.Metadata.String("general.architecture")
 ```
@@ -87,9 +85,9 @@ import (
 	"github.com/magomedcoder/gogguf/server"
 )
 
-engine, _ := gogguf.Load("./models/Qwen3-0.6B-Q8_0.gguf", gogguf.LoadOptions{})
+engine, _ := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{})
 
-srv := server.New(engine, "./models/Qwen3-0.6B-Q8_0.gguf")
+srv := server.New(engine, "./models/Qwen3-4B-Q8_0.gguf")
 
 srv.ListenAndServe("127.0.0.1:8000")
 ```

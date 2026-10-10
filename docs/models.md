@@ -1,7 +1,5 @@
 # Supported models
 
-[Russian version](models-ru.md)
-
 GoGGUF can read any GGUF v2/v3 file (`gogguf info`, `gogguf inspect`, mmap), but **full inference** (forward pass +
 generation) is implemented only for specific architectures - selected by `general.architecture` in GGUF metadata.
 
@@ -34,10 +32,10 @@ window.
 
 | Model      | Quantization | Status                                           | Links                                                       |
 |------------|--------------|--------------------------------------------------|-------------------------------------------------------------|
-| Qwen3-0.6B | Q8_0         | verified (golden tests, CLI, serve, CUDA `-ngl`) | [Hugging Face](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) |
+| Qwen3-1.7B | Q8_0         | verified (golden tests, CLI, serve, CUDA `-ngl`) | [Hugging Face](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF) |
 
-Other Qwen3 sizes (1.7B, 4B, 8B, ...) with `general.architecture: qwen3` **should work** if weights use a supported
-quantization (see below). They are not yet covered by automated golden tests.
+Other Qwen3 sizes (0.6B, 4B, 8B, ...) with `general.architecture: qwen3` **should work** if weights use a supported
+quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/examples often use **4B** for illustration.
 
 ### Qwen3 capabilities
 
@@ -51,19 +49,15 @@ quantization (see below). They are not yet covered by automated golden tests.
 
 ### Supported weight quantizations
 
-| Type | Status    |
-|------|-----------|
-| Q8_0 | supported |
-| Q4_0 | supported |
-| Q4_1 | supported |
-| Q5_0 | supported |
-| Q5_1 | supported |
-| Q2_K | supported |
-| Q3_K | supported |
-| Q4_K | supported |
-| Q5_K | supported |
-| Q6_K | supported |
-| Q8_K | supported |
+- **Legacy:** Q4_0, Q4_1, Q5_0, Q5_1, Q8_0
+- **K-quants:** Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K
+- **Unquantized (dequant path):** F16, F32
+
+### Planned weight quantizations
+
+- Q8_1
+- IQ-quants: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ4_NL, IQ4_XS
+- BF16, MXFP4
 
 ## GGUF read-only (no inference)
 
@@ -77,7 +71,7 @@ If `general.architecture` is not supported, inference `Load` returns an error li
 
 ## Planned
 
-Priority per [roadmap.md](roadmap.md):
+Priority:
 
 | Priority | Architecture / area | Expected `general.architecture` | Status    |
 |----------|---------------------|---------------------------------|-----------|
@@ -108,15 +102,4 @@ Priority per [roadmap.md](roadmap.md):
 
 ## Download test models
 
-```bash
-mkdir -p models
-
-# Qwen3 (primary golden model)
-curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
-
-# Llama 3.2 1B Instruct
-curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
-
-# Mistral 7B Instruct v0.2
-curl -L -o models/Mistral-7B-Instruct-v0.2-Q4_K_M.gguf https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf
-```
+See [testing.md](testing.md) for the golden/integration model and how to run tests.

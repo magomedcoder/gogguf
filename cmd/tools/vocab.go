@@ -10,7 +10,7 @@ import (
 
 // runVocab shows model config and special token IDs.
 func runVocab(args []string) error {
-	path := "./models/Qwen3-0.6B-Q8_0.gguf"
+	path := "./models/Qwen3-4B-Q8_0.gguf"
 	if len(args) > 0 {
 		path = args[0]
 	}

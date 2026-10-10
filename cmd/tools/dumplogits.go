@@ -13,7 +13,7 @@ import (
 // runDumpLogits writes full-vocab logits after prefill (.bin + .json).
 func runDumpLogits(args []string) error {
 	fs := flag.NewFlagSet("dumplogits", flag.ContinueOnError)
-	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "path to GGUF")
+	modelPath := fs.String("m", "./models/Qwen3-4B-Q8_0.gguf", "path to GGUF")
 	prompt := fs.String("p", "Hello", "prompt")
 	chatMode := fs.Bool("chat", false, "chat template")
 	out := fs.String("o", "", "output prefix (no extension); default next to model")

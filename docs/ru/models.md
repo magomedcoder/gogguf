@@ -1,7 +1,5 @@
 # Поддерживаемые модели
 
-[English version](models.md)
-
 GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap), но **полный inference** (forward + генерация) есть только для архитектур по полю `general.architecture` в метаданных GGUF.
 
 ## Поддерживается сейчас (end-to-end inference)
@@ -32,9 +30,9 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 
 | Модель     | Квантизация | Статус                                            | Ссылки                                                      |
 |------------|-------------|---------------------------------------------------|-------------------------------------------------------------|
-| Qwen3-0.6B | Q8_0        | проверено (golden-тесты, CLI, serve, CUDA `-ngl`) | [Hugging Face](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) |
+| Qwen3-1.7B | Q8_0        | проверено (golden-тесты, CLI, serve, CUDA `-ngl`) | [Hugging Face](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF) |
 
-Другие размеры Qwen3 (1.7B, 4B, 8B, ...) с `general.architecture: qwen3` **должны работать**, если веса в поддерживаемой квантизации (см. ниже). Автоматических golden-тестов для них пока нет.
+Другие размеры Qwen3 (0.6B, 4B, 8B, ...) с `general.architecture: qwen3` **должны работать**, если веса в поддерживаемой квантизации (см. ниже). Golden-фикстуры в CI покрывают **1.7B-Q8_0**; в примерах документации часто используется **4B**.
 
 ### Возможности Qwen3
 
@@ -48,19 +46,15 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 
 ### Поддерживаемые квантизации весов
 
-| Тип  | Статус         |
-|------|----------------|
-| Q8_0 | поддерживается |
-| Q4_0 | поддерживается |
-| Q4_1 | поддерживается |
-| Q5_0 | поддерживается |
-| Q5_1 | поддерживается |
-| Q2_K | поддерживается |
-| Q3_K | поддерживается |
-| Q4_K | поддерживается |
-| Q5_K | поддерживается |
-| Q6_K | поддерживается |
-| Q8_K | поддерживается |
+- **Legacy:** Q4_0, Q4_1, Q5_0, Q5_1, Q8_0
+- **K-quants:** Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K
+- **Без квантизации (путь dequant):** F16, F32
+
+### Планируемые квантизации весов
+
+- Q8_1
+- IQ-quants: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ4_NL, IQ4_XS
+- BF16, MXFP4
 
 ## GGUF только чтение (без inference)
 
@@ -74,7 +68,7 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 
 ## Планируется
 
-Приоритет по [roadmap.md](roadmap.md):
+Приоритет:
 
 | Приоритет | Архитектура / область | Ожидаемый `general.architecture` | Статус         |
 |-----------|-----------------------|----------------------------------|----------------|
@@ -105,15 +99,4 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 
 ## Скачать тестовые модели
 
-```bash
-mkdir -p models
-
-# Qwen3 (основная golden-модель)
-curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
-
-# Llama 3.2 1B Instruct
-curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
-
-# Mistral 7B Instruct v0.2
-curl -L -o models/Mistral-7B-Instruct-v0.2-Q4_K_M.gguf https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf
-```
+См. [testing.md](testing.md) - golden/integration-модель и запуск тестов.

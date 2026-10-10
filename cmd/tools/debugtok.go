@@ -8,7 +8,7 @@ import (
 
 // runDebugTok checks prompt encode and logits after prefill.
 func runDebugTok(args []string) error {
-	path := "./models/Qwen3-0.6B-Q8_0.gguf"
+	path := "./models/Qwen3-4B-Q8_0.gguf"
 	if len(args) > 0 {
 		path = args[0]
 	}

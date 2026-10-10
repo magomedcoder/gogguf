@@ -34,7 +34,7 @@ type logitMetric struct {
 // runDebugLayers prints per-layer RMS and final logits.
 func runDebugLayers(args []string) error {
 	fs := flag.NewFlagSet("debuglayers", flag.ContinueOnError)
-	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "path to GGUF")
+	modelPath := fs.String("m", "./models/Qwen3-4B-Q8_0.gguf", "path to GGUF")
 	prompt := fs.String("p", "Hello", "prompt")
 	chat := fs.Bool("chat", false, "chat template")
 	topN := fs.Int("top", 5, "number of top logits in report")

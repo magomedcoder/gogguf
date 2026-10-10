@@ -1,6 +1,6 @@
 {
   "magic": "GGUFLGT1",
-  "model": "Qwen3-0.6B-Q8_0.gguf",
+  "model": "Qwen3-1.7B-Q8_0.gguf",
   "prompt": "Hello",
   "chat": true,
   "tokens": [
@@ -23,23 +23,23 @@
   "top": [
     {
       "id": 9707,
-      "logit": 31.89029
+      "logit": 40.003227
     },
     {
       "id": 13048,
-      "logit": 24.440693
+      "logit": 30.416008
     },
     {
-      "id": 14990,
-      "logit": 22.841637
+      "id": 68012,
+      "logit": 27.301146
     },
     {
-      "id": 21927,
-      "logit": 21.730125
+      "id": 78078,
+      "logit": 25.91601
     },
     {
-      "id": 18665,
-      "logit": 21.543589
+      "id": 13936,
+      "logit": 25.314037
     }
   ],
   "backend": "cpu"

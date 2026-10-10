@@ -13,7 +13,7 @@ func TestSplitRepoTag(t *testing.T) {
 		tag     string
 		wantErr bool
 	}{
-		{"Qwen/Qwen3-0.6B-GGUF:Q8_0", "Qwen/Qwen3-0.6B-GGUF", "Q8_0", false},
+		{"Qwen/Qwen3-1.7B-GGUF:Q8_0", "Qwen/Qwen3-1.7B-GGUF", "Q8_0", false},
 		{"bartowski/Llama-3.2-1B-Instruct-GGUF", "bartowski/Llama-3.2-1B-Instruct-GGUF", "", false},
 		{"owner/repo:q4_k_m", "owner/repo", "q4_k_m", false},
 		{"", "", "", true},
@@ -42,7 +42,7 @@ func TestSplitRepoTag(t *testing.T) {
 }
 
 func TestValidRepoID(t *testing.T) {
-	ok := []string{"Qwen/Qwen3-0.6B-GGUF", "a/b", "org_name/model-name.v1"}
+	ok := []string{"Qwen/Qwen3-1.7B-GGUF", "a/b", "org_name/model-name.v1"}
 	bad := []string{"", "a", "a/b/c", "/a/b", "a/b/", "a//b", "a /b"}
 	for _, s := range ok {
 		if !ValidRepoID(s) {
@@ -122,8 +122,8 @@ func TestIsModelGGUF(t *testing.T) {
 }
 
 func TestRepoFolderName(t *testing.T) {
-	got := RepoFolderName("Qwen/Qwen3-0.6B-GGUF")
-	want := "models--Qwen--Qwen3-0.6B-GGUF"
+	got := RepoFolderName("Qwen/Qwen3-1.7B-GGUF")
+	want := "models--Qwen--Qwen3-1.7B-GGUF"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

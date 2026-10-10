@@ -11,7 +11,7 @@ Vue 3 + TypeScript + Vite + Tailwind CSS.
 В одном терминале - сервер с моделью:
 
 ```bash
-./build/gogguf serve -m ./models/Qwen3-0.6B-Q8_0.gguf --host 127.0.0.1:8000
+./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000
 ```
 
 В другом - UI:
@@ -36,4 +36,4 @@ yarn dev  # или npm run dev
 - настройки: `max_tokens`, `temperature`, `thinking`, `repeat_penalty`, `min_p`
 - остановка генерации, сброс чата
 
-Подробнее об эндпоинтах: [docs/api-ru.md](../docs/api-ru.md).
+Подробнее об эндпоинтах: [docs/api-ru.md](../docs/ru/api.md).

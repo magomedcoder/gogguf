@@ -1,7 +1,5 @@
 # HTTP API
 
-[Русская версия](api-ru.md)
-
 Start the server with `gogguf serve` (see [CLI](cli.md)).
 
 ## Auth and rate limit

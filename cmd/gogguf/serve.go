@@ -4,19 +4,18 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/pkg/server"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/magomedcoder/gogguf"
-	"github.com/magomedcoder/gogguf/server"
 )
 
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	var modelPath, hfRepo string
 	fs.StringVar(&modelPath, "m", "", "path to GGUF file")
-	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], e.g. Qwen/Qwen3-0.6B-GGUF:Q8_0")
+	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], e.g. Qwen/Qwen3-4B-GGUF:Q8_0")
 	fs.StringVar(&hfRepo, "hf-repo", "", "alias for -hf")
 	host := fs.String("host", "127.0.0.1:8000", "HTTP server address")
 	ngl := fs.Int("ngl", 0, "number of transformer layers on GPU (CUDA, build: -tags cuda)")

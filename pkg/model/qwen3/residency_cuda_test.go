@@ -13,15 +13,15 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
-// loadResidentModel loads Qwen3-0.6B-Q8_0 with full offload or skips the test.
+// loadResidentModel loads Qwen3-1.7B-Q8_0 with full offload or skips the test.
 // gpuMaxSeq=0 - auto-cap GPU KV-cache.
 func loadResidentModel(t *testing.T, gpuMaxSeq, nBatch int) *Model {
 	t.Helper()
 
 	var path string
 	for _, p := range []string{
-		filepath.Join("..", "..", "..", "models", "Qwen3-0.6B-Q8_0.gguf"),
-		filepath.Join("models", "Qwen3-0.6B-Q8_0.gguf"),
+		filepath.Join("..", "..", "..", "models", "Qwen3-1.7B-Q8_0.gguf"),
+		filepath.Join("models", "Qwen3-1.7B-Q8_0.gguf"),
 	} {
 		if _, err := os.Stat(p); err == nil {
 			path = p
@@ -30,7 +30,7 @@ func loadResidentModel(t *testing.T, gpuMaxSeq, nBatch int) *Model {
 	}
 
 	if path == "" {
-		t.Skip("missing Qwen3-0.6B-Q8_0.gguf")
+		t.Skip("missing Qwen3-1.7B-Q8_0.gguf")
 	}
 
 	r, err := format.OpenFile(path)

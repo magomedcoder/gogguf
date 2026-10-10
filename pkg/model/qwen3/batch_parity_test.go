@@ -12,8 +12,8 @@ import (
 func testModelPath(t *testing.T) string {
 	t.Helper()
 	candidates := []string{
-		filepath.Join("..", "..", "..", "models", "Qwen3-0.6B-Q8_0.gguf"),
-		filepath.Join("models", "Qwen3-0.6B-Q8_0.gguf"),
+		filepath.Join("..", "..", "..", "models", "Qwen3-1.7B-Q8_0.gguf"),
+		filepath.Join("models", "Qwen3-1.7B-Q8_0.gguf"),
 	}
 
 	for _, p := range candidates {
@@ -21,7 +21,7 @@ func testModelPath(t *testing.T) string {
 			return p
 		}
 	}
-	t.Skip("missing Qwen3-0.6B-Q8_0.gguf")
+	t.Skip("missing Qwen3-1.7B-Q8_0.gguf")
 
 	return ""
 }

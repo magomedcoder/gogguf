@@ -1,7 +1,5 @@
 # GoGGUF
 
-[English version](README.md)
-
 **GoGGUF** - лёгковесный способ запуска GGUF-моделей на Go без llama.cpp.
 
 > **Проект в активной разработке.** Поддержка GPU (CUDA) пока на раннем этапе.
@@ -31,34 +29,53 @@
 **Работает:** Qwen3, Llama 2/3, Mistral, Phi-2/3, Gemma/Gemma2
 **Скоро:** Vision, отдельные embedding-модели
 
-Подробнее: [docs/models-ru.md](docs/models-ru.md).
-
-## Тестовая модель
-
-На текущем этапе для разработки и тестирования используется Qwen3-0.6B-Q8_0.gguf:
-
-```bash
-mkdir -p models
-
-curl -L -o models/Qwen3-0.6B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
-```
+Подробнее: [docs/ru/models.md](docs/ru/models.md).
 
 ## Быстрый старт
 
+Пример модели для запуска CLI: `Qwen3-4B-Q8_0.gguf`
+
 ```bash
+# скачать модель
+mkdir -p models
+curl -L -o models/Qwen3-4B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q8_0.gguf
+
+# собрать CLI
 go build -o build/gogguf ./cmd/gogguf
 
-./build/gogguf run -m ./models/Qwen3-0.6B-Q8_0.gguf --chat -p "Привет" -n 64
+# чат в терминале
+./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -n 64
+
+# или HTTP API (совместимый с OpenAI)
+./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000
 ```
+
+Опциональный простой чат-UI ([web-ui](web-ui/)): оставьте `serve` запущенным и в другом терминале:
+
+```bash
+cd web-ui
+yarn install   # или npm install
+yarn dev       # http://localhost:5173 - проксирует /api на :8000
+```
+
+Подробнее про API: [docs/ru/api.md](docs/ru/api.md). Про UI: [web-ui/README-ru.md](web-ui/README-ru.md).
 
 ## Документация
 
-| Раздел                                           | Описание                               |
-|--------------------------------------------------|----------------------------------------|
-| [docs/build-ru.md](docs/build-ru.md)             | Сборка: CPU, CUDA, Docker              |
-| [docs/cli-ru.md](docs/cli-ru.md)                 | CLI: `info`, `inspect`, `run`, `serve` |
-| [docs/api-ru.md](docs/api-ru.md)                 | HTTP API сервера                       |
-| [docs/library-ru.md](docs/library-ru.md)         | Inference из Go-кода                   |
-| [docs/tools-ru.md](docs/tools-ru.md)             | `debugtok`, `vocab`, `bench`           |
-| [docs/GGUF-FORMAT-ru.md](docs/GGUF-FORMAT-ru.md) | Формат GGUF                            |
-| [docs/models-ru.md](docs/models-ru.md)           | Поддерживаемые и планируемые модели    |
+* [Сборка: CPU, CUDA, Docker](docs/ru/build.md)
+* [CLI: `info`, `inspect`, `run`, `serve`](docs/ru/cli.md)
+* [HTTP API сервера](docs/ru/api.md)
+* [Простой web UI](web-ui/README-ru.md)
+* [Inference из Go-кода](docs/ru/library.md)
+* [`debugtok`, `vocab`, `bench`](docs/ru/tools.md)
+* [Формат GGUF](docs/ru/GGUF-FORMAT.md)
+* [Поддерживаемые и планируемые модели](docs/ru/models.md)
+* [Тестирование](docs/ru/testing.md)
+
+## Участие в разработке
+
+Мы рады любому вкладу! Подробности - в [CONTRIBUTING.md](CONTRIBUTING.md)
+
+---
+
+[English version](README.md)
