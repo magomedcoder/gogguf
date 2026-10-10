@@ -15,7 +15,7 @@ const BlockQ5_1Size = 4 + 4 + QK5_1/2
 // w[j] = d * q + m; q = 5-bit unsigned
 func DequantBlockQ5_1(block []byte) ([QK5_1]float32, error) {
 	if len(block) < BlockQ5_1Size {
-		return [QK5_1]float32{}, fmt.Errorf("quant: блок Q5_1 слишком короткий: %d байт", len(block))
+		return [QK5_1]float32{}, fmt.Errorf("quant: Q5_1 block too short: %d bytes", len(block))
 	}
 
 	d := FP16ToFP32(binary.LittleEndian.Uint16(block[0:2]))
@@ -57,12 +57,12 @@ func DequantQ5_1Into(dst []float32, data []byte, n int) error {
 	}
 
 	if len(dst) < n {
-		return fmt.Errorf("quant: dst слишком короткий")
+		return fmt.Errorf("quant: dst too short")
 	}
 
 	want := (n + QK5_1 - 1) / QK5_1 * BlockQ5_1Size
 	if len(data) < want {
-		return fmt.Errorf("quant: данных Q5_1 недостаточно: нужно %d, есть %d", want, len(data))
+		return fmt.Errorf("quant: insufficient Q5_1 data: need %d, have %d", want, len(data))
 	}
 
 	for i := 0; i < n; i += QK5_1 {
@@ -85,7 +85,7 @@ func DotBlockQ5_1(block []byte, x []float32) (float32, error) {
 	}
 
 	if len(x) < QK5_1 {
-		return 0, fmt.Errorf("quant: вектор короче блока Q5_1")
+		return 0, fmt.Errorf("quant: vector shorter than Q5_1")
 	}
 
 	var sum float32

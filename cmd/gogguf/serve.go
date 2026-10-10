@@ -15,17 +15,17 @@ import (
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	var modelPath, hfRepo string
-	fs.StringVar(&modelPath, "m", "", "путь к файлу GGUF")
-	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], например Qwen/Qwen3-0.6B-GGUF:Q8_0")
-	fs.StringVar(&hfRepo, "hf-repo", "", "алиас -hf")
-	host := fs.String("host", "127.0.0.1:8000", "адрес HTTP-сервера")
-	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
-	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill (Qwen3, работает и с -ngl)")
-	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
-	dev := fs.String("dev", "", "GPU для offload: \"1\" или \"0,1\" (multi-GPU split слоёв)")
-	tensorSplit := fs.String("tensor-split", "", "пропорции слоёв по устройствам с -dev 0,1, например 0.6,0.4")
-	apiKey := fs.String("api-key", "", "API key (Bearer / X-API-Key); пусто = без auth; /v1/health открыт")
-	rateLimit := fs.Int("rate-limit", 0, "лимит запросов в минуту на IP (0 = без лимита); /v1/health не учитывается")
+	fs.StringVar(&modelPath, "m", "", "path to GGUF file")
+	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], e.g. Qwen/Qwen3-0.6B-GGUF:Q8_0")
+	fs.StringVar(&hfRepo, "hf-repo", "", "alias for -hf")
+	host := fs.String("host", "127.0.0.1:8000", "HTTP server address")
+	ngl := fs.Int("ngl", 0, "number of transformer layers on GPU (CUDA, build: -tags cuda)")
+	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 speeds up prefill (Qwen3, works with -ngl)")
+	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
+	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
+	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
+	apiKey := fs.String("api-key", "", "API key (Bearer / X-API-Key); empty = no auth; /v1/health is public")
+	rateLimit := fs.Int("rate-limit", 0, "requests per minute per IP (0 = unlimited); /v1/health excluded")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -38,7 +38,7 @@ func runServe(args []string) error {
 
 	path, err := resolveModelPath(modelPath, hfRepo)
 	if err != nil {
-		return fmt.Errorf("%w\nиспользование: gogguf serve -m файл.gguf|-hf owner/repo[:quant] [--host 127.0.0.1:8000]", err)
+		return fmt.Errorf("%w\nusage: gogguf serve -m file.gguf|-hf owner/repo[:quant] [--host 127.0.0.1:8000]", err)
 	}
 
 	engine, err := gogguf.Load(path, gogguf.LoadOptions{
@@ -61,7 +61,7 @@ func runServe(args []string) error {
 
 	fmt.Fprintf(os.Stderr, "gogguf serve: %s (model: %s)", *host, path)
 	if *ngl > 0 {
-		fmt.Fprintf(os.Stderr, " GPU offload: %d слоёв на %s", *ngl, engine.GPUDescription())
+		fmt.Fprintf(os.Stderr, " GPU offload: %d layers on %s", *ngl, engine.GPUDescription())
 	}
 
 	if *nBatch > 1 {

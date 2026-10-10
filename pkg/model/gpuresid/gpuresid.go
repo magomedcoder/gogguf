@@ -90,12 +90,12 @@ func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOu
 	}
 
 	if h == nil {
-		return fmt.Errorf("gpuresid: слой %d: тип %s не поддерживает device residency", layer, info.Type)
+		return fmt.Errorf("gpuresid: layer %d: type %s does not support device residency", layer, info.Type)
 	}
 
 	// FP32 path exists only for NeoX + QK-norm (Qwen3)
 	if r.rope != gpu.RoPENeoX || t.QNorm == "" || t.KNorm == "" {
-		return fmt.Errorf("gpuresid: слой %d: тип %s не поддерживает fused QKV", layer, info.Type)
+		return fmt.Errorf("gpuresid: layer %d: type %s does not support fused QKV", layer, info.Type)
 	}
 
 	qW, kW, vW, err := r.floats3(t.AttnQ, t.AttnK, t.AttnV)
@@ -129,7 +129,7 @@ func (r *Runner) AttnFFN(t Tensors, d Dims, ffnNorm, x, attn []float32) error {
 	}
 
 	if x == nil {
-		return fmt.Errorf("gpuresid: тип %s не поддерживает device residency", info.Type)
+		return fmt.Errorf("gpuresid: type %s does not support device residency", info.Type)
 	}
 
 	woW, err := r.w.Floats(t.AttnOut)
@@ -180,7 +180,7 @@ func (r *Runner) ffn(geglu bool, gateName, upName, downName string, x, out []flo
 	}
 
 	if geglu {
-		return fmt.Errorf("gpuresid: тип %s не поддерживает fused GeGLU", info.Type)
+		return fmt.Errorf("gpuresid: type %s does not support fused GeGLU", info.Type)
 	}
 
 	gateW, upW, downW, err := r.floats3(gateName, upName, downName)
@@ -194,7 +194,7 @@ func (r *Runner) ffn(geglu bool, gateName, upName, downName string, x, out []flo
 // MatMulInto - single matmul on GPU by weight name (§7: MLA projections, MoE router, lm_head). Result is written to out
 func (r *Runner) MatMulInto(name string, rows, cols int, vec, out []float32) error {
 	if len(out) < rows {
-		return fmt.Errorf("gpuresid: %s: короткий out: %d < %d", name, len(out), rows)
+		return fmt.Errorf("gpuresid: %s: short out: %d < %d", name, len(out), rows)
 	}
 
 	info, err := r.w.Info(name)
@@ -242,7 +242,7 @@ func (r *Runner) matMulQuant(t format.GGML, name string, raw []byte, rows, cols 
 	case format.GgmlQ6_K:
 		return r.g.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
 	default:
-		return nil, fmt.Errorf("gpuresid: %s: тип %s без GPU matmul", name, t)
+		return nil, fmt.Errorf("gpuresid: %s: type %s has no GPU matmul", name, t)
 	}
 }
 
@@ -265,7 +265,7 @@ func (r *Runner) ExpertFFN(gateExps, upExps, downExps string, expert int, x, out
 	}
 
 	if gate.t != up.t || gate.t != down.t {
-		return fmt.Errorf("gpuresid: эксперты разного типа: %s/%s/%s", gate.t, up.t, down.t)
+		return fmt.Errorf("gpuresid: experts of different types: %s/%s/%s", gate.t, up.t, down.t)
 	}
 
 	return r.g.FFNSwiGLUQuantCached(gate.t, gate.name, up.name, down.name, gate.raw, up.raw, down.raw, x, out, embd, ffn)
@@ -322,7 +322,7 @@ func (r *Runner) expertSlice(name string, expert, rows, cols int) (expertWeights
 	}
 
 	if !gpu.FusedQuantSupported(info.Type) {
-		return expertWeights{}, fmt.Errorf("gpuresid: %s: тип %s не поддерживается fused-путём", name, info.Type)
+		return expertWeights{}, fmt.Errorf("gpuresid: %s: type %s not supported on fused path", name, info.Type)
 	}
 
 	bytesPerExpert, err := QuantBytes(info.Type, rows, cols)
@@ -337,7 +337,7 @@ func (r *Runner) expertSlice(name string, expert, rows, cols int) (expertWeights
 
 	off := expert * bytesPerExpert
 	if off < 0 || off+bytesPerExpert > len(raw) {
-		return expertWeights{}, fmt.Errorf("gpuresid: %s: эксперт %d вне тензора (%d байт)", name, expert, len(raw))
+		return expertWeights{}, fmt.Errorf("gpuresid: %s: expert %d out of tensor bounds (%d bytes)", name, expert, len(raw))
 	}
 
 	return expertWeights{

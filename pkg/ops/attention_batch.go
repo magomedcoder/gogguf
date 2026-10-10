@@ -18,21 +18,21 @@ func AttentionScoresBatchCausalInto(dst, q, k, v, scores []float32, pastLen, bat
 
 	qDim := nHeads * headDim
 	if len(dst) < batch*qDim || len(q) < batch*qDim {
-		return fmt.Errorf("ops: q/dst слишком короткие")
+		return fmt.Errorf("ops: q/dst too short")
 	}
 
 	total := pastLen + batch
 	kvDim := nKVHeads * headDim
 	if len(k) < total*kvDim || len(v) < total*kvDim {
-		return fmt.Errorf("ops: k/v слишком короткие для seq=%d", total)
+		return fmt.Errorf("ops: k/v too short for seq=%d", total)
 	}
 
 	if len(scores) < total {
-		return fmt.Errorf("ops: scores слишком короткий")
+		return fmt.Errorf("ops: scores too short")
 	}
 
 	if nHeads%nKVHeads != 0 {
-		return fmt.Errorf("ops: nHeads=%d не кратно nKVHeads=%d", nHeads, nKVHeads)
+		return fmt.Errorf("ops: nHeads=%d not divisible by nKVHeads=%d", nHeads, nKVHeads)
 	}
 
 	groupSize := nHeads / nKVHeads

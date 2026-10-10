@@ -14,7 +14,7 @@ func TestIsMistralModel(t *testing.T) {
 		},
 	}
 	if !isMistralModel(r) {
-		t.Fatal("ожидали определение mistral по имени")
+		t.Fatal("expected mistral detection by name")
 	}
 
 	r2 := &format.Reader{
@@ -25,7 +25,7 @@ func TestIsMistralModel(t *testing.T) {
 		},
 	}
 	if !isMistralModel(r2) {
-		t.Fatal("ожидали определение mistral по sliding_window")
+		t.Fatal("expected mistral detection by sliding_window")
 	}
 
 	r3 := &format.Reader{
@@ -35,7 +35,7 @@ func TestIsMistralModel(t *testing.T) {
 		},
 	}
 	if isMistralModel(r3) {
-		t.Fatal("модель llama не должна определяться как mistral")
+		t.Fatal("llama model must not be detected as mistral")
 	}
 
 	r4 := &format.Reader{
@@ -44,7 +44,7 @@ func TestIsMistralModel(t *testing.T) {
 		},
 	}
 	if !isMistralModel(r4) {
-		t.Fatal("ожидали архитектуру mistral")
+		t.Fatal("expected mistral architecture")
 	}
 }
 
@@ -58,7 +58,7 @@ func TestIsMixtralModel(t *testing.T) {
 	}
 
 	if !isMixtralModel(r) {
-		t.Fatal("ожидали Mixtral по expert_count")
+		t.Fatal("expected Mixtral by expert_count")
 	}
 
 	r2 := &format.Reader{
@@ -69,6 +69,6 @@ func TestIsMixtralModel(t *testing.T) {
 	}
 
 	if isMixtralModel(r2) {
-		t.Fatal("Llama 3 не должна определяться как Mixtral")
+		t.Fatal("Llama 3 must not be detected as Mixtral")
 	}
 }

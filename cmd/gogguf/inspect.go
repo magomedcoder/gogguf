@@ -22,8 +22,8 @@ func runInspect(path string) error {
 	}
 	sort.Strings(keys)
 
-	fmt.Printf("Порядок байт: %s\n", byteOrderLabel(r.ByteOrder))
-	fmt.Printf("Версия GGUF: %d\n", r.Version)
+	fmt.Printf("Byte order: %s\n", byteOrderLabel(r.ByteOrder))
+	fmt.Printf("GGUF version: %d\n", r.Version)
 
 	for _, k := range keys {
 		printMetadata(k, r.Metadata[k])
@@ -34,7 +34,7 @@ func runInspect(path string) error {
 		for i, d := range t.Dimensions {
 			dims[i] = fmt.Sprintf("%d", d)
 		}
-		fmt.Printf("Тензор: %s: %s [%s] (%d байт)\n", t.Name, t.Type, strings.Join(dims, "x"), t.Size())
+		fmt.Printf("Tensor: %s: %s [%s] (%d bytes)\n", t.Name, t.Type, strings.Join(dims, "x"), t.Size())
 	}
 
 	return nil
@@ -56,9 +56,9 @@ func byteOrderLabel(o binary.ByteOrder) string {
 func printMetadata(name string, v any) {
 	switch vv := v.(type) {
 	case []uint8, []int8, []uint16, []int16, []uint32, []int32, []float32, []bool, []string, []uint64, []int64, []float64:
-		fmt.Printf("Метаданные: %s: [%T len=%d]\n", name, vv, sliceLen(vv))
+		fmt.Printf("Metadata: %s: [%T len=%d]\n", name, vv, sliceLen(vv))
 	default:
-		fmt.Printf("Метаданные: %s: %v\n", name, v)
+		fmt.Printf("Metadata: %s: %v\n", name, v)
 	}
 }
 

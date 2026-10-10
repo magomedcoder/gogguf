@@ -35,19 +35,19 @@ func TestParseConfigPhi2(t *testing.T) {
 	}
 
 	if cfg.HeadDim != 80 {
-		t.Fatalf("HeadDim = %d, ожидали 80", cfg.HeadDim)
+		t.Fatalf("HeadDim = %d, expected 80", cfg.HeadDim)
 	}
 
 	if cfg.RopeDim != 32 {
-		t.Fatalf("RopeDim = %d, ожидали 32 (partial 0.4)", cfg.RopeDim)
+		t.Fatalf("RopeDim = %d, expected 32 (partial 0.4)", cfg.RopeDim)
 	}
 
 	if cfg.NumKVHeads != 32 {
-		t.Fatalf("NumKVHeads = %d, ожидали 32", cfg.NumKVHeads)
+		t.Fatalf("NumKVHeads = %d, expected 32", cfg.NumKVHeads)
 	}
 
 	if cfg.VocabSize != 51200 {
-		t.Fatalf("VocabSize = %d, ожидали 51200", cfg.VocabSize)
+		t.Fatalf("VocabSize = %d, expected 51200", cfg.VocabSize)
 	}
 }
 
@@ -67,7 +67,7 @@ func TestLayerNormInto(t *testing.T) {
 	}
 
 	if math.Abs(sum) > 1e-4 {
-		t.Fatalf("mean после LN ≈ 0, sum=%v dst=%v", sum, dst)
+		t.Fatalf("mean after LN ≈ 0, sum=%v dst=%v", sum, dst)
 	}
 }
 
@@ -79,10 +79,10 @@ func TestGELUInPlace(t *testing.T) {
 	}
 
 	if x[1] <= 0.8 || x[1] >= 1 {
-		t.Fatalf("GELU(1)=%v вне ожидаемого диапазона", x[1])
+		t.Fatalf("GELU(1)=%v outside expected range", x[1])
 	}
 
 	if x[2] >= 0 {
-		t.Fatalf("GELU(-1)=%v должно быть < 0", x[2])
+		t.Fatalf("GELU(-1)=%v expected to be < 0", x[2])
 	}
 }

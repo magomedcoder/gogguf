@@ -16,26 +16,26 @@ import (
 func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	var modelPath, hfRepo string
-	fs.StringVar(&modelPath, "m", "", "путь к файлу GGUF")
-	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], например Qwen/Qwen3-0.6B-GGUF:Q8_0")
-	fs.StringVar(&hfRepo, "hf-repo", "", "алиас -hf")
-	prompt := fs.String("p", "", "текст промпта")
-	maxTokens := fs.Int("n", 128, "максимум новых токенов")
-	temp := fs.Float64("temp", 0, "температура (0 = greedy)")
-	topK := fs.Int("top-k", 0, "top-k sampling (0 = выключено)")
-	topP := fs.Float64("top-p", 1, "top-p nucleus sampling (1 = выключено)")
-	minP := fs.Float64("min-p", 0, "min-p sampling (0 = выключено)")
-	repeatPenalty := fs.Float64("repeat-penalty", 1, "штраф за повтор токенов (1 = выключено)")
-	repeatLastN := fs.Int("repeat-last-n", 64, "окно истории для repeat-penalty")
-	seed := fs.Uint64("seed", 0, "seed PRNG для sampling")
-	chat := fs.Bool("chat", false, "обернуть промпт в Qwen chat template")
-	thinking := fs.Bool("thinking", false, "Qwen3: включить режим размышления (с --chat)")
-	interactive := fs.Bool("i", false, "интерактивный режим (REPL)")
-	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, сборка: -tags cuda)")
-	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill (Qwen3, работает и с -ngl)")
-	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
-	dev := fs.String("dev", "", "GPU для offload: \"1\" или \"0,1\" (multi-GPU split слоёв)")
-	tensorSplit := fs.String("tensor-split", "", "пропорции слоёв по устройствам с -dev 0,1, например 0.6,0.4")
+	fs.StringVar(&modelPath, "m", "", "path to GGUF file")
+	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], e.g. Qwen/Qwen3-0.6B-GGUF:Q8_0")
+	fs.StringVar(&hfRepo, "hf-repo", "", "alias for -hf")
+	prompt := fs.String("p", "", "prompt text")
+	maxTokens := fs.Int("n", 128, "max new tokens")
+	temp := fs.Float64("temp", 0, "temperature (0 = greedy)")
+	topK := fs.Int("top-k", 0, "top-k sampling (0 = off)")
+	topP := fs.Float64("top-p", 1, "top-p nucleus sampling (1 = off)")
+	minP := fs.Float64("min-p", 0, "min-p sampling (0 = off)")
+	repeatPenalty := fs.Float64("repeat-penalty", 1, "token repeat penalty (1 = off)")
+	repeatLastN := fs.Int("repeat-last-n", 64, "history window for repeat-penalty")
+	seed := fs.Uint64("seed", 0, "PRNG seed for sampling")
+	chat := fs.Bool("chat", false, "wrap prompt in Qwen chat template")
+	thinking := fs.Bool("thinking", false, "Qwen3: enable thinking mode (with --chat)")
+	interactive := fs.Bool("i", false, "interactive mode (REPL)")
+	ngl := fs.Int("ngl", 0, "number of transformer layers on GPU (CUDA, build: -tags cuda)")
+	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 speeds up prefill (Qwen3, works with -ngl)")
+	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
+	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
+	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -48,10 +48,10 @@ func runRun(args []string) error {
 
 	path, err := resolveModelPath(modelPath, hfRepo)
 	if err != nil {
-		return fmt.Errorf("%w\nиспользование: gogguf run -m файл.gguf|-hf owner/repo[:quant] -p \"промпт\" [-n 128] [-i]", err)
+		return fmt.Errorf("%w\nusage: gogguf run -m file.gguf|-hf owner/repo[:quant] -p \"prompt\" [-n 128] [-i]", err)
 	}
 	if !*interactive && *prompt == "" {
-		return fmt.Errorf("укажите промпт через -p или используйте -i")
+		return fmt.Errorf("specify prompt via -p or use -i")
 	}
 
 	engine, err := gogguf.Load(path, gogguf.LoadOptions{
@@ -64,7 +64,7 @@ func runRun(args []string) error {
 		return err
 	}
 	if *ngl > 0 {
-		fmt.Fprintf(os.Stderr, "GPU offload: %d слоёв на %s\n", *ngl, engine.GPUDescription())
+		fmt.Fprintf(os.Stderr, "GPU offload: %d layers on %s\n", *ngl, engine.GPUDescription())
 	}
 	if *nBatch > 1 {
 		fmt.Fprintf(os.Stderr, "n_batch: %d\n", *nBatch)
@@ -128,9 +128,9 @@ func formatChatHistory(meta map[string]any, messages []chattmpl.Message, thinkin
 }
 
 func runInteractive(ctx *gogguf.Context, engine *gogguf.Engine, chat bool, thinking *bool, params gogguf.GenerateParams, in io.Reader, out io.Writer) error {
-	fmt.Fprintln(os.Stderr, "Интерактивный режим. Пустая строка или Ctrl+D - выход")
+	fmt.Fprintln(os.Stderr, "Interactive mode. Empty line or Ctrl+D to exit")
 	if chat {
-		fmt.Fprintln(os.Stderr, "Команды: /clear - сбросить историю диалога")
+		fmt.Fprintln(os.Stderr, "Commands: /clear - reset conversation history")
 	}
 
 	conv := ctx.NewConversation()
@@ -150,7 +150,7 @@ func runInteractive(ctx *gogguf.Context, engine *gogguf.Engine, chat bool, think
 		if chat && line == "/clear" {
 			messages = nil
 			conv.Reset()
-			fmt.Fprintln(os.Stderr, "История очищена")
+			fmt.Fprintln(os.Stderr, "History cleared")
 			continue
 		}
 

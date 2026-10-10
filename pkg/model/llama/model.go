@@ -126,7 +126,7 @@ func (m *Model) SetDebugHooks(h *DebugHooks) {
 // Forward runs forward pass for tokenIDs starting at startPos
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("llama: пустой ввод")
+		return nil, fmt.Errorf("llama: empty input")
 	}
 
 	for i, tok := range tokenIDs {
@@ -157,7 +157,7 @@ func (m *Model) EmbeddingDim() int {
 // Embed - last-token RMSNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("llama: пустой ввод")
+		return nil, fmt.Errorf("llama: empty input")
 	}
 
 	m.ResetCache()

@@ -14,7 +14,7 @@ import (
 func TestMatMulVecGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 	defer b.Close()
 
@@ -32,7 +32,7 @@ func TestMatMulVecGPU(t *testing.T) {
 
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("строка %d: получили %v, ожидали %v", i, got[i], want[i])
+			t.Fatalf("row %d: got %v, expected %v", i, got[i], want[i])
 		}
 	}
 }
@@ -40,7 +40,7 @@ func TestMatMulVecGPU(t *testing.T) {
 func TestMatMulVecCachedGraphReplay(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 	defer b.Close()
 
@@ -74,11 +74,11 @@ func TestMatMulVecCachedGraphReplay(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got1[i]-want[i])) > 1e-4 {
-			t.Fatalf("pass1 строка %d: получили %v, ожидали %v", i, got1[i], want[i])
+			t.Fatalf("pass1 row %d: got %v, expected %v", i, got1[i], want[i])
 		}
 
 		if math.Abs(float64(got2[i]-want[i])) > 1e-4 {
-			t.Fatalf("pass2 строка %d: получили %v, ожидали %v", i, got2[i], want[i])
+			t.Fatalf("pass2 row %d: got %v, expected %v", i, got2[i], want[i])
 		}
 	}
 
@@ -99,12 +99,12 @@ func TestMatMulVecCachedGraphReplay(t *testing.T) {
 	}
 	for i := range want2 {
 		if math.Abs(float64(got3[i]-want2[i])) > 1e-4 {
-			t.Fatalf("vec2 строка %d: получили %v, ожидали %v", i, got3[i], want2[i])
+			t.Fatalf("vec2 row %d: got %v, expected %v", i, got3[i], want2[i])
 		}
 	}
 
 	if !b.hasGraphs {
-		t.Log("CUDA Graphs API недоступен - используется pool + обычный launch")
+		t.Log("CUDA Graphs API unavailable - using pool + regular launch")
 	}
 }
 
@@ -112,7 +112,7 @@ func TestMatMulVecCachedGraphReplay(t *testing.T) {
 func TestMatMulVecCachedKernelOnlySameVec(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 	defer b.Close()
 
@@ -175,7 +175,7 @@ func TestMatMulVecCachedKernelOnlySameVec(t *testing.T) {
 func BenchmarkMatMulVecCachedGPU(b *testing.B) {
 	be, err := Open()
 	if err != nil {
-		b.Skip("CUDA недоступна:", err)
+		b.Skip("CUDA unavailable:", err)
 	}
 	defer be.Close()
 
@@ -206,7 +206,7 @@ func BenchmarkMatMulVecCachedGPU(b *testing.B) {
 func TestMatMulVecQ8_0GPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 	defer b.Close()
 
@@ -242,7 +242,7 @@ func TestMatMulVecQ8_0GPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got[i]-want[i])) > 1e-3 {
-			t.Fatalf("строка %d: получили %v, ожидали %v", i, got[i], want[i])
+			t.Fatalf("row %d: got %v, expected %v", i, got[i], want[i])
 		}
 	}
 
@@ -254,7 +254,7 @@ func TestMatMulVecQ8_0GPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got2[i]-want[i])) > 1e-3 {
-			t.Fatalf("replay строка %d: получили %v, ожидали %v", i, got2[i], want[i])
+			t.Fatalf("replay row %d: got %v, expected %v", i, got2[i], want[i])
 		}
 	}
 }
@@ -262,12 +262,12 @@ func TestMatMulVecQ8_0GPU(t *testing.T) {
 func TestMatMulVecQ4_0GPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 	defer b.Close()
 
 	if !b.hasQ4 {
-		t.Skip("CUDA q4_0 kernel недоступен")
+		t.Skip("CUDA q4_0 kernel unavailable")
 	}
 
 	rows, cols := 2, 32
@@ -304,7 +304,7 @@ func TestMatMulVecQ4_0GPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got[i]-want[i])) > 1e-3 {
-			t.Fatalf("строка %d: получили %v, ожидали %v", i, got[i], want[i])
+			t.Fatalf("row %d: got %v, expected %v", i, got[i], want[i])
 		}
 	}
 
@@ -315,7 +315,7 @@ func TestMatMulVecQ4_0GPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got2[i]-want[i])) > 1e-3 {
-			t.Fatalf("replay строка %d: получили %v, ожидали %v", i, got2[i], want[i])
+			t.Fatalf("replay row %d: got %v, expected %v", i, got2[i], want[i])
 		}
 	}
 }
@@ -323,12 +323,12 @@ func TestMatMulVecQ4_0GPU(t *testing.T) {
 func TestMatMulVecQ4_KGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 	defer b.Close()
 
 	if !b.hasQ4K {
-		t.Skip("CUDA q4_k kernel недоступен")
+		t.Skip("CUDA q4_k kernel unavailable")
 	}
 
 	rows, cols := 2, quant.QK_K
@@ -365,7 +365,7 @@ func TestMatMulVecQ4_KGPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got[i]-want[i])) > 1e-3 {
-			t.Fatalf("строка %d: получили %v, ожидали %v", i, got[i], want[i])
+			t.Fatalf("row %d: got %v, expected %v", i, got[i], want[i])
 		}
 	}
 
@@ -376,7 +376,7 @@ func TestMatMulVecQ4_KGPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got2[i]-want[i])) > 1e-3 {
-			t.Fatalf("replay строка %d: получили %v, ожидали %v", i, got2[i], want[i])
+			t.Fatalf("replay row %d: got %v, expected %v", i, got2[i], want[i])
 		}
 	}
 }
@@ -384,12 +384,12 @@ func TestMatMulVecQ4_KGPU(t *testing.T) {
 func TestMatMulVecQ5_KGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 	defer b.Close()
 
 	if !b.hasQ5K {
-		t.Skip("CUDA q5_k kernel недоступен")
+		t.Skip("CUDA q5_k kernel unavailable")
 	}
 
 	rows, cols := 2, quant.QK_K
@@ -430,7 +430,7 @@ func TestMatMulVecQ5_KGPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got[i]-want[i])) > 1e-3 {
-			t.Fatalf("строка %d: получили %v, ожидали %v", i, got[i], want[i])
+			t.Fatalf("row %d: got %v, expected %v", i, got[i], want[i])
 		}
 	}
 
@@ -441,7 +441,7 @@ func TestMatMulVecQ5_KGPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got2[i]-want[i])) > 1e-3 {
-			t.Fatalf("replay строка %d: получили %v, ожидали %v", i, got2[i], want[i])
+			t.Fatalf("replay row %d: got %v, expected %v", i, got2[i], want[i])
 		}
 	}
 }
@@ -449,12 +449,12 @@ func TestMatMulVecQ5_KGPU(t *testing.T) {
 func TestMatMulVecQ6_KGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 	defer b.Close()
 
 	if !b.hasQ6K {
-		t.Skip("CUDA q6_k kernel недоступен")
+		t.Skip("CUDA q6_k kernel unavailable")
 	}
 
 	rows, cols := 2, quant.QK_K
@@ -494,7 +494,7 @@ func TestMatMulVecQ6_KGPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got[i]-want[i])) > 1e-3 {
-			t.Fatalf("строка %d: получили %v, ожидали %v", i, got[i], want[i])
+			t.Fatalf("row %d: got %v, expected %v", i, got[i], want[i])
 		}
 	}
 
@@ -505,7 +505,7 @@ func TestMatMulVecQ6_KGPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(got2[i]-want[i])) > 1e-3 {
-			t.Fatalf("replay строка %d: получили %v, ожидали %v", i, got2[i], want[i])
+			t.Fatalf("replay row %d: got %v, expected %v", i, got2[i], want[i])
 		}
 	}
 }
@@ -513,11 +513,11 @@ func TestMatMulVecQ6_KGPU(t *testing.T) {
 func TestRMSNormGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 
 	if !b.hasRMS {
-		t.Skip("CUDA rmsnorm kernel недоступен")
+		t.Skip("CUDA rmsnorm kernel unavailable")
 	}
 
 	defer b.Close()
@@ -536,7 +536,7 @@ func TestRMSNormGPU(t *testing.T) {
 
 	for i := range want {
 		if math.Abs(float64(dst[i]-want[i])) > 1e-4 {
-			t.Fatalf("элемент %d: получили %v, ожидали %v", i, dst[i], want[i])
+			t.Fatalf("element %d: got %v, expected %v", i, dst[i], want[i])
 		}
 	}
 }

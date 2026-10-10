@@ -86,14 +86,14 @@ func (g GGML) String() string {
 		return name
 	}
 
-	return fmt.Sprintf("неизвестный GGML(%d)", g)
+	return fmt.Sprintf("unknown GGML(%d)", g)
 }
 
 // dataSize computes tensor data size in bytes
 func (g GGML) dataSize(dimensions []uint64) int64 {
 	block, ok := ggmlBlocks[g]
 	if !ok {
-		panic("неизвестный тип: " + g.String())
+		panic("unknown type: " + g.String())
 	}
 
 	values := uint64(1)

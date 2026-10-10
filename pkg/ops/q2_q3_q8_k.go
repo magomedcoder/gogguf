@@ -17,17 +17,17 @@ func matMulVecKQuant(
 	}
 
 	if cols%qk != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, qk)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, qk)
 	}
 
 	blocksPerRow := cols / qk
 	want := rows * blocksPerRow * blockSize
 	if len(raw) < want {
-		return fmt.Errorf("ops: %s matrix слишком короткая", name)
+		return fmt.Errorf("ops: %s matrix too short", name)
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -100,7 +100,7 @@ func EmbeddingQ2_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ2_KInto(dst, raw[off:off+rowBytes], dim)
@@ -114,7 +114,7 @@ func EmbeddingQ3_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ3_KInto(dst, raw[off:off+rowBytes], dim)
@@ -128,7 +128,7 @@ func EmbeddingQ8_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ8_KInto(dst, raw[off:off+rowBytes], dim)

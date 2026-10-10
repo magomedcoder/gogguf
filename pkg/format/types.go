@@ -42,7 +42,7 @@ func (t Type) String() string {
 	if name, ok := typeNames[t]; ok {
 		return name
 	}
-	return fmt.Sprintf("неизвестный-тип-%d", t)
+	return fmt.Sprintf("unknown-type-%d", t)
 }
 
 // Filetype - type of majority of tensors in file
@@ -69,23 +69,23 @@ const (
 )
 
 var filetypeNames = map[Filetype]string{
-	AllF32:            "все F32",
-	MostlyF16:         "в основном F16",
-	MostlyQ4_0:        "в основном Q4_0",
-	MostlyQ4_1:        "в основном Q4_1",
-	MostlyQ4_1SomeF16: "в основном Q4_1, частично F16",
-	MostlyQ8_0:        "в основном Q8_0",
-	MostlyQ5_0:        "в основном Q5_0",
-	MostlyQ5_1:        "в основном Q5_1",
-	MostlyQ2_K:        "в основном Q2_K",
-	MostlyQ3_KS:       "в основном Q3_K - малый",
-	MostlyQ3_KM:       "в основном Q3_K - средний",
-	MostlyQ3_KL:       "в основном Q3_K - большой",
-	MostlyQ4_KS:       "в основном Q4_K - малый",
-	MostlyQ4_KM:       "в основном Q4_K - средний",
-	MostlyQ5_KS:       "в основном Q5_K - малый",
-	MostlyQ5_KM:       "в основном Q5_K - средний",
-	MostlyQ6_K:        "в основном Q6_K",
+	AllF32:            "all F32",
+	MostlyF16:         "mostly F16",
+	MostlyQ4_0:        "mostly Q4_0",
+	MostlyQ4_1:        "mostly Q4_1",
+	MostlyQ4_1SomeF16: "mostly Q4_1, partially F16",
+	MostlyQ8_0:        "mostly Q8_0",
+	MostlyQ5_0:        "mostly Q5_0",
+	MostlyQ5_1:        "mostly Q5_1",
+	MostlyQ2_K:        "mostly Q2_K",
+	MostlyQ3_KS:       "mostly Q3_K - small",
+	MostlyQ3_KM:       "mostly Q3_K - medium",
+	MostlyQ3_KL:       "mostly Q3_K - large",
+	MostlyQ4_KS:       "mostly Q4_K - small",
+	MostlyQ4_KM:       "mostly Q4_K - medium",
+	MostlyQ5_KS:       "mostly Q5_K - small",
+	MostlyQ5_KM:       "mostly Q5_K - medium",
+	MostlyQ6_K:        "mostly Q6_K",
 }
 
 // String returns file quantization type description
@@ -93,5 +93,5 @@ func (f Filetype) String() string {
 	if name, ok := filetypeNames[f]; ok {
 		return name
 	}
-	return fmt.Sprintf("неизвестный filetype(%d)", f)
+	return fmt.Sprintf("unknown filetype(%d)", f)
 }

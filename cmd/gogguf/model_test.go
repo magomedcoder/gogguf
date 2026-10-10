@@ -10,11 +10,11 @@ func TestResolveModelPath(t *testing.T) {
 
 	_, err = resolveModelPath("/tmp/m.gguf", "owner/repo")
 	if err == nil {
-		t.Fatal("ожидалась ошибка при -m и -hf вместе")
+		t.Fatal("expected error when -m and -hf together")
 	}
 
 	_, err = resolveModelPath("", "")
 	if err == nil {
-		t.Fatal("ожидалась ошибка без источника")
+		t.Fatal("expected error without model source")
 	}
 }

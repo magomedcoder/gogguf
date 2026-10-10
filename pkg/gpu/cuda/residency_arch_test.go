@@ -19,7 +19,7 @@ func TestFFNGeGLUQuantQ8(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasGeGLU {
-		t.Skip("нет geglu kernel")
+		t.Skip("no geglu kernel")
 	}
 
 	embd, ffn := 64, 128
@@ -69,7 +69,7 @@ func TestQKVRoPENormWithoutQKNorm(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasAttn || !b.hasRoPENorm || !b.hasRMS {
-		t.Skip("нет QKV/rope_norm/rmsnorm kernels")
+		t.Skip("no QKV/rope_norm/rmsnorm kernels")
 	}
 
 	embd, nHeads, nKVHeads, headDim := 64, 4, 2, 16

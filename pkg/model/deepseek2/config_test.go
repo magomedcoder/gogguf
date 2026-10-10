@@ -53,7 +53,7 @@ func TestParseConfigMLA(t *testing.T) {
 	}
 
 	if cfg.QLoraRank != 0 {
-		t.Fatalf("для lite ожидали QLora=0, получили %d", cfg.QLoraRank)
+		t.Fatalf("for lite expected QLora=0, got %d", cfg.QLoraRank)
 	}
 
 	if cfg.DenseLeadLayers != 1 || cfg.ExpertCount != 64 {
@@ -67,7 +67,7 @@ func TestParseConfigMLA(t *testing.T) {
 	// with YaRN factor=40 scale must differ from usual 1/sqrt(192)
 	plain := float32(1 / math.Sqrt(192))
 	if math.Abs(float64(cfg.AttnScale-plain)) < 1e-6 {
-		t.Fatalf("ожидали YaRN scale ≠ plain, получили %v", cfg.AttnScale)
+		t.Fatalf("expected YaRN scale ≠ plain, got %v", cfg.AttnScale)
 	}
 }
 
@@ -90,6 +90,6 @@ func TestParseConfigRequiresKVLora(t *testing.T) {
 	}
 
 	if _, err := deepseek2.ParseConfig(r); err == nil {
-		t.Fatal("ожидали ошибку без kv_lora_rank")
+		t.Fatal("expected error without kv_lora_rank")
 	}
 }

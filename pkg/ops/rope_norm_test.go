@@ -42,6 +42,6 @@ func TestRoPENormDiffersFromNeoX(t *testing.T) {
 	}
 
 	if same {
-		t.Fatal("ожидали различие между Norm и NeoX RoPE")
+		t.Fatal("want difference between Norm and NeoX RoPE")
 	}
 }

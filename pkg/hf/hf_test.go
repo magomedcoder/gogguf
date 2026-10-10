@@ -26,7 +26,7 @@ func TestSplitRepoTag(t *testing.T) {
 		spec, err := SplitRepoTag(tt.in)
 		if tt.wantErr {
 			if err == nil {
-				t.Fatalf("%q: ожидалась ошибка", tt.in)
+				t.Fatalf("%q: expected error", tt.in)
 			}
 			continue
 		}
@@ -46,13 +46,13 @@ func TestValidRepoID(t *testing.T) {
 	bad := []string{"", "a", "a/b/c", "/a/b", "a/b/", "a//b", "a /b"}
 	for _, s := range ok {
 		if !ValidRepoID(s) {
-			t.Fatalf("ожидался валидный id: %q", s)
+			t.Fatalf("expected valid id: %q", s)
 		}
 	}
 
 	for _, s := range bad {
 		if ValidRepoID(s) {
-			t.Fatalf("ожидался невалидный id: %q", s)
+			t.Fatalf("expected invalid id: %q", s)
 		}
 	}
 }
@@ -93,7 +93,7 @@ func TestFindBestModel(t *testing.T) {
 
 	got, ok = FindBestModel(files, "Q5_K_M")
 	if ok {
-		t.Fatalf("отсутствующий тег не должен матчиться: %+v", got)
+		t.Fatalf("missing tag must not match: %+v", got)
 	}
 
 	onlyQ8 := []FileInfo{
@@ -109,15 +109,15 @@ func TestFindBestModel(t *testing.T) {
 
 func TestIsModelGGUF(t *testing.T) {
 	if !IsModelGGUF("foo/bar-Q8_0.gguf") {
-		t.Fatal("ожидался model gguf")
+		t.Fatal("expected model gguf")
 	}
 
 	if IsModelGGUF("mmproj-Q8_0.gguf") {
-		t.Fatal("mmproj не должен считаться моделью")
+		t.Fatal("mmproj must not be treated as model")
 	}
 
 	if IsModelGGUF("readme.md") {
-		t.Fatal("не-gguf")
+		t.Fatal("non-gguf")
 	}
 }
 

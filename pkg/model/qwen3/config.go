@@ -102,7 +102,7 @@ func parseConfigWithPrefix(r *format.Reader, prefix string) (Config, error) {
 	if heads*headDim != emb {
 		qOut := heads * headDim
 		if qOut <= 0 {
-			return Config{}, fmt.Errorf("qwen3: некорректный head_dim=%d", headDim)
+			return Config{}, fmt.Errorf("qwen3: invalid head_dim=%d", headDim)
 		}
 		_ = qOut
 	}
@@ -188,7 +188,7 @@ func vocabSize(r *format.Reader, emb int) (int, error) {
 	}
 
 	if len(info.Dimensions) != 2 {
-		return 0, fmt.Errorf("qwen3: token_embd.weight: ожидается 2D")
+		return 0, fmt.Errorf("qwen3: token_embd.weight: expected 2D")
 	}
 
 	a, b := int(info.Dimensions[0]), int(info.Dimensions[1])
@@ -200,5 +200,5 @@ func vocabSize(r *format.Reader, emb int) (int, error) {
 		return a, nil
 	}
 
-	return 0, fmt.Errorf("qwen3: token_embd.weight %v не содержит embedding_length=%d", info.Dimensions, emb)
+	return 0, fmt.Errorf("qwen3: token_embd.weight %v does not contain embedding_length=%d", info.Dimensions, emb)
 }

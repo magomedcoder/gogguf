@@ -13,7 +13,7 @@ const BlockQ2_KSize = 84
 // layout: scales[16], qs[64], d(fp16), dmin(fp16)
 func DequantBlockQ2_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ2_KSize {
-		return [QK_K]float32{}, fmt.Errorf("quant: блок Q2_K слишком короткий: %d байт", len(block))
+		return [QK_K]float32{}, fmt.Errorf("quant: Q2_K block too short: %d bytes", len(block))
 	}
 
 	scales := block[0:16]
@@ -74,12 +74,12 @@ func DequantQ2_KInto(dst []float32, data []byte, n int) error {
 	}
 
 	if len(dst) < n {
-		return fmt.Errorf("quant: dst слишком короткий")
+		return fmt.Errorf("quant: dst too short")
 	}
 
 	want := (n + QK_K - 1) / QK_K * BlockQ2_KSize
 	if len(data) < want {
-		return fmt.Errorf("quant: данных Q2_K недостаточно: нужно %d, есть %d", want, len(data))
+		return fmt.Errorf("quant: insufficient Q2_K data: need %d, have %d", want, len(data))
 	}
 
 	for i := 0; i < n; i += QK_K {
@@ -97,7 +97,7 @@ func DequantQ2_KInto(dst []float32, data []byte, n int) error {
 // DotBlockQ2_K - dot product of Q2_K block with 256 float32
 func DotBlockQ2_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
-		return 0, fmt.Errorf("quant: вектор короче блока Q2_K")
+		return 0, fmt.Errorf("quant: vector shorter than Q2_K")
 	}
 
 	w, err := DequantBlockQ2_K(block)
@@ -120,7 +120,7 @@ const BlockQ3_KSize = 110
 // layout: hmask[32], qs[64], scales[12], d(fp16)
 func DequantBlockQ3_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ3_KSize {
-		return [QK_K]float32{}, fmt.Errorf("quant: блок Q3_K слишком короткий: %d байт", len(block))
+		return [QK_K]float32{}, fmt.Errorf("quant: Q3_K block too short: %d bytes", len(block))
 	}
 
 	hm := block[0:32]
@@ -215,12 +215,12 @@ func DequantQ3_KInto(dst []float32, data []byte, n int) error {
 	}
 
 	if len(dst) < n {
-		return fmt.Errorf("quant: dst слишком короткий")
+		return fmt.Errorf("quant: dst too short")
 	}
 
 	want := (n + QK_K - 1) / QK_K * BlockQ3_KSize
 	if len(data) < want {
-		return fmt.Errorf("quant: данных Q3_K недостаточно: нужно %d, есть %d", want, len(data))
+		return fmt.Errorf("quant: insufficient Q3_K data: need %d, have %d", want, len(data))
 	}
 
 	for i := 0; i < n; i += QK_K {
@@ -238,7 +238,7 @@ func DequantQ3_KInto(dst []float32, data []byte, n int) error {
 // DotBlockQ3_K - dot product of Q3_K block with 256 float32
 func DotBlockQ3_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
-		return 0, fmt.Errorf("quant: вектор короче блока Q3_K")
+		return 0, fmt.Errorf("quant: vector shorter than Q3_K")
 	}
 
 	w, err := DequantBlockQ3_K(block)
@@ -261,7 +261,7 @@ const BlockQ8_KSize = 292
 // layout: d(float32), qs[256]int8, bsums[16]int16
 func DequantBlockQ8_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ8_KSize {
-		return [QK_K]float32{}, fmt.Errorf("quant: блок Q8_K слишком короткий: %d байт", len(block))
+		return [QK_K]float32{}, fmt.Errorf("quant: Q8_K block too short: %d bytes", len(block))
 	}
 
 	d := math.Float32frombits(binary.LittleEndian.Uint32(block[0:4]))
@@ -296,12 +296,12 @@ func DequantQ8_KInto(dst []float32, data []byte, n int) error {
 	}
 
 	if len(dst) < n {
-		return fmt.Errorf("quant: dst слишком короткий")
+		return fmt.Errorf("quant: dst too short")
 	}
 
 	want := (n + QK_K - 1) / QK_K * BlockQ8_KSize
 	if len(data) < want {
-		return fmt.Errorf("quant: данных Q8_K недостаточно: нужно %d, есть %d", want, len(data))
+		return fmt.Errorf("quant: insufficient Q8_K data: need %d, have %d", want, len(data))
 	}
 
 	for i := 0; i < n; i += QK_K {
@@ -319,7 +319,7 @@ func DequantQ8_KInto(dst []float32, data []byte, n int) error {
 // DotBlockQ8_K - dot product of Q8_K block with 256 float32
 func DotBlockQ8_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
-		return 0, fmt.Errorf("quant: вектор короче блока Q8_K")
+		return 0, fmt.Errorf("quant: vector shorter than Q8_K")
 	}
 
 	w, err := DequantBlockQ8_K(block)

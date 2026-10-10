@@ -13,12 +13,12 @@ import (
 // runDumpLogits writes full-vocab logits after prefill (.bin + .json).
 func runDumpLogits(args []string) error {
 	fs := flag.NewFlagSet("dumplogits", flag.ContinueOnError)
-	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")
-	prompt := fs.String("p", "Hello", "промпт")
+	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "path to GGUF")
+	prompt := fs.String("p", "Hello", "prompt")
 	chatMode := fs.Bool("chat", false, "chat template")
-	out := fs.String("o", "", "префикс выхода (без расширения); по умолчанию рядом с моделью")
-	ngl := fs.Int("ngl", 0, "слоёв на GPU")
-	topN := fs.Int("top", 5, "top-N в JSON meta")
+	out := fs.String("o", "", "output prefix (no extension); default next to model")
+	ngl := fs.Int("ngl", 0, "layers on GPU")
+	topN := fs.Int("top", 5, "top-N in JSON meta")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -88,7 +88,7 @@ func runDumpLogits(args []string) error {
 		return err
 	}
 
-	fmt.Printf("записано %s.bin / %s.json (vocab=%d greedy=%d)\n", prefix, prefix, len(logits), meta.Greedy)
+	fmt.Printf("wrote %s.bin / %s.json (vocab=%d greedy=%d)\n", prefix, prefix, len(logits), meta.Greedy)
 
 	return nil
 }

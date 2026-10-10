@@ -164,7 +164,7 @@ func (req *chatCompletionRequest) samplerConfig() sampler.Config {
 
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "метод не разрешен", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -175,7 +175,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(req.Messages) == 0 {
-		http.Error(w, "messages обязателен", http.StatusBadRequest)
+		http.Error(w, "messages is required", http.StatusBadRequest)
 		return
 	}
 
@@ -291,7 +291,7 @@ func trimStopSuffix(text string, stops []string) string {
 func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming не поддерживается", http.StatusInternalServerError)
+		http.Error(w, "streaming is not supported", http.StatusInternalServerError)
 		return
 	}
 

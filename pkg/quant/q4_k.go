@@ -24,7 +24,7 @@ func getScaleMinK4(j int, scales []byte) (uint8, uint8) {
 // DequantBlockQ4_K dequantizes one Q4_K block to 256 float32
 func DequantBlockQ4_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ4_KSize {
-		return [QK_K]float32{}, fmt.Errorf("quant: блок Q4_K слишком короткий: %d байт", len(block))
+		return [QK_K]float32{}, fmt.Errorf("quant: Q4_K block too short: %d bytes", len(block))
 	}
 
 	d := FP16ToFP32(binary.LittleEndian.Uint16(block[0:2]))
@@ -81,12 +81,12 @@ func DequantQ4_KInto(dst []float32, data []byte, n int) error {
 	}
 
 	if len(dst) < n {
-		return fmt.Errorf("quant: dst слишком короткий")
+		return fmt.Errorf("quant: dst too short")
 	}
 
 	want := (n + QK_K - 1) / QK_K * BlockQ4_KSize
 	if len(data) < want {
-		return fmt.Errorf("quant: данных Q4_K недостаточно: нужно %d, есть %d", want, len(data))
+		return fmt.Errorf("quant: insufficient Q4_K data: need %d, have %d", want, len(data))
 	}
 
 	for i := 0; i < n; i += QK_K {
@@ -104,7 +104,7 @@ func DequantQ4_KInto(dst []float32, data []byte, n int) error {
 // DotBlockQ4_K - dot product of Q4_K block with 256 float32
 func DotBlockQ4_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
-		return 0, fmt.Errorf("quant: вектор короче блока Q4_K")
+		return 0, fmt.Errorf("quant: vector shorter than Q4_K")
 	}
 
 	w, err := DequantBlockQ4_K(block)

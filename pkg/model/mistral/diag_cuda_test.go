@@ -61,7 +61,7 @@ func TestDiagLayer0Matmuls(t *testing.T) {
 		case format.GgmlQ6_K:
 			err = ops.MatMulVecQ6_KInto(raw, rows, cols, vec, want)
 		default:
-			t.Logf("%s: тип %s пропущен", name, info.Type)
+			t.Logf("%s: type %s skipped", name, info.Type)
 			continue
 		}
 

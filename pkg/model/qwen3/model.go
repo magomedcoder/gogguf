@@ -243,7 +243,7 @@ func (m *Model) SetDebugHooks(h *DebugHooks) {
 // Returns logits for the last token [vocabSize]
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("qwen3: пустой ввод")
+		return nil, fmt.Errorf("qwen3: empty input")
 	}
 
 	// n_batch>1: multi-token prefill; with -ngl chunk matmul/attn on GPU (loop MatMulVec*Cached + AttentionScoresKV), else CPU GEMM. MoE/debug - serial.
@@ -285,7 +285,7 @@ func (m *Model) EmbeddingDim() int {
 // Embed - last-token RMSNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("qwen3: пустой ввод")
+		return nil, fmt.Errorf("qwen3: empty input")
 	}
 	m.ResetCache()
 	defer m.ResetCache()
@@ -511,11 +511,11 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	m.residency = false
 
 	if !m.gpu.HiddenActive() {
-		return fmt.Errorf("qwen3: слой %d на GPU: %w (hidden state потерян)", layer, cause)
+		return fmt.Errorf("qwen3: layer %d on GPU: %w (hidden state lost)", layer, cause)
 	}
 
 	if err := m.gpu.HiddenDownload(m.scratch.x[:m.cfg.EmbeddingDim]); err != nil {
-		return fmt.Errorf("qwen3: слой %d на GPU: %w (откат на host: %v)", layer, cause, err)
+		return fmt.Errorf("qwen3: layer %d on GPU: %w (fallback to host: %v)", layer, cause, err)
 	}
 
 	return nil

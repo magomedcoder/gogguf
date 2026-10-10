@@ -91,7 +91,7 @@ func (conv *Conversation) startGeneration(prompt string) (*GenerationSession, er
 	}
 
 	if ctxLen := conv.ctx.engine.ContextLength(); ctxLen > 0 && len(promptTokens) > ctxLen {
-		return nil, fmt.Errorf("runtime: промпт %d токенов превышает context_length=%d", len(promptTokens), ctxLen)
+		return nil, fmt.Errorf("runtime: prompt %d tokens exceeds context_length=%d", len(promptTokens), ctxLen)
 	}
 
 	cached := len(conv.tokens)
@@ -116,7 +116,7 @@ func (conv *Conversation) startGeneration(prompt string) (*GenerationSession, er
 
 		conv.tokens = append(conv.tokens, newTokens...)
 	} else if cached == 0 {
-		return nil, fmt.Errorf("runtime: пустой промпт")
+		return nil, fmt.Errorf("runtime: empty prompt")
 	} else {
 		last := conv.tokens[len(conv.tokens)-1]
 		logits, err = conv.ctx.engine.Model.Forward([]int{last}, len(conv.tokens)-1)

@@ -21,7 +21,7 @@ func TestAppendNAdvanceN(t *testing.T) {
 	}
 
 	if kv.KLayer(0)[4] != 5 || kv.VLayer(0)[8] != 90 {
-		t.Fatalf("неверные значения после AppendN")
+		t.Fatalf("wrong values after AppendN")
 	}
 
 	kv.AdvanceN(3)

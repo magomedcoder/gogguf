@@ -44,11 +44,11 @@ func MetaValue[T any](metadata Metadata, name string) (T, error) {
 	var zero T
 	v, found := metadata[name]
 	if !found {
-		return zero, fmt.Errorf("значение метаданных %q не найдено", name)
+		return zero, fmt.Errorf("metadata value %q not found", name)
 	}
 
 	if _, ok := v.(T); !ok {
-		return zero, fmt.Errorf("значение метаданных %q не является типом %T, фактический тип: %T", name, zero, v)
+		return zero, fmt.Errorf("metadata value %q is not type %T, actual type: %T", name, zero, v)
 	}
 
 	return v.(T), nil
@@ -61,7 +61,7 @@ func MetaValue[T any](metadata Metadata, name string) (T, error) {
 func MetaValueNumber[T ~int | ~uint8 | ~int8 | ~uint16 | ~int16 | ~uint32 | ~int32 | ~uint64 | ~int64 | ~float32 | ~float64](metadata Metadata, name string) (T, error) {
 	v, found := metadata[name]
 	if !found {
-		return 0, fmt.Errorf("значение метаданных %q не найдено", name)
+		return 0, fmt.Errorf("metadata value %q not found", name)
 	}
 
 	switch vv := v.(type) {
@@ -99,6 +99,6 @@ func MetaValueNumber[T ~int | ~uint8 | ~int8 | ~uint16 | ~int16 | ~uint32 | ~int
 		return T(vv), nil
 
 	default:
-		return 0, fmt.Errorf("значение метаданных %q не является числом, тип: %T", name, v)
+		return 0, fmt.Errorf("metadata value %q is not a number, type: %T", name, v)
 	}
 }

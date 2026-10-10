@@ -40,7 +40,7 @@ func FromGGUF(r *format.Reader) (*Tokenizer, error) {
 	case "gpt2", "llama":
 		return loadBPE(r)
 	default:
-		return nil, fmt.Errorf("tokenizer: модель %q не поддерживается", model)
+		return nil, fmt.Errorf("tokenizer: model %q not supported", model)
 	}
 }
 
@@ -60,7 +60,7 @@ func loadBPE(r *format.Reader) (*Tokenizer, error) {
 		for rank, m := range raw {
 			parts := strings.SplitN(m, " ", 2)
 			if len(parts) != 2 {
-				return nil, fmt.Errorf("tokenizer: некорректный merge %q", m)
+				return nil, fmt.Errorf("tokenizer: invalid merge %q", m)
 			}
 			merges[mergePair{parts[0], parts[1]}] = rank
 		}
@@ -106,7 +106,7 @@ func (t *Tokenizer) encodeSegment(text string) ([]int, error) {
 		for _, sym := range t.bpe(word) {
 			id, ok := t.id[sym]
 			if !ok {
-				return nil, fmt.Errorf("tokenizer: неизвестный токен %q", sym)
+				return nil, fmt.Errorf("tokenizer: unknown token %q", sym)
 			}
 			out = append(out, id)
 		}

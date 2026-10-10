@@ -12,11 +12,11 @@ func runCompareLayers(args []string) error {
 	fs := flag.NewFlagSet("comparelayers", flag.ContinueOnError)
 	aPath := fs.String("a", "", "dump A")
 	bPath := fs.String("b", "", "dump B")
-	modelPath := fs.String("m", "", "модель: CPU vs GPU")
-	prompt := fs.String("p", "Hello", "промпт для -m")
+	modelPath := fs.String("m", "", "model: CPU vs GPU")
+	prompt := fs.String("p", "Hello", "prompt for -m")
 	chatMode := fs.Bool("chat", false, "chat template")
-	ngl := fs.Int("ngl", -1, "слоёв GPU (-1 = все)")
-	tol := fs.Float64("tol", 1e-4, "допуск |diff|")
+	ngl := fs.Int("ngl", -1, "GPU layers (-1 = all)")
+	tol := fs.Float64("tol", 1e-4, "tolerance |diff|")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -46,7 +46,7 @@ func runCompareLayers(args []string) error {
 
 		_, b, err = debug.LoadLayersDump(*bPath)
 	default:
-		return fmt.Errorf("укажите -a/-b или -m")
+		return fmt.Errorf("specify -a/-b or -m")
 	}
 
 	if err != nil {
@@ -75,10 +75,10 @@ func runCompareLayers(args []string) error {
 	fmt.Printf("layers: n=%d worst_max_abs=%.6g@layer%d total_over_tol=%d (tol=%g)\n", len(layers), worst, worstI, totalOver, *tol)
 
 	if embed.OverTol > 0 || totalOver > 0 {
-		return fmt.Errorf("FAIL: hidden states вне допуска")
+		return fmt.Errorf("FAIL: hidden states outside tolerance")
 	}
 
-	fmt.Println("OK: layer hidden в допуске")
+	fmt.Println("OK: layer hidden within tolerance")
 
 	return nil
 }

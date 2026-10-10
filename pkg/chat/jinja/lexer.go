@@ -158,7 +158,7 @@ func findClose(src string, start int, end string) (after int, trimRight bool, in
 		}
 	}
 
-	return 0, false, 0, errf("незакрытый тег")
+	return 0, false, 0, errf("unclosed tag")
 }
 
 func lexWords(src string, stmt bool) ([]token, error) {
@@ -238,14 +238,14 @@ func lexWords(src string, stmt bool) ([]token, error) {
 				out = append(out, token{typ: tokAssign})
 				i++
 			} else {
-				return nil, errf("неожиданный '='")
+				return nil, errf("unexpected '='")
 			}
 		case '!':
 			if i+1 < len(src) && src[i+1] == '=' {
 				out = append(out, token{typ: tokNe})
 				i += 2
 			} else {
-				return nil, errf("неожиданный '!'")
+				return nil, errf("unexpected '!'")
 			}
 		case '<':
 			if i+1 < len(src) && src[i+1] == '=' {
@@ -295,7 +295,7 @@ func lexWords(src string, stmt bool) ([]token, error) {
 				sb.WriteByte(src[i])
 				i++
 			}
-			return nil, errf("незакрытая строка")
+			return nil, errf("unclosed string")
 		default:
 			if src[i] >= '0' && src[i] <= '9' {
 				j := i
@@ -366,7 +366,7 @@ func lexWords(src string, stmt bool) ([]token, error) {
 					})
 				}
 			} else {
-				return nil, errf("неожиданный символ %q", string(src[i]))
+				return nil, errf("unexpected character %q", string(src[i]))
 			}
 		}
 	next:

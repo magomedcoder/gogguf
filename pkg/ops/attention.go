@@ -14,15 +14,15 @@ func AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHead
 // AttentionScoresIntoSoftcap like AttentionScoresInto; softcap>0 -> softcap*tanh(score/softcap) (Gemma2)
 func AttentionScoresIntoSoftcap(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int, softcap float32) error {
 	if len(dst) < nHeads*headDim {
-		return fmt.Errorf("ops: dst слишком короткий")
+		return fmt.Errorf("ops: dst too short")
 	}
 
 	if len(scores) < seqLen {
-		return fmt.Errorf("ops: scores слишком короткий")
+		return fmt.Errorf("ops: scores too short")
 	}
 
 	if nHeads%nKVHeads != 0 {
-		return fmt.Errorf("ops: nHeads=%d не кратно nKVHeads=%d", nHeads, nKVHeads)
+		return fmt.Errorf("ops: nHeads=%d not divisible by nKVHeads=%d", nHeads, nKVHeads)
 	}
 
 	groupSize := nHeads / nKVHeads

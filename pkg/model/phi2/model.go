@@ -170,7 +170,7 @@ func (m *Model) Close() error {
 // Forward runs forward pass for tokenIDs starting at startPos
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("phi2: пустой ввод")
+		return nil, fmt.Errorf("phi2: empty input")
 	}
 
 	for i, id := range tokenIDs {
@@ -181,7 +181,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 
 		for layer := range m.cfg.NumLayers {
 			if err := m.forwardBlock(layer, pos); err != nil {
-				return nil, fmt.Errorf("phi2: слой %d pos %d: %w", layer, pos, err)
+				return nil, fmt.Errorf("phi2: layer %d pos %d: %w", layer, pos, err)
 			}
 		}
 
@@ -204,7 +204,7 @@ func (m *Model) EmbeddingDim() int {
 // Embed - last-token LayerNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("phi2: пустой ввод")
+		return nil, fmt.Errorf("phi2: empty input")
 	}
 	m.ResetCache()
 	defer m.ResetCache()

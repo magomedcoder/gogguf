@@ -11,7 +11,7 @@ const BlockQ6_KSize = 210
 // DequantBlockQ6_K dequantizes one Q6_K block to 256 float32
 func DequantBlockQ6_K(block []byte) ([QK_K]float32, error) {
 	if len(block) < BlockQ6_KSize {
-		return [QK_K]float32{}, fmt.Errorf("quant: блок Q6_K слишком короткий: %d байт", len(block))
+		return [QK_K]float32{}, fmt.Errorf("quant: Q6_K block too short: %d bytes", len(block))
 	}
 
 	ql := block[0:128]
@@ -54,12 +54,12 @@ func DequantQ6_KInto(dst []float32, data []byte, n int) error {
 	}
 
 	if len(dst) < n {
-		return fmt.Errorf("quant: dst слишком короткий")
+		return fmt.Errorf("quant: dst too short")
 	}
 
 	want := (n + QK_K - 1) / QK_K * BlockQ6_KSize
 	if len(data) < want {
-		return fmt.Errorf("quant: данных Q6_K недостаточно: нужно %d, есть %d", want, len(data))
+		return fmt.Errorf("quant: insufficient Q6_K data: need %d, have %d", want, len(data))
 	}
 
 	for i := 0; i < n; i += QK_K {
@@ -87,7 +87,7 @@ func DequantQ6_K(data []byte, n int) ([]float32, error) {
 // DotBlockQ6_K - dot product of Q6_K block with 256 float32
 func DotBlockQ6_K(block []byte, x []float32) (float32, error) {
 	if len(x) < QK_K {
-		return 0, fmt.Errorf("quant: вектор короче блока Q6_K")
+		return 0, fmt.Errorf("quant: vector shorter than Q6_K")
 	}
 
 	w, err := DequantBlockQ6_K(block)

@@ -18,7 +18,7 @@ func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasAttn || !b.hasRoPE || !b.hasRMS || !b.hasSoftmax {
-		t.Skip("нет QKV/RoPE/attn kernels")
+		t.Skip("no QKV/RoPE/attn kernels")
 	}
 
 	embd := 8
@@ -123,7 +123,7 @@ func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 
 	for i := range wantAttn {
 		if math.Abs(float64(attn[i]-wantAttn[i])) > 2e-3 {
-			t.Fatalf("токен 0 attn[%d]=%v, ожидали %v", i, attn[i], wantAttn[i])
+			t.Fatalf("token 0 attn[%d]=%v, expected %v", i, attn[i], wantAttn[i])
 		}
 	}
 
@@ -190,15 +190,15 @@ func TestQKVRoPEAttentionGraphReplay(t *testing.T) {
 
 	for i := range wantAttn2 {
 		if math.Abs(float64(attn2[i]-wantAttn2[i])) > 2e-3 {
-			t.Fatalf("токен 1 attn[%d]=%v, ожидали %v", i, attn2[i], wantAttn2[i])
+			t.Fatalf("token 1 attn[%d]=%v, expected %v", i, attn2[i], wantAttn2[i])
 		}
 	}
 
 	if b.hasGraphs && b.matmulPool.layer_graphs == nil {
-		t.Fatal("ожидался QKV layer CUDA Graph после replay")
+		t.Fatal("expected QKV layer CUDA Graph after replay")
 	}
 
 	if b.hasGraphs && b.attnPool.graphs == nil {
-		t.Fatal("ожидался attention CUDA Graph по seq_len")
+		t.Fatal("expected attention CUDA Graph for seq_len")
 	}
 }

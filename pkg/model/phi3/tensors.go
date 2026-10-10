@@ -38,7 +38,7 @@ func loadLayerTensors(w *weights.Store, numLayers int) ([]layerTensors, error) {
 			lt.attnK = p + "attn_k.weight"
 			lt.attnV = p + "attn_v.weight"
 			if _, err := w.Info(lt.attnQ); err != nil {
-				return nil, fmt.Errorf("phi3: blk.%d: нет attn_qkv и attn_q", i)
+				return nil, fmt.Errorf("phi3: blk.%d: missing attn_qkv and attn_q", i)
 			}
 		}
 

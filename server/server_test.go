@@ -16,16 +16,16 @@ func TestHealth(t *testing.T) {
 	srv.handleHealth(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("статус = %d, ожидали 200", rec.Code)
+		t.Fatalf("status = %d, expected 200", rec.Code)
 	}
 
 	var resp healthResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("не удалось разобрать ответ: %v", err)
+		t.Fatalf("failed to parse response: %v", err)
 	}
 
 	if resp.Status != "ok" {
-		t.Fatalf("status = %q, ожидали ok", resp.Status)
+		t.Fatalf("status = %q, expected ok", resp.Status)
 	}
 }
 
@@ -35,16 +35,16 @@ func TestModelsFormat(t *testing.T) {
 	srv.handleModels(rec, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("статус = %d, ожидали 200", rec.Code)
+		t.Fatalf("status = %d, expected 200", rec.Code)
 	}
 
 	var resp modelsResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("не удалось разобрать ответ: %v", err)
+		t.Fatalf("failed to parse response: %v", err)
 	}
 
 	if len(resp.Data) != 1 || resp.Data[0].ID == "" {
-		t.Fatalf("ожидали одну модель с id, получили %+v", resp)
+		t.Fatalf("expected one model with id, got %+v", resp)
 	}
 }
 
@@ -56,7 +56,7 @@ func TestHandlerRoutes(t *testing.T) {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: статус = %d, ожидали 200", path, rec.Code)
+			t.Fatalf("%s: status = %d, expected 200", path, rec.Code)
 		}
 	}
 }
@@ -67,7 +67,7 @@ func TestEmbeddingsBadRequest(t *testing.T) {
 	body := bytes.NewBufferString(`{"input":null}`)
 	srv.handleEmbeddings(rec, httptest.NewRequest(http.MethodPost, "/v1/embeddings", body))
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("статус = %d, ожидали 400", rec.Code)
+		t.Fatalf("status = %d, expected 400", rec.Code)
 	}
 }
 
@@ -93,7 +93,7 @@ func TestParseEmbeddingsInput(t *testing.T) {
 		}
 
 		if tc.toks && got[0].tokens == nil {
-			t.Fatalf("%s: ожидали tokens", tc.raw)
+			t.Fatalf("%s: expected tokens", tc.raw)
 		}
 
 		if !tc.toks && got[0].text == "" && tc.raw != `["a","b"]` {
@@ -101,7 +101,7 @@ func TestParseEmbeddingsInput(t *testing.T) {
 		}
 
 		if !tc.toks && len(got) > 0 && got[0].tokens != nil {
-			t.Fatalf("%s: не ожидали tokens", tc.raw)
+			t.Fatalf("%s: did not expect tokens", tc.raw)
 		}
 	}
 }
@@ -112,16 +112,16 @@ func TestReset(t *testing.T) {
 	srv.handleReset(rec, httptest.NewRequest(http.MethodPost, "/v1/reset", nil))
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("статус = %d, ожидали 200", rec.Code)
+		t.Fatalf("status = %d, expected 200", rec.Code)
 	}
 
 	var resp healthResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("не удалось разобрать ответ: %v", err)
+		t.Fatalf("failed to parse response: %v", err)
 	}
 
 	if resp.Status != "ok" {
-		t.Fatalf("status = %q, ожидали ok", resp.Status)
+		t.Fatalf("status = %q, expected ok", resp.Status)
 	}
 }
 
@@ -132,6 +132,6 @@ func TestChatCompletionsBadRequest(t *testing.T) {
 	srv.handleChatCompletions(rec, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body))
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("статус = %d, ожидали 400", rec.Code)
+		t.Fatalf("status = %d, expected 400", rec.Code)
 	}
 }

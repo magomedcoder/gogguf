@@ -17,7 +17,7 @@ func TestAttnFFNResidualGPU(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
-		t.Skip("нет add/rmsnorm/swiglu")
+		t.Skip("no add/rmsnorm/swiglu")
 	}
 
 	embd, attnDim, ffn := 8, 16, 12
@@ -105,6 +105,6 @@ func TestAttnFFNResidualGPU(t *testing.T) {
 	}
 
 	if b.hasGraphs && b.matmulPool.layer_graphs == nil {
-		t.Fatal("ожидался residual layer CUDA Graph после replay")
+		t.Fatal("expected residual layer CUDA Graph after replay")
 	}
 }

@@ -11,15 +11,15 @@ func TestFormatChatHistoryIncludesRoles(t *testing.T) {
 	messages := []chattmpl.Message{
 		{
 			Role:    "user",
-			Content: "Привет",
+			Content: "Hello",
 		},
 		{
 			Role:    "assistant",
-			Content: "Здравствуйте",
+			Content: "Hello there",
 		},
 		{
 			Role:    "user",
-			Content: "Как дела?",
+			Content: "How are you?",
 		},
 	}
 
@@ -28,9 +28,9 @@ func TestFormatChatHistoryIncludesRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, want := range []string{"user", "assistant", "Привет", "Здравствуйте", "Как дела?"} {
+	for _, want := range []string{"user", "assistant", "Hello", "Hello there", "How are you?"} {
 		if !strings.Contains(prompt, want) {
-			t.Fatalf("промпт не содержит %q:\n%s", want, prompt)
+			t.Fatalf("prompt does not contain %q:\n%s", want, prompt)
 		}
 	}
 }

@@ -20,23 +20,23 @@ func Resolve(repoWithTag string) (string, error) {
 		// offline fallback: local cache only
 		cached := listCachedFiles(spec.Repo)
 		if len(cached) == 0 {
-			return "", fmt.Errorf("hf: не удалось получить список файлов для %s: %w", spec.Repo, err)
+			return "", fmt.Errorf("hf: failed to list files for %s: %w", spec.Repo, err)
 		}
 
-		fmt.Fprintf(os.Stderr, "hf: сеть недоступна, используем кэш (%v)\n", err)
+		fmt.Fprintf(os.Stderr, "hf: network unavailable, using cache (%v)\n", err)
 		files = cached
 	}
 
 	primary, ok := FindBestModel(files, spec.Tag)
 	if !ok {
 		avail := ListModelGGUF(files)
-		msg := fmt.Sprintf("hf: GGUF не найден в %s", spec.Repo)
+		msg := fmt.Sprintf("hf: GGUF not found in %s", spec.Repo)
 		if spec.Tag != "" {
-			msg += fmt.Sprintf(" для тега %q", spec.Tag)
+			msg += fmt.Sprintf(" for tag %q", spec.Tag)
 		}
 
 		if len(avail) > 0 {
-			msg += "\nдоступные файлы:\n  " + strings.Join(avail, "\n  ")
+			msg += "\navailable files:\n  " + strings.Join(avail, "\n  ")
 		}
 
 		return "", fmt.Errorf("%s", msg)
@@ -58,7 +58,7 @@ func Resolve(repoWithTag string) (string, error) {
 			}
 		}
 
-		return "", fmt.Errorf("hf: файл %s есть в индексе кэша, но отсутствует на диске", primary.Path)
+		return "", fmt.Errorf("hf: file %s is in cache index but missing on disk", primary.Path)
 	}
 
 	path, err := ensureDownloaded(primary, token)
@@ -72,7 +72,7 @@ func Resolve(repoWithTag string) (string, error) {
 
 func fetchRepoFilesOnline(repoID, token string) ([]FileInfo, error) {
 	if !ValidRepoID(repoID) {
-		return nil, fmt.Errorf("неверный repository id: %s", repoID)
+		return nil, fmt.Errorf("invalid repository id: %s", repoID)
 	}
 
 	commit, err := resolveCommit(repoID, token)

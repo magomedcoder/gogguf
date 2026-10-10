@@ -67,7 +67,7 @@ func TestParseConfigLlama2Defaults(t *testing.T) {
 	}
 
 	if cfg.RopeFreqBase != 10000 {
-		t.Fatalf("RopeFreqBase=%v, ожидали 10000 для Llama2-sized vocab", cfg.RopeFreqBase)
+		t.Fatalf("RopeFreqBase=%v, expected 10000 for Llama2-sized vocab", cfg.RopeFreqBase)
 	}
 
 	if cfg.HeadDim != 128 {

@@ -130,7 +130,7 @@ func resolveCommit(repoID, token string) (string, error) {
 	}
 
 	if commit == "" {
-		return "", fmt.Errorf("нет валидной ветки для %s", repoID)
+		return "", fmt.Errorf("no valid branch for %s", repoID)
 	}
 
 	repoPath, err := RepoPath(repoID)

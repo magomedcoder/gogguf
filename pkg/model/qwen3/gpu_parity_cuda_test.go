@@ -32,7 +32,7 @@ func maxAbsDiff(t *testing.T, a, b []float32) float64 {
 func skipOOM(t *testing.T, err error) {
 	t.Helper()
 	if gpu.IsOutOfMemory(err) {
-		t.Skip("не хватило VRAM:", err)
+		t.Skip("insufficient VRAM:", err)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestGPUFullOffloadLogitsParity(t *testing.T) {
 
 	gpuEng, err := gogguf.Load(path, gogguf.LoadOptions{NGL: 999})
 	if err != nil {
-		t.Skip("GPU offload недоступен:", err)
+		t.Skip("GPU offload unavailable:", err)
 	}
 	defer gpuEng.Close()
 
@@ -69,7 +69,7 @@ func TestGPUFullOffloadLogitsParity(t *testing.T) {
 	}
 
 	if d := maxAbsDiff(t, cpuLogits, gpuLogits); d > 0.5 {
-		t.Fatalf("logits CPU vs GPU расходятся: max|diff|=%v", d)
+		t.Fatalf("CPU vs GPU logits diverge: max|diff|=%v", d)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestGPUNBatchPrefillParity(t *testing.T) {
 	run := func(nBatch int) (prefill, decode []float32) {
 		eng, err := gogguf.Load(path, gogguf.LoadOptions{NGL: 999, NBatch: nBatch})
 		if err != nil {
-			t.Skip("GPU offload недоступен:", err)
+			t.Skip("GPU offload unavailable:", err)
 		}
 		defer eng.Close()
 
@@ -112,10 +112,10 @@ func TestGPUNBatchPrefillParity(t *testing.T) {
 	batchPrefill, batchDecode := run(32)
 
 	if d := maxAbsDiff(t, serialPrefill, batchPrefill); d > 0.5 {
-		t.Fatalf("prefill logits serial vs batch расходятся: max|diff|=%v", d)
+		t.Fatalf("prefill logits serial vs batch diverge: max|diff|=%v", d)
 	}
 
 	if d := maxAbsDiff(t, serialDecode, batchDecode); d > 0.5 {
-		t.Fatalf("decode после batch-prefill расходится: max|diff|=%v", d)
+		t.Fatalf("decode after batch-prefill diverges: max|diff|=%v", d)
 	}
 }

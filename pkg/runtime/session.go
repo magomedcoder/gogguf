@@ -25,7 +25,7 @@ func (c *Context) StartGeneration(prompt string) (*GenerationSession, error) {
 	}
 
 	if ctxLen := c.engine.ContextLength(); ctxLen > 0 && len(promptTokens) > ctxLen {
-		return nil, fmt.Errorf("runtime: промпт %d токенов превышает context_length=%d", len(promptTokens), ctxLen)
+		return nil, fmt.Errorf("runtime: prompt %d tokens exceeds context_length=%d", len(promptTokens), ctxLen)
 	}
 
 	logits, err := c.engine.Model.Forward(promptTokens, 0)
@@ -68,7 +68,7 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 
 	startPos := len(s.promptTokens) + len(s.generated) - 1
 	if ctxLen := s.ctx.engine.ContextLength(); ctxLen > 0 && startPos >= ctxLen {
-		return -1, fmt.Errorf("runtime: позиция %d >= context_length=%d", startPos, ctxLen)
+		return -1, fmt.Errorf("runtime: position %d >= context_length=%d", startPos, ctxLen)
 	}
 
 	logits, err := s.ctx.engine.Model.Forward([]int{next}, startPos)
@@ -170,4 +170,4 @@ func hitStopSequence(text string, stops []string) bool {
 }
 
 // ErrNoSession is returned when the generation session was not started.
-var ErrNoSession = fmt.Errorf("runtime: сессия генерации не начата")
+var ErrNoSession = fmt.Errorf("runtime: generation session not started")

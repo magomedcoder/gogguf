@@ -122,11 +122,11 @@ func (e *Engine) ForwardTokenIDs(tokens []int, startPos int) ([]float32, error) 
 // EmbedTokens returns last-token hidden embedding (output-norm); resets model KV-cache.
 func (e *Engine) EmbedTokens(tokens []int) ([]float32, error) {
 	if e == nil || e.Model == nil {
-		return nil, fmt.Errorf("runtime: модель не загружена")
+		return nil, fmt.Errorf("runtime: model not loaded")
 	}
 
 	if len(tokens) == 0 {
-		return nil, fmt.Errorf("runtime: пустой ввод для embeddings")
+		return nil, fmt.Errorf("runtime: empty input for embeddings")
 	}
 
 	return e.Model.Embed(tokens)
@@ -135,7 +135,7 @@ func (e *Engine) EmbedTokens(tokens []int) ([]float32, error) {
 // EmbedText encodes text (with BOS when needed) and returns embedding + token IDs.
 func (e *Engine) EmbedText(text string) (vec []float32, tokens []int, err error) {
 	if e == nil || e.tok == nil {
-		return nil, nil, fmt.Errorf("runtime: tokenizer не загружен")
+		return nil, nil, fmt.Errorf("runtime: tokenizer not loaded")
 	}
 
 	tokens, err = e.encodeForEmbed(text)

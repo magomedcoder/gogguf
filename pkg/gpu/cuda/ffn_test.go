@@ -17,7 +17,7 @@ func TestFFNSwiGLUGPU(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasSwiGLU {
-		t.Skip("нет SwiGLU kernel")
+		t.Skip("no SwiGLU kernel")
 	}
 
 	embd, ffn := 8, 16
@@ -79,6 +79,6 @@ func TestFFNSwiGLUGPU(t *testing.T) {
 	}
 
 	if b.hasGraphs && b.matmulPool.layer_graphs == nil {
-		t.Fatal("ожидался FFN layer CUDA Graph после replay")
+		t.Fatal("expected FFN layer CUDA Graph after replay")
 	}
 }

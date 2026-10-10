@@ -8,7 +8,7 @@ import (
 
 func embeddingRowOffset(dim, tokenID, blockSize, qk int) (int, int, error) {
 	if dim%qk != 0 {
-		return 0, 0, fmt.Errorf("ops: dim=%d не кратно %d", dim, qk)
+		return 0, 0, fmt.Errorf("ops: dim=%d not divisible by %d", dim, qk)
 	}
 
 	blocksPerRow := dim / qk
@@ -25,7 +25,7 @@ func EmbeddingQ8_0Into(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ8_0Into(dst, raw[off:off+rowBytes], dim)
@@ -39,7 +39,7 @@ func EmbeddingQ4_0Into(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ4_0Into(dst, raw[off:off+rowBytes], dim)
@@ -53,7 +53,7 @@ func EmbeddingQ4_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ4_KInto(dst, raw[off:off+rowBytes], dim)
@@ -67,7 +67,7 @@ func EmbeddingQ5_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ5_KInto(dst, raw[off:off+rowBytes], dim)
@@ -81,7 +81,7 @@ func EmbeddingQ6_KInto(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ6_KInto(dst, raw[off:off+rowBytes], dim)

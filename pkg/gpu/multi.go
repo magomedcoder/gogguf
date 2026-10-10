@@ -35,17 +35,17 @@ var _ Backend = (*MultiBackend)(nil)
 // split sets layer proportions per device (like -tensor-split); nil = even
 func NewMultiBackend(devs []Backend, split []float64) (*MultiBackend, error) {
 	if len(devs) == 0 {
-		return nil, errors.New("gpu: multi: пустой список устройств")
+		return nil, errors.New("gpu: multi: empty device list")
 	}
 
 	for i, d := range devs {
 		if d == nil {
-			return nil, fmt.Errorf("gpu: multi: устройство %d = nil", i)
+			return nil, fmt.Errorf("gpu: multi: device %d is nil", i)
 		}
 	}
 
 	if split != nil && len(split) != len(devs) {
-		return nil, fmt.Errorf("gpu: multi: tensor-split из %d значений при %d устройствах", len(split), len(devs))
+		return nil, fmt.Errorf("gpu: multi: tensor-split has %d values for %d devices", len(split), len(devs))
 	}
 
 	return &MultiBackend{devs: devs, split: split}, nil
@@ -121,18 +121,18 @@ func (m *MultiBackend) Plan() string {
 			names = append(names, d.Name())
 		}
 
-		return strings.Join(names, " + ") + " (слои не распределены)"
+		return strings.Join(names, " + ") + " (layers not assigned)"
 	}
 
 	parts := make([]string, 0, len(m.devs))
 	for i, d := range m.devs {
 		from, to := m.bounds[i], m.bounds[i+1]
 		if to <= from {
-			parts = append(parts, fmt.Sprintf("%s: без слоёв", d.Name()))
+			parts = append(parts, fmt.Sprintf("%s: no layers", d.Name()))
 			continue
 		}
 
-		parts = append(parts, fmt.Sprintf("%s: слои %d-%d", d.Name(), from, to-1))
+		parts = append(parts, fmt.Sprintf("%s: layers %d-%d", d.Name(), from, to-1))
 	}
 
 	return strings.Join(parts, ", ")
@@ -357,7 +357,7 @@ func (m *MultiBackend) HiddenActive() bool {
 // HiddenUpload puts hidden on the first layer's device; others clear residency
 func (m *MultiBackend) HiddenUpload(x []float32) error {
 	if len(x) == 0 {
-		return fmt.Errorf("gpu: multi: HiddenUpload: пустой x")
+		return fmt.Errorf("gpu: multi: HiddenUpload: empty x")
 	}
 
 	m.mu.Lock()

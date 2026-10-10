@@ -101,7 +101,7 @@ func withRateLimit(next http.Handler, rl *rateLimiter) http.Handler {
 
 		if !rl.allow(clientIP(r)) {
 			w.Header().Set("Retry-After", "1")
-			writeAPIError(w, http.StatusTooManyRequests, "превышен rate limit", "rate_limit_error")
+			writeAPIError(w, http.StatusTooManyRequests, "rate limit exceeded", "rate_limit_error")
 			return
 		}
 

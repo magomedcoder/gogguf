@@ -236,7 +236,7 @@ func matMulQuantInto(t format.GGML, raw []byte, rows, cols int, vec, out []float
 	case format.GgmlQ6_K:
 		return ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
 	default:
-		return fmt.Errorf("gpu: тип %s не поддерживается fused-путём", t)
+		return fmt.Errorf("gpu: type %s not supported on fused path", t)
 	}
 }
 

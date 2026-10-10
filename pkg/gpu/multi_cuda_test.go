@@ -11,7 +11,7 @@ import (
 func TestMultiBackendOverRealCUDADevice(t *testing.T) {
 	dev, err := OpenCUDADevice(0)
 	if err != nil {
-		t.Skipf("CUDA недоступна: %v", err)
+		t.Skipf("CUDA unavailable: %v", err)
 	}
 
 	m, err := NewMultiBackend([]Backend{dev}, nil)
@@ -25,8 +25,8 @@ func TestMultiBackendOverRealCUDADevice(t *testing.T) {
 		t.Fatalf("KVCacheInit: %v", err)
 	}
 
-	if plan := Describe(m); !strings.Contains(plan, "слои 0-3") {
-		t.Fatalf("Describe = %q, ожидали диапазон слоёв 0-3", plan)
+	if plan := Describe(m); !strings.Contains(plan, "layers 0-3") {
+		t.Fatalf("Describe = %q, expected layer range 0-3", plan)
 	}
 
 	x := make([]float32, 16)
@@ -39,7 +39,7 @@ func TestMultiBackendOverRealCUDADevice(t *testing.T) {
 	}
 
 	if !m.HiddenActive() {
-		t.Fatal("HiddenActive() = false после HiddenUpload")
+		t.Fatal("HiddenActive() = false after HiddenUpload")
 	}
 
 	got := make([]float32, len(x))
@@ -49,7 +49,7 @@ func TestMultiBackendOverRealCUDADevice(t *testing.T) {
 
 	for i := range x {
 		if got[i] != x[i] {
-			t.Fatalf("hidden[%d] = %v, ожидали %v", i, got[i], x[i])
+			t.Fatalf("hidden[%d] = %v, expected %v", i, got[i], x[i])
 		}
 	}
 

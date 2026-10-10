@@ -23,17 +23,17 @@ func MatMulVecQ4_1Into(raw []byte, rows, cols int, vec, out []float32) error {
 	}
 
 	if cols%quant.QK4_1 != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK4_1)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK4_1)
 	}
 
 	blocksPerRow := cols / quant.QK4_1
 	want := rows * blocksPerRow * quant.BlockQ4_1Size
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q4_1 matrix слишком короткая")
+		return fmt.Errorf("ops: Q4_1 matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -74,17 +74,17 @@ func MatMulVecQ5_0Into(raw []byte, rows, cols int, vec, out []float32) error {
 	}
 
 	if cols%quant.QK5_0 != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK5_0)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK5_0)
 	}
 
 	blocksPerRow := cols / quant.QK5_0
 	want := rows * blocksPerRow * quant.BlockQ5_0Size
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q5_0 matrix слишком короткая")
+		return fmt.Errorf("ops: Q5_0 matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -125,17 +125,17 @@ func MatMulVecQ5_1Into(raw []byte, rows, cols int, vec, out []float32) error {
 	}
 
 	if cols%quant.QK5_1 != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK5_1)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK5_1)
 	}
 
 	blocksPerRow := cols / quant.QK5_1
 	want := rows * blocksPerRow * quant.BlockQ5_1Size
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q5_1 matrix слишком короткая")
+		return fmt.Errorf("ops: Q5_1 matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -167,7 +167,7 @@ func EmbeddingQ4_1Into(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ4_1Into(dst, raw[off:off+rowBytes], dim)
@@ -181,7 +181,7 @@ func EmbeddingQ5_0Into(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ5_0Into(dst, raw[off:off+rowBytes], dim)
@@ -195,7 +195,7 @@ func EmbeddingQ5_1Into(dst []float32, raw []byte, dim, tokenID int) error {
 	}
 
 	if off+rowBytes > len(raw) {
-		return fmt.Errorf("ops: tokenID=%d вне диапазона", tokenID)
+		return fmt.Errorf("ops: tokenID=%d out of range", tokenID)
 	}
 
 	return quant.DequantQ5_1Into(dst, raw[off:off+rowBytes], dim)

@@ -9,7 +9,7 @@ import (
 func LayerNormInto(dst, x, weight, bias []float32, eps float32) error {
 	n := len(x)
 	if n == 0 || len(dst) != n || len(weight) != n || len(bias) != n {
-		return fmt.Errorf("ops: LayerNormInto: несовпадение длин")
+		return fmt.Errorf("ops: LayerNormInto: length mismatch")
 	}
 
 	var sum float64

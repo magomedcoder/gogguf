@@ -31,12 +31,12 @@ func loadLlamaLayerLogitsFixture(t *testing.T) layerLogitsFile {
 		}
 	}
 	if data == nil {
-		t.Fatal("llama32_layer_logits.json не найден")
+		t.Fatal("llama32_layer_logits.json not found")
 	}
 
 	var lf layerLogitsFile
 	if err := json.Unmarshal(data, &lf); err != nil {
-		t.Fatalf("не удалось разобрать fixture: %v", err)
+		t.Fatalf("failed to parse fixture: %v", err)
 	}
 
 	return lf
@@ -46,7 +46,7 @@ func TestLlama32LayerLogitsFixture(t *testing.T) {
 	lf := loadLlamaLayerLogitsFixture(t)
 	engine, err := gogguf.Load(llamaModelPath(t), gogguf.LoadOptions{})
 	if err != nil {
-		t.Fatalf("не удалось загрузить модель: %v", err)
+		t.Fatalf("failed to load model: %v", err)
 	}
 
 	ctx, err := engine.NewContext()
@@ -58,7 +58,7 @@ func TestLlama32LayerLogitsFixture(t *testing.T) {
 		SetDebugHooks(*llama.DebugHooks)
 	})
 	if !ok {
-		t.Fatal("модель не поддерживает debug hooks")
+		t.Fatal("model does not support debug hooks")
 	}
 
 	for _, tc := range lf.Cases {
@@ -98,12 +98,12 @@ func TestLlama32LayerLogitsFixture(t *testing.T) {
 			}
 
 			if len(got) != len(tc.LayerGreedy) {
-				t.Fatalf("layer count = %d, ожидали %d", len(got), len(tc.LayerGreedy))
+				t.Fatalf("layer count = %d, expected %d", len(got), len(tc.LayerGreedy))
 			}
 
 			for i := range got {
 				if got[i] != tc.LayerGreedy[i] {
-					t.Fatalf("layer[%d] greedy = %d, ожидали %d", i, got[i], tc.LayerGreedy[i])
+					t.Fatalf("layer[%d] greedy = %d, expected %d", i, got[i], tc.LayerGreedy[i])
 				}
 			}
 
@@ -112,24 +112,24 @@ func TestLlama32LayerLogitsFixture(t *testing.T) {
 			}
 
 			if len(gotTop) != len(tc.LayerTopLogits) {
-				t.Fatalf("layer top logits count = %d, ожидали %d", len(gotTop), len(tc.LayerTopLogits))
+				t.Fatalf("layer top logits count = %d, expected %d", len(gotTop), len(tc.LayerTopLogits))
 			}
 
 			const logitTol = 1e-4
 			for layer := range gotTop {
 				want := tc.LayerTopLogits[layer]
 				if len(gotTop[layer]) != len(want) {
-					t.Fatalf("layer[%d] top logits len = %d, ожидали %d", layer, len(gotTop[layer]), len(want))
+					t.Fatalf("layer[%d] top logits len = %d, expected %d", layer, len(gotTop[layer]), len(want))
 				}
 
 				for j := range want {
 					if gotTop[layer][j].ID != want[j].ID {
-						t.Fatalf("layer[%d] top[%d] id = %d, ожидали %d", layer, j, gotTop[layer][j].ID, want[j].ID)
+						t.Fatalf("layer[%d] top[%d] id = %d, expected %d", layer, j, gotTop[layer][j].ID, want[j].ID)
 					}
 
 					diff := math.Abs(float64(gotTop[layer][j].Logit - want[j].Logit))
 					if diff > logitTol {
-						t.Fatalf("layer[%d] logit[%d] = %v, ожидали ~%v", layer, want[j].ID, gotTop[layer][j].Logit, want[j].Logit)
+						t.Fatalf("layer[%d] logit[%d] = %v, expected ~%v", layer, want[j].ID, gotTop[layer][j].Logit, want[j].Logit)
 					}
 				}
 			}

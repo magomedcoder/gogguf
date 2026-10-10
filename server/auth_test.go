@@ -16,7 +16,7 @@ func TestAPIKeyRequired(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("без ключа: статус=%d, ожидали 401", rec.Code)
+		t.Fatalf("without key: status=%d, expected 401", rec.Code)
 	}
 
 	var errBody apiErrorResponse
@@ -32,7 +32,7 @@ func TestAPIKeyRequired(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("health: статус=%d", rec.Code)
+		t.Fatalf("health: status=%d", rec.Code)
 	}
 
 	// Bearer
@@ -41,7 +41,7 @@ func TestAPIKeyRequired(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer secret")
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("Bearer: статус=%d", rec.Code)
+		t.Fatalf("Bearer: status=%d", rec.Code)
 	}
 
 	// X-API-Key
@@ -50,7 +50,7 @@ func TestAPIKeyRequired(t *testing.T) {
 	req.Header.Set("X-API-Key", "secret")
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("X-API-Key: статус=%d", rec.Code)
+		t.Fatalf("X-API-Key: status=%d", rec.Code)
 	}
 
 	// wrong API key
@@ -59,7 +59,7 @@ func TestAPIKeyRequired(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer wrong")
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong key: статус=%d", rec.Code)
+		t.Fatalf("wrong key: status=%d", rec.Code)
 	}
 }
 
@@ -85,11 +85,11 @@ func TestRateLimit(t *testing.T) {
 				t.Fatalf("type=%q", errBody.Error.Type)
 			}
 		default:
-			t.Fatalf("неожиданный статус %d", rec.Code)
+			t.Fatalf("unexpected status %d", rec.Code)
 		}
 	}
 	if ok < 1 || limited < 1 {
-		t.Fatalf("ok=%d limited=%d, ожидали оба >0", ok, limited)
+		t.Fatalf("ok=%d limited=%d, expected both >0", ok, limited)
 	}
 
 	// health is not rate-limited
@@ -98,7 +98,7 @@ func TestRateLimit(t *testing.T) {
 	req.RemoteAddr = "10.0.0.1:1234"
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("health под лимитом: %d", rec.Code)
+		t.Fatalf("health under limit: %d", rec.Code)
 	}
 }
 

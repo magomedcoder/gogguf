@@ -45,7 +45,7 @@ func (t *Tokenizer) encodeGreedyVocab(text string) ([]int, error) {
 		}
 
 		if bestID < 0 {
-			return nil, fmt.Errorf("tokenizer: неизвестный токен %q", text[i:i+1])
+			return nil, fmt.Errorf("tokenizer: unknown token %q", text[i:i+1])
 		}
 
 		out = append(out, bestID)

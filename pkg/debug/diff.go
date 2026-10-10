@@ -50,7 +50,7 @@ func DiffLogits(a, b []float32, tol float64) DiffStats {
 // LogSoftmaxInPlace writes log(softmax(x)) into dst (dst may be x).
 func LogSoftmaxInPlace(dst, x []float32) {
 	if len(dst) < len(x) {
-		panic("debug: LogSoftmaxInPlace: dst слишком короткий")
+		panic("debug: LogSoftmaxInPlace: dst too short")
 	}
 
 	if len(x) == 0 {

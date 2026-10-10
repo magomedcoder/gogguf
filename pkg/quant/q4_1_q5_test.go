@@ -30,7 +30,7 @@ func TestDequantBlockQ4_1(t *testing.T) {
 
 func TestBlockQ4_1SizeMatchesFormat(t *testing.T) {
 	if BlockQ4_1Size != 20 {
-		t.Fatalf("BlockQ4_1Size=%d, ожидали 20", BlockQ4_1Size)
+		t.Fatalf("BlockQ4_1Size=%d, want 20", BlockQ4_1Size)
 	}
 }
 
@@ -47,17 +47,17 @@ func TestDequantBlockQ5_0(t *testing.T) {
 	}
 
 	if math.Abs(float64(out[0]-float32(21-16))) > 1e-5 {
-		t.Fatalf("out[0]=%v, ожидали 5", out[0])
+		t.Fatalf("out[0]=%v, want 5", out[0])
 	}
 
 	if math.Abs(float64(out[16]-float32(16-16))) > 1e-5 {
-		t.Fatalf("out[16]=%v, ожидали 0", out[16])
+		t.Fatalf("out[16]=%v, want 0", out[16])
 	}
 }
 
 func TestBlockQ5_0SizeMatchesFormat(t *testing.T) {
 	if BlockQ5_0Size != 22 {
-		t.Fatalf("BlockQ5_0Size=%d, ожидали 22", BlockQ5_0Size)
+		t.Fatalf("BlockQ5_0Size=%d, want 22", BlockQ5_0Size)
 	}
 }
 
@@ -84,6 +84,6 @@ func TestDequantBlockQ5_1(t *testing.T) {
 
 func TestBlockQ5_1SizeMatchesFormat(t *testing.T) {
 	if BlockQ5_1Size != 24 {
-		t.Fatalf("BlockQ5_1Size=%d, ожидали 24", BlockQ5_1Size)
+		t.Fatalf("BlockQ5_1Size=%d, want 24", BlockQ5_1Size)
 	}
 }

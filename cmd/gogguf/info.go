@@ -10,13 +10,13 @@ import (
 // runInfo prints brief information about a GGUF file.
 func runInfo(args []string) error {
 	fs := flag.NewFlagSet("info", flag.ExitOnError)
-	modelPath := fs.String("m", "", "путь к файлу GGUF")
+	modelPath := fs.String("m", "", "path to GGUF file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	if *modelPath == "" {
-		return fmt.Errorf("использование: gogguf info -m файл.gguf")
+		return fmt.Errorf("usage: gogguf info -m file.gguf")
 	}
 
 	r, err := gogguf.OpenFile(*modelPath)
@@ -27,19 +27,19 @@ func runInfo(args []string) error {
 	arch, _ := r.Metadata.String("general.architecture")
 	name, _ := r.Metadata.String("general.name")
 
-	fmt.Printf("Файл:%s\n", *modelPath)
-	fmt.Printf("Версия GGUF: %d\n", r.Version)
-	fmt.Printf("Архитектура: %s\n", arch)
+	fmt.Printf("File:%s\n", *modelPath)
+	fmt.Printf("GGUF version: %d\n", r.Version)
+	fmt.Printf("Architecture: %s\n", arch)
 	if name != "" {
-		fmt.Printf("Имя модели: %s\n", name)
+		fmt.Printf("Model name: %s\n", name)
 	}
-	fmt.Printf("Тензоров: %d\n", len(r.Tensors))
-	fmt.Printf("Размер весов: %.1f MB\n", float64(r.TensorSize())/1e6)
+	fmt.Printf("Tensors: %d\n", len(r.Tensors))
+	fmt.Printf("Weight size: %.1f MB\n", float64(r.TensorSize())/1e6)
 
 	if arch != "" {
 		ctxKey := arch + ".context_length"
 		if ctx, err := r.Metadata.Int(ctxKey); err == nil {
-			fmt.Printf("Контекст: %d токенов\n", ctx)
+			fmt.Printf("Context: %d tokens\n", ctx)
 		}
 	}
 

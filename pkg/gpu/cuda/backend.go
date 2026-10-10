@@ -20,7 +20,7 @@ import (
 )
 
 // errUploadOOM - cuMemAlloc returned code -1 when uploading weights to device
-var errUploadOOM = errors.New("не хватило VRAM")
+var errUploadOOM = errors.New("out of VRAM")
 
 // uploadFail formats upload error; code -1 marks VRAM exhaustion
 func uploadFail(kind, name string, rc C.int) error {
@@ -28,7 +28,7 @@ func uploadFail(kind, name string, rc C.int) error {
 		return fmt.Errorf("cuda: upload %s %q: %w", kind, name, errUploadOOM)
 	}
 
-	return fmt.Errorf("cuda: upload %s %q: код %d", kind, name, int(rc))
+	return fmt.Errorf("cuda: upload %s %q: code %d", kind, name, int(rc))
 }
 
 type gpuMatrix struct {
@@ -109,7 +109,7 @@ func Open() (*Backend, error) {
 // Numbering - after CUDA_VISIBLE_DEVICES filter, as in llama.cpp
 func OpenDevice(device int) (*Backend, error) {
 	if device < 0 {
-		return nil, fmt.Errorf("cuda: device=%d: ordinal должен быть >= 0", device)
+		return nil, fmt.Errorf("cuda: device=%d: ordinal must be >= 0", device)
 	}
 
 	b := &Backend{
@@ -132,7 +132,7 @@ func OpenDevice(device int) (*Backend, error) {
 			msg = C.GoString(&nameBuf[0])
 		}
 
-		return nil, fmt.Errorf("cuda: init устройства %d: код %d: %s", device, int(rc), msg)
+		return nil, fmt.Errorf("cuda: device init %d: code %d: %s", device, int(rc), msg)
 	}
 
 	b.name = fmt.Sprintf("CUDA:%d %s", device, C.GoString(&nameBuf[0]))
@@ -152,7 +152,7 @@ func OpenDevice(device int) (*Backend, error) {
 
 	if rc := C.gguf_cuda_matmul_pool_init(&b.drv, b.ctx, &b.matmulPool); rc != 0 {
 		C.gguf_cuda_shutdown(&b.drv, b.ctx)
-		return nil, fmt.Errorf("cuda: matmul pool init: код %d", int(rc))
+		return nil, fmt.Errorf("cuda: matmul pool init: code %d", int(rc))
 	}
 
 	return b, nil
@@ -264,7 +264,7 @@ func (b *Backend) VRAMInfo() (used, total uint64, err error) {
 
 	var free, tot C.size_t
 	if rc := C.gguf_cuda_mem_info(&b.drv, b.ctx, &free, &tot); rc != 0 {
-		return 0, 0, fmt.Errorf("cuda: mem_info: код %d", int(rc))
+		return 0, 0, fmt.Errorf("cuda: mem_info: code %d", int(rc))
 	}
 
 	return uint64(tot) - uint64(free), uint64(tot), nil
@@ -337,7 +337,7 @@ func (b *Backend) MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec: код %d", int(rc))
+		return nil, fmt.Errorf("cuda: matmul_vec: code %d", int(rc))
 	}
 
 	return out, nil
@@ -388,7 +388,7 @@ func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int,
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_device %q: код %d", name, int(rc))
+		return nil, fmt.Errorf("cuda: matmul_vec_device %q: code %d", name, int(rc))
 	}
 
 	return out, nil
@@ -444,7 +444,7 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q8_0 %q: код %d", name, int(rc))
+		return nil, fmt.Errorf("cuda: matmul_vec_q8_0 %q: code %d", name, int(rc))
 	}
 
 	return out, nil
@@ -452,7 +452,7 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 
 func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if !b.hasQ4 {
-		return nil, fmt.Errorf("cuda: q4_0 matmul kernel недоступен")
+		return nil, fmt.Errorf("cuda: q4_0 matmul kernel unavailable")
 	}
 	if err := validateQ4MatMul(raw, rows, cols, vec); err != nil {
 		return nil, err
@@ -503,7 +503,7 @@ func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, v
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q4_0 %q: код %d", name, int(rc))
+		return nil, fmt.Errorf("cuda: matmul_vec_q4_0 %q: code %d", name, int(rc))
 	}
 
 	return out, nil
@@ -511,7 +511,7 @@ func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, v
 
 func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if !b.hasQ4K {
-		return nil, fmt.Errorf("cuda: q4_k matmul kernel недоступен")
+		return nil, fmt.Errorf("cuda: q4_k matmul kernel unavailable")
 	}
 	if err := validateQ4KMatMul(raw, rows, cols, vec); err != nil {
 		return nil, err
@@ -562,7 +562,7 @@ func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, v
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q4_k %q: код %d", name, int(rc))
+		return nil, fmt.Errorf("cuda: matmul_vec_q4_k %q: code %d", name, int(rc))
 	}
 
 	return out, nil
@@ -570,7 +570,7 @@ func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, v
 
 func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if !b.hasQ5K {
-		return nil, fmt.Errorf("cuda: q5_k matmul kernel недоступен")
+		return nil, fmt.Errorf("cuda: q5_k matmul kernel unavailable")
 	}
 
 	if err := validateQ5KMatMul(raw, rows, cols, vec); err != nil {
@@ -622,7 +622,7 @@ func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, v
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q5_k %q: код %d", name, int(rc))
+		return nil, fmt.Errorf("cuda: matmul_vec_q5_k %q: code %d", name, int(rc))
 	}
 
 	return out, nil
@@ -630,7 +630,7 @@ func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, v
 
 func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	if !b.hasQ6K {
-		return nil, fmt.Errorf("cuda: q6_k matmul kernel недоступен")
+		return nil, fmt.Errorf("cuda: q6_k matmul kernel unavailable")
 	}
 	if err := validateQ6KMatMul(raw, rows, cols, vec); err != nil {
 		return nil, err
@@ -682,7 +682,7 @@ func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, v
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q6_k %q: код %d", name, int(rc))
+		return nil, fmt.Errorf("cuda: matmul_vec_q6_k %q: code %d", name, int(rc))
 	}
 
 	return out, nil
@@ -699,7 +699,7 @@ func (b *Backend) ropeKernel(mode ops.RoPEMode) (C.CUfunction, int, error) {
 	switch mode {
 	case ops.RoPENorm:
 		if !b.hasRoPENorm {
-			return nil, 0, fmt.Errorf("cuda: rope_heads_norm kernel недоступен")
+			return nil, 0, fmt.Errorf("cuda: rope_heads_norm kernel unavailable")
 		}
 
 		return b.fnRoPENorm, ropeModeNorm, nil
@@ -769,26 +769,26 @@ func (b *Backend) quantCache(t format.GGML) (map[string]gpuQ8Matrix, C.CUfunctio
 		return b.matricesQ8, b.fnQ8, nil
 	case format.GgmlQ4_0:
 		if !b.hasQ4 {
-			return nil, nil, fmt.Errorf("cuda: q4_0 kernel недоступен")
+			return nil, nil, fmt.Errorf("cuda: q4_0 kernel unavailable")
 		}
 		return b.matricesQ4, b.fnQ4, nil
 	case format.GgmlQ4_K:
 		if !b.hasQ4K {
-			return nil, nil, fmt.Errorf("cuda: q4_k kernel недоступен")
+			return nil, nil, fmt.Errorf("cuda: q4_k kernel unavailable")
 		}
 		return b.matricesQ4K, b.fnQ4K, nil
 	case format.GgmlQ5_K:
 		if !b.hasQ5K {
-			return nil, nil, fmt.Errorf("cuda: q5_k kernel недоступен")
+			return nil, nil, fmt.Errorf("cuda: q5_k kernel unavailable")
 		}
 		return b.matricesQ5K, b.fnQ5K, nil
 	case format.GgmlQ6_K:
 		if !b.hasQ6K {
-			return nil, nil, fmt.Errorf("cuda: q6_k kernel недоступен")
+			return nil, nil, fmt.Errorf("cuda: q6_k kernel unavailable")
 		}
 		return b.matricesQ6K, b.fnQ6K, nil
 	default:
-		return nil, nil, fmt.Errorf("cuda: тип %s не поддерживается fused-путём", t)
+		return nil, nil, fmt.Errorf("cuda: type %s not supported on fused path", t)
 	}
 }
 
@@ -822,7 +822,7 @@ func validateQuantMatMul(t format.GGML, raw []byte, rows, cols int, vec []float3
 	case format.GgmlQ6_K:
 		return validateQ6KMatMul(raw, rows, cols, vec)
 	default:
-		return fmt.Errorf("cuda: тип %s не поддерживается fused-путём", t)
+		return fmt.Errorf("cuda: type %s not supported on fused path", t)
 	}
 }
 
@@ -846,7 +846,7 @@ func (b *Backend) ensureQuantMatrix(t format.GGML, name string, raw []byte, rows
 	}
 
 	if len(raw) == 0 {
-		return gpuQ8Matrix{}, fmt.Errorf("cuda: %q: пустые веса", name)
+		return gpuQ8Matrix{}, fmt.Errorf("cuda: %q: empty weights", name)
 	}
 
 	var ptr C.CUdeviceptr
@@ -903,15 +903,15 @@ func (b *Backend) ensureQ8Matrix(name string, raw []byte, rows, cols int) (gpuQ8
 
 func (b *Backend) FFNSwiGLUCached(gateName, upName, downName string, gateW, upW, downW, x, out []float32, embd, ffn int) error {
 	if !b.hasSwiGLU {
-		return fmt.Errorf("cuda: SwiGLU kernel недоступен")
+		return fmt.Errorf("cuda: SwiGLU kernel unavailable")
 	}
 
 	if len(x) < embd || len(out) < embd {
-		return fmt.Errorf("cuda: FFNSwiGLUCached: короткий x/out")
+		return fmt.Errorf("cuda: FFNSwiGLUCached: x/out too short")
 	}
 
 	if len(gateW) < ffn*embd || len(upW) < ffn*embd || len(downW) < embd*ffn {
-		return fmt.Errorf("cuda: FFNSwiGLUCached: короткие веса")
+		return fmt.Errorf("cuda: FFNSwiGLUCached: weights too short")
 	}
 
 	b.mu.Lock()
@@ -950,7 +950,7 @@ func (b *Backend) FFNSwiGLUCached(gateName, upName, downName string, gateW, upW,
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		return fmt.Errorf("cuda: ffn_swiglu: код %d", int(rc))
+		return fmt.Errorf("cuda: ffn_swiglu: code %d", int(rc))
 	}
 
 	return nil
@@ -958,11 +958,11 @@ func (b *Backend) FFNSwiGLUCached(gateName, upName, downName string, gateW, upW,
 
 func (b *Backend) FFNSwiGLUQ8_0Cached(gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
 	if !b.hasSwiGLU {
-		return fmt.Errorf("cuda: SwiGLU kernel недоступен")
+		return fmt.Errorf("cuda: SwiGLU kernel unavailable")
 	}
 
 	if len(x) < embd || len(out) < embd {
-		return fmt.Errorf("cuda: FFNSwiGLUQ8_0Cached: короткий x/out")
+		return fmt.Errorf("cuda: FFNSwiGLUQ8_0Cached: x/out too short")
 	}
 
 	b.mu.Lock()
@@ -1001,7 +1001,7 @@ func (b *Backend) FFNSwiGLUQ8_0Cached(gateName, upName, downName string, gateRaw
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		return fmt.Errorf("cuda: ffn_swiglu q8: код %d", int(rc))
+		return fmt.Errorf("cuda: ffn_swiglu q8: code %d", int(rc))
 	}
 
 	return nil
@@ -1009,11 +1009,11 @@ func (b *Backend) FFNSwiGLUQ8_0Cached(gateName, upName, downName string, gateRaw
 
 func (b *Backend) AttnFFNResidualCached(woName, ffnNormName, gateName, upName, downName string, woW, ffnNorm, gateW, upW, downW, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
 	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
-		return fmt.Errorf("cuda: attn+ffn residual kernels недоступны")
+		return fmt.Errorf("cuda: attn+ffn residual kernels unavailable")
 	}
 
 	if len(x) < embd || len(attn) < attnDim || len(ffnNorm) < embd {
-		return fmt.Errorf("cuda: AttnFFNResidualCached: короткие буферы")
+		return fmt.Errorf("cuda: AttnFFNResidualCached: buffers too short")
 	}
 
 	b.mu.Lock()
@@ -1073,7 +1073,7 @@ func (b *Backend) AttnFFNResidualCached(woName, ffnNormName, gateName, upName, d
 	b.lastVecLen = 0
 
 	if rc != 0 {
-		return fmt.Errorf("cuda: attn_ffn_residual: код %d", int(rc))
+		return fmt.Errorf("cuda: attn_ffn_residual: code %d", int(rc))
 	}
 
 	return nil
@@ -1081,11 +1081,11 @@ func (b *Backend) AttnFFNResidualCached(woName, ffnNormName, gateName, upName, d
 
 func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
 	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
-		return fmt.Errorf("cuda: attn+ffn residual kernels недоступны")
+		return fmt.Errorf("cuda: attn+ffn residual kernels unavailable")
 	}
 
 	if len(x) < embd || len(attn) < attnDim || len(ffnNorm) < embd {
-		return fmt.Errorf("cuda: AttnFFNResidualQ8_0Cached: короткие буферы")
+		return fmt.Errorf("cuda: AttnFFNResidualQ8_0Cached: buffers too short")
 	}
 
 	b.mu.Lock()
@@ -1143,7 +1143,7 @@ func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upNam
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		return fmt.Errorf("cuda: attn_ffn_residual q8: код %d", int(rc))
+		return fmt.Errorf("cuda: attn_ffn_residual q8: code %d", int(rc))
 	}
 
 	return nil
@@ -1151,17 +1151,17 @@ func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upNam
 
 func (b *Backend) QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormName string, qW, kW, vW, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
 	if !b.hasAttn || !b.hasRoPE || !b.hasRMS {
-		return fmt.Errorf("cuda: qkv+rope+attn kernels недоступны")
+		return fmt.Errorf("cuda: qkv+rope+attn kernels unavailable")
 	}
 
 	if len(h) < embd || len(cos) < headDim/2 || len(sin) < headDim/2 || len(attn) < nHeads*headDim || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
-		return fmt.Errorf("cuda: QKVRoPEAttentionCached: короткие буферы")
+		return fmt.Errorf("cuda: QKVRoPEAttentionCached: buffers too short")
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.kvReady {
-		return fmt.Errorf("cuda: kv cache не инициализирован")
+		return fmt.Errorf("cuda: kv cache not initialized")
 	}
 
 	qM, err := b.ensureFP32Matrix(qName, qW, nHeads*headDim, embd)
@@ -1231,7 +1231,7 @@ func (b *Backend) QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormNa
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		return fmt.Errorf("cuda: qkv_rope_attn: код %d", int(rc))
+		return fmt.Errorf("cuda: qkv_rope_attn: code %d", int(rc))
 	}
 
 	return nil
@@ -1239,17 +1239,17 @@ func (b *Backend) QKVRoPEAttentionCached(qName, kName, vName, qNormName, kNormNa
 
 func (b *Backend) QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
 	if !b.hasAttn || !b.hasRoPE || !b.hasRMS {
-		return fmt.Errorf("cuda: qkv+rope+attn kernels недоступны")
+		return fmt.Errorf("cuda: qkv+rope+attn kernels unavailable")
 	}
 
 	if len(h) < embd || len(cos) < headDim/2 || len(sin) < headDim/2 || len(attn) < nHeads*headDim || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
-		return fmt.Errorf("cuda: QKVRoPEAttentionQ8_0Cached: короткие буферы")
+		return fmt.Errorf("cuda: QKVRoPEAttentionQ8_0Cached: buffers too short")
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.kvReady {
-		return fmt.Errorf("cuda: kv cache не инициализирован")
+		return fmt.Errorf("cuda: kv cache not initialized")
 	}
 
 	qM, err := b.ensureQ8Matrix(qName, qRaw, nHeads*headDim, embd)
@@ -1319,7 +1319,7 @@ func (b *Backend) QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNo
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		return fmt.Errorf("cuda: qkv_rope_attn q8: код %d", int(rc))
+		return fmt.Errorf("cuda: qkv_rope_attn q8: code %d", int(rc))
 	}
 
 	return nil
@@ -1328,7 +1328,7 @@ func (b *Backend) QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNo
 // FFNSwiGLUQuantCached: FFN SwiGLU natively for Q8_0/Q4_0/Q4_K/Q5_K/Q6_K (no host Floats)
 func (b *Backend) FFNSwiGLUQuantCached(t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
 	if !b.hasSwiGLU {
-		return fmt.Errorf("cuda: SwiGLU kernel недоступен")
+		return fmt.Errorf("cuda: SwiGLU kernel unavailable")
 	}
 
 	return b.ffnGatedQuantCached(b.fnSwiGLU, "swiglu", t, gateName, upName, downName, gateRaw, upRaw, downRaw, x, out, embd, ffn)
@@ -1337,7 +1337,7 @@ func (b *Backend) FFNSwiGLUQuantCached(t format.GGML, gateName, upName, downName
 // FFNGeGLUQuantCached: FFN GeGLU (Gemma) natively for the same quants
 func (b *Backend) FFNGeGLUQuantCached(t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
 	if !b.hasGeGLU {
-		return fmt.Errorf("cuda: GeGLU kernel недоступен")
+		return fmt.Errorf("cuda: GeGLU kernel unavailable")
 	}
 
 	return b.ffnGatedQuantCached(b.fnGeGLU, "geglu", t, gateName, upName, downName, gateRaw, upRaw, downRaw, x, out, embd, ffn)
@@ -1346,7 +1346,7 @@ func (b *Backend) FFNGeGLUQuantCached(t format.GGML, gateName, upName, downName 
 // ffnGatedQuantCached - gate/up matmul + fnAct activation + down on device
 func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t format.GGML, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
 	if len(x) < embd || len(out) < embd {
-		return fmt.Errorf("cuda: ffn %s: короткий x/out", act)
+		return fmt.Errorf("cuda: ffn %s: x/out too short", act)
 	}
 
 	b.mu.Lock()
@@ -1390,7 +1390,7 @@ func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t format.G
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		return fmt.Errorf("cuda: ffn_%s %s: код %d", act, t, int(rc))
+		return fmt.Errorf("cuda: ffn_%s %s: code %d", act, t, int(rc))
 	}
 
 	return nil
@@ -1400,11 +1400,11 @@ func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t format.G
 // With active residency x not uploaded to GPU and result stays in d_resid.
 func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
 	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
-		return fmt.Errorf("cuda: attn+ffn residual kernels недоступны")
+		return fmt.Errorf("cuda: attn+ffn residual kernels unavailable")
 	}
 
 	if len(ffnNorm) < embd {
-		return fmt.Errorf("cuda: AttnFFNResidualQuantCached: короткий ffn_norm")
+		return fmt.Errorf("cuda: AttnFFNResidualQuantCached: ffn_norm too short")
 	}
 
 	b.mu.Lock()
@@ -1415,7 +1415,7 @@ func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName,
 	resident := b.hiddenResident && len(x) == 0
 	if !resident {
 		if len(x) < embd {
-			return fmt.Errorf("cuda: AttnFFNResidualQuantCached: короткий x")
+			return fmt.Errorf("cuda: AttnFFNResidualQuantCached: x too short")
 		}
 
 		b.clearResidencyLocked()
@@ -1493,7 +1493,7 @@ func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName,
 			b.clearResidencyLocked()
 		}
 
-		return fmt.Errorf("cuda: attn_ffn_residual %s: код %d", t, int(rc))
+		return fmt.Errorf("cuda: attn_ffn_residual %s: code %d", t, int(rc))
 	}
 
 	return nil
@@ -1504,7 +1504,7 @@ func (b *Backend) AttnFFNResidualQuantCached(t format.GGML, woName, ffnNormName,
 // mode selects RoPE kernel (NeoX for Qwen/Mistral, NORM for Llama); empty qNormName/kNormName - layer without QK-norm.
 func (b *Backend) QKVRoPEAttentionQuantCached(t format.GGML, mode ops.RoPEMode, qName, kName, vName, qNormName, kNormName, attnNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, attnNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error {
 	if !b.hasAttn || !b.hasRoPE || !b.hasRMS {
-		return fmt.Errorf("cuda: qkv+rope+attn kernels недоступны")
+		return fmt.Errorf("cuda: qkv+rope+attn kernels unavailable")
 	}
 
 	fnRoPE, ropeMode, err := b.ropeKernel(mode)
@@ -1513,24 +1513,24 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t format.GGML, mode ops.RoPEMode, 
 	}
 
 	if len(cos) < headDim/2 || len(sin) < headDim/2 || len(attn) < nHeads*headDim || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
-		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: короткие буферы")
+		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: buffers too short")
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if !b.kvReady {
-		return fmt.Errorf("cuda: kv cache не инициализирован")
+		return fmt.Errorf("cuda: kv cache not initialized")
 	}
 
 	// h == nil - hidden from resident residual via RMSNorm on device
 	resident := b.hiddenResident && len(h) == 0
 	if !resident && len(h) < embd {
-		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: короткий h")
+		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: h too short")
 	}
 
 	if resident && len(attnNorm) < embd {
-		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: короткий attn_norm")
+		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: attn_norm too short")
 	}
 
 	_, fnMatmul, err := b.quantCache(t)
@@ -1620,7 +1620,7 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t format.GGML, mode ops.RoPEMode, 
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		return fmt.Errorf("cuda: qkv_rope_attn %s: код %d", t, int(rc))
+		return fmt.Errorf("cuda: qkv_rope_attn %s: code %d", t, int(rc))
 	}
 
 	return nil
@@ -1642,7 +1642,7 @@ func (b *Backend) HiddenActive() bool {
 // HiddenUpload enables residency: one HtoD hidden state per token
 func (b *Backend) HiddenUpload(x []float32) error {
 	if len(x) == 0 {
-		return fmt.Errorf("cuda: HiddenUpload: пустой x")
+		return fmt.Errorf("cuda: HiddenUpload: empty x")
 	}
 
 	b.mu.Lock()
@@ -1651,7 +1651,7 @@ func (b *Backend) HiddenUpload(x []float32) error {
 	rc := C.gguf_cuda_hidden_upload(&b.drv, b.ctx, &b.matmulPool, (*C.float)(unsafe.Pointer(&x[0])), C.int(len(x)))
 	if rc != 0 {
 		b.hiddenResident = false
-		return fmt.Errorf("cuda: hidden_upload: код %d", int(rc))
+		return fmt.Errorf("cuda: hidden_upload: code %d", int(rc))
 	}
 
 	b.matmulPool.keep_resid_device = 1
@@ -1665,20 +1665,20 @@ func (b *Backend) HiddenUpload(x []float32) error {
 // HiddenDownload fetches residual from device and disables residency
 func (b *Backend) HiddenDownload(dst []float32) error {
 	if len(dst) == 0 {
-		return fmt.Errorf("cuda: HiddenDownload: пустой dst")
+		return fmt.Errorf("cuda: HiddenDownload: empty dst")
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if !b.hiddenResident {
-		return fmt.Errorf("cuda: HiddenDownload: residency не активна")
+		return fmt.Errorf("cuda: HiddenDownload: residency not active")
 	}
 
 	rc := C.gguf_cuda_hidden_download(&b.drv, b.ctx, &b.matmulPool, (*C.float)(unsafe.Pointer(&dst[0])), C.int(len(dst)))
 	b.clearResidencyLocked()
 	if rc != 0 {
-		return fmt.Errorf("cuda: hidden_download: код %d", int(rc))
+		return fmt.Errorf("cuda: hidden_download: code %d", int(rc))
 	}
 
 	return nil
@@ -1687,18 +1687,18 @@ func (b *Backend) HiddenDownload(dst []float32) error {
 // LogitsFromDevice: out_norm + lm_head on GPU over resident hidden; DtoH only logits
 func (b *Backend) LogitsFromDevice(t format.GGML, normName string, norm []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error {
 	if !b.hasRMS {
-		return fmt.Errorf("cuda: rmsnorm kernel недоступен")
+		return fmt.Errorf("cuda: rmsnorm kernel unavailable")
 	}
 
 	if len(norm) < embd || len(logits) < vocab {
-		return fmt.Errorf("cuda: LogitsFromDevice: короткие буферы")
+		return fmt.Errorf("cuda: LogitsFromDevice: buffers too short")
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if !b.hiddenResident {
-		return fmt.Errorf("cuda: LogitsFromDevice: residency не активна")
+		return fmt.Errorf("cuda: LogitsFromDevice: residency not active")
 	}
 
 	normM, err := b.ensureFP32Matrix(normName, norm, embd, 1)
@@ -1744,7 +1744,7 @@ func (b *Backend) LogitsFromDevice(t format.GGML, normName string, norm []float3
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
 	if rc != 0 {
-		return fmt.Errorf("cuda: logits_from_device: код %d", int(rc))
+		return fmt.Errorf("cuda: logits_from_device: code %d", int(rc))
 	}
 
 	return nil
@@ -1773,11 +1773,11 @@ func (b *Backend) prepareVecUpload(vec []float32) {
 
 func (b *Backend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 	if !b.hasRMS {
-		return fmt.Errorf("cuda: rmsnorm kernel недоступен")
+		return fmt.Errorf("cuda: rmsnorm kernel unavailable")
 	}
 
 	if len(dst) != len(x) || len(x) != len(weight) || len(x) == 0 {
-		return fmt.Errorf("cuda: RMSNormInto: несовпадение длин")
+		return fmt.Errorf("cuda: RMSNormInto: length mismatch")
 	}
 
 	rc := C.gguf_cuda_rmsnorm(
@@ -1791,7 +1791,7 @@ func (b *Backend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 		C.float(eps),
 	)
 	if rc != 0 {
-		return fmt.Errorf("cuda: rmsnorm: код %d", int(rc))
+		return fmt.Errorf("cuda: rmsnorm: code %d", int(rc))
 	}
 
 	return nil
@@ -1799,20 +1799,20 @@ func (b *Backend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 
 func (b *Backend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error {
 	if !b.hasRoPE {
-		return fmt.Errorf("cuda: rope kernel недоступен")
+		return fmt.Errorf("cuda: rope kernel unavailable")
 	}
 
 	half := headDim / 2
 	if nHeads <= 0 || headDim <= 0 || half*2 != headDim {
-		return fmt.Errorf("cuda: ApplyRoPEHeads: неверные размеры")
+		return fmt.Errorf("cuda: ApplyRoPEHeads: invalid dimensions")
 	}
 
 	if len(v) < nHeads*headDim {
-		return fmt.Errorf("cuda: ApplyRoPEHeads: v слишком короткий")
+		return fmt.Errorf("cuda: ApplyRoPEHeads: v too short")
 	}
 
 	if half > ops.MaxRoPEPairs() {
-		return fmt.Errorf("cuda: head_dim=%d слишком велик для GPU RoPE", headDim)
+		return fmt.Errorf("cuda: head_dim=%d too large for GPU RoPE", headDim)
 	}
 
 	cos := make([]float32, half)
@@ -1821,7 +1821,7 @@ func (b *Backend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase
 
 	rc := C.gguf_cuda_rope_heads(&b.drv, b.ctx, b.fnRoPE, (*C.float)(unsafe.Pointer(&v[0])), (*C.float)(unsafe.Pointer(&cos[0])), (*C.float)(unsafe.Pointer(&sin[0])), C.int(nHeads), C.int(headDim), C.int(half))
 	if rc != 0 {
-		return fmt.Errorf("cuda: rope_heads: код %d", int(rc))
+		return fmt.Errorf("cuda: rope_heads: code %d", int(rc))
 	}
 
 	return nil
@@ -1829,20 +1829,20 @@ func (b *Backend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase
 
 func (b *Backend) ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error {
 	if !b.hasRoPENorm {
-		return fmt.Errorf("cuda: rope_heads_norm kernel недоступен")
+		return fmt.Errorf("cuda: rope_heads_norm kernel unavailable")
 	}
 
 	half := headDim / 2
 	if nHeads <= 0 || headDim <= 0 || half*2 != headDim {
-		return fmt.Errorf("cuda: ApplyRoPEHeadsNorm: неверные размеры")
+		return fmt.Errorf("cuda: ApplyRoPEHeadsNorm: invalid dimensions")
 	}
 
 	if len(v) < nHeads*headDim {
-		return fmt.Errorf("cuda: ApplyRoPEHeadsNorm: v слишком короткий")
+		return fmt.Errorf("cuda: ApplyRoPEHeadsNorm: v too short")
 	}
 
 	if half > ops.MaxRoPEPairs() {
-		return fmt.Errorf("cuda: head_dim=%d слишком велик для GPU RoPE Norm", headDim)
+		return fmt.Errorf("cuda: head_dim=%d too large for GPU RoPE Norm", headDim)
 	}
 
 	cos := make([]float32, half)
@@ -1851,7 +1851,7 @@ func (b *Backend) ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freq
 
 	rc := C.gguf_cuda_rope_heads(&b.drv, b.ctx, b.fnRoPENorm, (*C.float)(unsafe.Pointer(&v[0])), (*C.float)(unsafe.Pointer(&cos[0])), (*C.float)(unsafe.Pointer(&sin[0])), C.int(nHeads), C.int(headDim), C.int(half))
 	if rc != 0 {
-		return fmt.Errorf("cuda: rope_heads_norm: код %d", int(rc))
+		return fmt.Errorf("cuda: rope_heads_norm: code %d", int(rc))
 	}
 
 	return nil
@@ -1859,7 +1859,7 @@ func (b *Backend) ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freq
 
 func (b *Backend) SwiGLUInPlace(gate, up []float32) error {
 	if !b.hasSwiGLU {
-		return fmt.Errorf("cuda: swiglu kernel недоступен")
+		return fmt.Errorf("cuda: swiglu kernel unavailable")
 	}
 
 	if len(gate) != len(up) {
@@ -1872,7 +1872,7 @@ func (b *Backend) SwiGLUInPlace(gate, up []float32) error {
 
 	rc := C.gguf_cuda_swiglu(&b.drv, b.ctx, b.fnSwiGLU, (*C.float)(unsafe.Pointer(&gate[0])), (*C.float)(unsafe.Pointer(&up[0])), C.int(len(gate)))
 	if rc != 0 {
-		return fmt.Errorf("cuda: swiglu: код %d", int(rc))
+		return fmt.Errorf("cuda: swiglu: code %d", int(rc))
 	}
 
 	return nil
@@ -1881,24 +1881,24 @@ func (b *Backend) SwiGLUInPlace(gate, up []float32) error {
 func (b *Backend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	_ = scores
 	if !b.hasAttn {
-		return fmt.Errorf("cuda: attention kernels недоступны")
+		return fmt.Errorf("cuda: attention kernels unavailable")
 	}
 
 	if len(dst) < nHeads*headDim {
-		return fmt.Errorf("cuda: AttentionScoresInto: dst слишком короткий")
+		return fmt.Errorf("cuda: AttentionScoresInto: dst too short")
 	}
 
 	if seqLen <= 0 || nHeads <= 0 || nKVHeads <= 0 || headDim <= 0 || nHeads%nKVHeads != 0 {
-		return fmt.Errorf("cuda: AttentionScoresInto: неверные размеры")
+		return fmt.Errorf("cuda: AttentionScoresInto: invalid dimensions")
 	}
 
 	kvStride := nKVHeads * headDim
 	if len(q) < nHeads*headDim {
-		return fmt.Errorf("cuda: AttentionScoresInto: q слишком короткий")
+		return fmt.Errorf("cuda: AttentionScoresInto: q too short")
 	}
 
 	if len(k) < seqLen*kvStride || len(v) < seqLen*kvStride {
-		return fmt.Errorf("cuda: AttentionScoresInto: k/v слишком короткие")
+		return fmt.Errorf("cuda: AttentionScoresInto: k/v too short")
 	}
 
 	fnSM := b.fnSoftmax
@@ -1920,7 +1920,7 @@ func (b *Backend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nH
 		C.int(nKVHeads),
 		C.int(headDim))
 	if rc != 0 {
-		return fmt.Errorf("cuda: attention: код %d", int(rc))
+		return fmt.Errorf("cuda: attention: code %d", int(rc))
 	}
 
 	return nil
@@ -1928,7 +1928,7 @@ func (b *Backend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nH
 
 func (b *Backend) KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error {
 	if !b.hasAttn {
-		return fmt.Errorf("cuda: attention kernels недоступны")
+		return fmt.Errorf("cuda: attention kernels unavailable")
 	}
 
 	b.mu.Lock()
@@ -1944,14 +1944,14 @@ func (b *Backend) KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error 
 
 	rc := C.gguf_cuda_kv_init(&b.drv, b.ctx, &b.kvCache, C.int(layers), C.int(maxSeq), C.int(kvDim))
 	if rc != 0 {
-		return fmt.Errorf("cuda: kv_init: код %d", int(rc))
+		return fmt.Errorf("cuda: kv_init: code %d", int(rc))
 	}
 
 	qBytes := nHeads * headDim
 	rc = C.gguf_cuda_attn_pool_init(&b.drv, b.ctx, &b.attnPool, C.int(qBytes), C.int(maxSeq), C.int(kvDim), C.int(headDim/2))
 	if rc != 0 {
 		C.gguf_cuda_kv_free(&b.drv, &b.kvCache)
-		return fmt.Errorf("cuda: attn_pool_init: код %d", int(rc))
+		return fmt.Errorf("cuda: attn_pool_init: code %d", int(rc))
 	}
 
 	b.kvReady = true
@@ -1964,14 +1964,14 @@ func (b *Backend) KVCacheReset() {
 
 func (b *Backend) KVCacheAppend(layer, pos int, k, v []float32) error {
 	if len(k) == 0 || len(v) == 0 {
-		return fmt.Errorf("cuda: KVCacheAppend: пустой k/v")
+		return fmt.Errorf("cuda: KVCacheAppend: empty k/v")
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if !b.kvReady {
-		return fmt.Errorf("cuda: kv cache не инициализирован")
+		return fmt.Errorf("cuda: kv cache not initialized")
 	}
 
 	rc := C.gguf_cuda_kv_append(
@@ -1984,7 +1984,7 @@ func (b *Backend) KVCacheAppend(layer, pos int, k, v []float32) error {
 		(*C.float)(unsafe.Pointer(&v[0])),
 	)
 	if rc != 0 {
-		return fmt.Errorf("cuda: kv_append layer=%d pos=%d: код %d", layer, pos, int(rc))
+		return fmt.Errorf("cuda: kv_append layer=%d pos=%d: code %d", layer, pos, int(rc))
 	}
 
 	return nil
@@ -1996,18 +1996,18 @@ func (b *Backend) KVCacheAppendN(layer, pos int, k, v []float32, n int) error {
 	}
 
 	if len(k) == 0 || len(v) == 0 {
-		return fmt.Errorf("cuda: KVCacheAppendN: пустой k/v")
+		return fmt.Errorf("cuda: KVCacheAppendN: empty k/v")
 	}
 
 	if len(k)%n != 0 || len(v)%n != 0 {
-		return fmt.Errorf("cuda: KVCacheAppendN: len(k)=%d len(v)=%d не кратны n=%d", len(k), len(v), n)
+		return fmt.Errorf("cuda: KVCacheAppendN: len(k)=%d len(v)=%d not divisible by n=%d", len(k), len(v), n)
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if !b.kvReady {
-		return fmt.Errorf("cuda: kv cache не инициализирован")
+		return fmt.Errorf("cuda: kv cache not initialized")
 	}
 
 	rc := C.gguf_cuda_kv_append_n(
@@ -2021,7 +2021,7 @@ func (b *Backend) KVCacheAppendN(layer, pos int, k, v []float32, n int) error {
 		C.int(n),
 	)
 	if rc != 0 {
-		return fmt.Errorf("cuda: kv_append_n layer=%d pos=%d n=%d: код %d", layer, pos, n, int(rc))
+		return fmt.Errorf("cuda: kv_append_n layer=%d pos=%d n=%d: code %d", layer, pos, n, int(rc))
 	}
 
 	return nil
@@ -2029,22 +2029,22 @@ func (b *Backend) KVCacheAppendN(layer, pos int, k, v []float32, n int) error {
 
 func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	if !b.hasAttn {
-		return fmt.Errorf("cuda: attention kernels недоступны")
+		return fmt.Errorf("cuda: attention kernels unavailable")
 	}
 
 	if len(dst) < nHeads*headDim {
-		return fmt.Errorf("cuda: AttentionScoresKV: dst слишком короткий")
+		return fmt.Errorf("cuda: AttentionScoresKV: dst too short")
 	}
 
 	if len(q) < nHeads*headDim {
-		return fmt.Errorf("cuda: AttentionScoresKV: q слишком короткий")
+		return fmt.Errorf("cuda: AttentionScoresKV: q too short")
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if !b.kvReady {
-		return fmt.Errorf("cuda: kv cache не инициализирован")
+		return fmt.Errorf("cuda: kv cache not initialized")
 	}
 
 	fnSM := b.fnSoftmax
@@ -2068,7 +2068,7 @@ func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads,
 		C.int(headDim),
 	)
 	if rc != 0 {
-		return fmt.Errorf("cuda: kv_attention layer=%d: код %d", layer, int(rc))
+		return fmt.Errorf("cuda: kv_attention layer=%d: code %d", layer, int(rc))
 	}
 
 	return nil
@@ -2084,7 +2084,7 @@ func validateMatMul(matrix []float32, rows, cols int, vec []float32) error {
 	}
 
 	if len(matrix) < rows*cols {
-		return fmt.Errorf("cuda: matrix слишком короткая")
+		return fmt.Errorf("cuda: matrix too short")
 	}
 
 	return nil
@@ -2096,7 +2096,7 @@ func validateQ8MatMul(raw []byte, rows, cols int, vec []float32) error {
 	}
 
 	if cols%quant.QK8_0 != 0 {
-		return fmt.Errorf("cuda: cols=%d не кратно %d", cols, quant.QK8_0)
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK8_0)
 	}
 
 	if len(vec) != cols {
@@ -2106,7 +2106,7 @@ func validateQ8MatMul(raw []byte, rows, cols int, vec []float32) error {
 	blocksPerRow := cols / quant.QK8_0
 	want := rows * blocksPerRow * quant.BlockQ8_0Size
 	if len(raw) < want {
-		return fmt.Errorf("cuda: Q8_0 matrix слишком короткая")
+		return fmt.Errorf("cuda: Q8_0 matrix too short")
 	}
 
 	return nil
@@ -2118,7 +2118,7 @@ func validateQ4MatMul(raw []byte, rows, cols int, vec []float32) error {
 	}
 
 	if cols%quant.QK4_0 != 0 {
-		return fmt.Errorf("cuda: cols=%d не кратно %d", cols, quant.QK4_0)
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK4_0)
 	}
 
 	if len(vec) != cols {
@@ -2128,7 +2128,7 @@ func validateQ4MatMul(raw []byte, rows, cols int, vec []float32) error {
 	blocksPerRow := cols / quant.QK4_0
 	want := rows * blocksPerRow * quant.BlockQ4_0Size
 	if len(raw) < want {
-		return fmt.Errorf("cuda: Q4_0 matrix слишком короткая")
+		return fmt.Errorf("cuda: Q4_0 matrix too short")
 	}
 
 	return nil
@@ -2140,7 +2140,7 @@ func validateQ4KMatMul(raw []byte, rows, cols int, vec []float32) error {
 	}
 
 	if cols%quant.QK_K != 0 {
-		return fmt.Errorf("cuda: cols=%d не кратно %d", cols, quant.QK_K)
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK_K)
 	}
 
 	if len(vec) != cols {
@@ -2150,7 +2150,7 @@ func validateQ4KMatMul(raw []byte, rows, cols int, vec []float32) error {
 	blocksPerRow := cols / quant.QK_K
 	want := rows * blocksPerRow * quant.BlockQ4_KSize
 	if len(raw) < want {
-		return fmt.Errorf("cuda: Q4_K matrix слишком короткая")
+		return fmt.Errorf("cuda: Q4_K matrix too short")
 	}
 
 	return nil
@@ -2162,7 +2162,7 @@ func validateQ5KMatMul(raw []byte, rows, cols int, vec []float32) error {
 	}
 
 	if cols%quant.QK_K != 0 {
-		return fmt.Errorf("cuda: cols=%d не кратно %d", cols, quant.QK_K)
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK_K)
 	}
 
 	if len(vec) != cols {
@@ -2172,7 +2172,7 @@ func validateQ5KMatMul(raw []byte, rows, cols int, vec []float32) error {
 	blocksPerRow := cols / quant.QK_K
 	want := rows * blocksPerRow * quant.BlockQ5_KSize
 	if len(raw) < want {
-		return fmt.Errorf("cuda: Q5_K matrix слишком короткая")
+		return fmt.Errorf("cuda: Q5_K matrix too short")
 	}
 
 	return nil
@@ -2184,7 +2184,7 @@ func validateQ6KMatMul(raw []byte, rows, cols int, vec []float32) error {
 	}
 
 	if cols%quant.QK_K != 0 {
-		return fmt.Errorf("cuda: cols=%d не кратно %d", cols, quant.QK_K)
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK_K)
 	}
 
 	if len(vec) != cols {
@@ -2194,7 +2194,7 @@ func validateQ6KMatMul(raw []byte, rows, cols int, vec []float32) error {
 	blocksPerRow := cols / quant.QK_K
 	want := rows * blocksPerRow * quant.BlockQ6_KSize
 	if len(raw) < want {
-		return fmt.Errorf("cuda: Q6_K matrix слишком короткая")
+		return fmt.Errorf("cuda: Q6_K matrix too short")
 	}
 
 	return nil

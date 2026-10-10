@@ -12,11 +12,11 @@ import (
 func TestSwiGLUGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 
 	if !b.hasSwiGLU {
-		t.Skip("CUDA swiglu kernel недоступен")
+		t.Skip("CUDA swiglu kernel unavailable")
 	}
 
 	defer b.Close()

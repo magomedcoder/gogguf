@@ -164,7 +164,7 @@ func ParseConfig(r *format.Reader) (Config, error) {
 
 	if denseLead < layers {
 		if nExpert <= 0 || nUsed <= 0 || expertFFN <= 0 {
-			return Config{}, fmt.Errorf("deepseek2: MoE требует expert_count/used/ffn")
+			return Config{}, fmt.Errorf("deepseek2: MoE requires expert_count/used/ffn")
 		}
 	}
 
@@ -283,7 +283,7 @@ func vocabSize(r *format.Reader, emb int) (int, error) {
 	}
 
 	if len(info.Dimensions) != 2 {
-		return 0, fmt.Errorf("deepseek2: token_embd.weight: ожидается 2D")
+		return 0, fmt.Errorf("deepseek2: token_embd.weight: expected 2D")
 	}
 
 	a, b := int(info.Dimensions[0]), int(info.Dimensions[1])
@@ -295,5 +295,5 @@ func vocabSize(r *format.Reader, emb int) (int, error) {
 		return a, nil
 	}
 
-	return 0, fmt.Errorf("deepseek2: token_embd %v без emb=%d", info.Dimensions, emb)
+	return 0, fmt.Errorf("deepseek2: token_embd %v missing emb=%d", info.Dimensions, emb)
 }

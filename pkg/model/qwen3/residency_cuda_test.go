@@ -30,7 +30,7 @@ func loadResidentModel(t *testing.T, gpuMaxSeq, nBatch int) *Model {
 	}
 
 	if path == "" {
-		t.Skip("нет Qwen3-0.6B-Q8_0.gguf")
+		t.Skip("missing Qwen3-0.6B-Q8_0.gguf")
 	}
 
 	r, err := format.OpenFile(path)
@@ -40,13 +40,13 @@ func loadResidentModel(t *testing.T, gpuMaxSeq, nBatch int) *Model {
 
 	g, err := gpu.OpenCUDA()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 
 	m, err := Load(weights.New(r), g, 999, gpuMaxSeq, nBatch)
 	if err != nil {
 		g.Close()
-		t.Skip("offload недоступен:", err)
+		t.Skip("offload unavailable:", err)
 	}
 
 	return m
@@ -55,7 +55,7 @@ func loadResidentModel(t *testing.T, gpuMaxSeq, nBatch int) *Model {
 func skipOOM(t *testing.T, err error) {
 	t.Helper()
 	if gpu.IsOutOfMemory(err) {
-		t.Skip("не хватило VRAM:", err)
+		t.Skip("insufficient VRAM:", err)
 	}
 }
 
@@ -65,11 +65,11 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 	defer m.Close()
 
 	if !m.residency {
-		t.Fatal("ожидали residency=true при полном offload Q8_0")
+		t.Fatal("expected residency=true with full Q8_0 offload")
 	}
 
 	if !m.logitsOnGPU {
-		t.Fatal("ожидали logitsOnGPU=true при полном offload Q8_0")
+		t.Fatal("expected logitsOnGPU=true with full Q8_0 offload")
 	}
 
 	if err := m.forwardToken(1, 0, false); err != nil {
@@ -79,7 +79,7 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 
 	// after all layers hidden still on device: no DtoH
 	if !m.residDevice || !m.residency {
-		t.Skip("residency откатилась на host (вероятно нехватка VRAM)")
+		t.Skip("residency fell back to host (likely insufficient VRAM)")
 	}
 
 	// logits come from d_resid; host buffer x is not needed
@@ -89,7 +89,7 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 	}
 
 	if !m.logitsOnGPU {
-		t.Fatal("logitsOnGPU сброшен: GPU lm_head не сработал")
+		t.Fatal("logitsOnGPU cleared: GPU lm_head failed")
 	}
 }
 
@@ -105,7 +105,7 @@ func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 	}
 
 	if m.gpuKVStale {
-		t.Fatal("GPU KV-cache помечен stale: KVCacheAppendN не сработал")
+		t.Fatal("GPU KV-cache marked stale: KVCacheAppendN failed")
 	}
 
 	// decode after batch must use the resident GPU path again
@@ -115,7 +115,7 @@ func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 	}
 
 	if !m.residDevice {
-		t.Fatal("decode после batch не пошёл по device-резидентному пути")
+		t.Fatal("decode after batch did not use device-resident path")
 	}
 }
 
@@ -144,7 +144,7 @@ func TestGPUBatchMatmulAttnParity(t *testing.T) {
 	}
 
 	if batch.gpuKVStale {
-		t.Fatal("GPU KV stale после успешного batch-prefill")
+		t.Fatal("GPU KV stale after successful batch-prefill")
 	}
 
 	var worst float64
@@ -185,7 +185,7 @@ func TestGPUKVStaleFallsBackToCPUAttention(t *testing.T) {
 	}
 
 	if !small.gpuKVStale {
-		t.Fatal("ожидали gpuKVStale=true при GPU KV меньше промпта")
+		t.Fatal("expected gpuKVStale=true when GPU KV shorter than prompt")
 	}
 
 	var worst float64
@@ -196,7 +196,7 @@ func TestGPUKVStaleFallsBackToCPUAttention(t *testing.T) {
 	}
 
 	if worst > 0.5 {
-		t.Fatalf("logits после gpuKVStale расходятся: max|diff|=%v", worst)
+		t.Fatalf("logits after gpuKVStale diverge: max|diff|=%v", worst)
 	}
 
 	// further decode must remain correct (without GPU KV)

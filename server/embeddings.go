@@ -32,19 +32,19 @@ type embeddingsUsage struct {
 
 func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "метод не разрешен", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
 	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "не удалось прочитать тело", "invalid_request_error")
+		writeAPIError(w, http.StatusBadRequest, "failed to read body", "invalid_request_error")
 		return
 	}
 
 	var req embeddingsRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "некорректный JSON", "invalid_request_error")
+		writeAPIError(w, http.StatusBadRequest, "invalid JSON", "invalid_request_error")
 		return
 	}
 
@@ -54,7 +54,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(inputs) == 0 {
-		writeAPIError(w, http.StatusBadRequest, "input пустой", "invalid_request_error")
+		writeAPIError(w, http.StatusBadRequest, "input is empty", "invalid_request_error")
 		return
 	}
 
@@ -122,14 +122,14 @@ type embedInput struct {
 
 func parseEmbeddingsInput(raw json.RawMessage) ([]embedInput, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return nil, fmt.Errorf("input обязателен")
+		return nil, fmt.Errorf("input is required")
 	}
 
 	switch raw[0] {
 	case '"':
 		var s string
 		if err := json.Unmarshal(raw, &s); err != nil {
-			return nil, fmt.Errorf("input: ожидалась строка")
+			return nil, fmt.Errorf("input: expected a string")
 		}
 		return []embedInput{{text: s}}, nil
 	case '[':
@@ -159,8 +159,8 @@ func parseEmbeddingsInput(raw json.RawMessage) ([]embedInput, error) {
 
 			return out, nil
 		}
-		return nil, fmt.Errorf("input: ожидается string, []string, []int или [][]int")
+		return nil, fmt.Errorf("input: expected string, []string, []int, or [][]int")
 	default:
-		return nil, fmt.Errorf("input: неподдерживаемый тип")
+		return nil, fmt.Errorf("input: unsupported type")
 	}
 }

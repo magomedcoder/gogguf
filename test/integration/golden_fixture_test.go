@@ -53,12 +53,12 @@ func loadGolden(t *testing.T) goldenFile {
 		}
 	}
 	if data == nil {
-		t.Skip("golden fixture не найден")
+		t.Skip("golden fixture not found")
 	}
 
 	var gf goldenFile
 	if err := json.Unmarshal(data, &gf); err != nil {
-		t.Fatalf("не удалось разобрать fixture: %v", err)
+		t.Fatalf("failed to parse fixture: %v", err)
 	}
 	return gf
 }
@@ -67,7 +67,7 @@ func TestGoldenFixture(t *testing.T) {
 	gf := loadGolden(t)
 	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
-		t.Fatalf("не удалось загрузить модель: %v", err)
+		t.Fatalf("failed to load model: %v", err)
 	}
 
 	for _, tc := range gf.Cases {
@@ -80,12 +80,12 @@ func TestGoldenFixture(t *testing.T) {
 				}
 
 				if len(ids) != len(tc.Encode) {
-					t.Fatalf("Encode(%q) = %v, ожидали %v", tc.Input, ids, tc.Encode)
+					t.Fatalf("Encode(%q) = %v, expected %v", tc.Input, ids, tc.Encode)
 				}
 
 				for i := range ids {
 					if ids[i] != tc.Encode[i] {
-						t.Fatalf("Encode(%q)[%d] = %d, ожидали %d", tc.Input, i, ids[i], tc.Encode[i])
+						t.Fatalf("Encode(%q)[%d] = %d, expected %d", tc.Input, i, ids[i], tc.Encode[i])
 					}
 				}
 
@@ -121,12 +121,12 @@ func TestGoldenFixture(t *testing.T) {
 
 				got := sess.GeneratedTokens()
 				if len(got) != len(tc.GreedyTokens) {
-					t.Fatalf("greedy tokens = %v (len %d), ожидали %v (len %d)", got, len(got), tc.GreedyTokens, len(tc.GreedyTokens))
+					t.Fatalf("greedy tokens = %v (len %d), expected %v (len %d)", got, len(got), tc.GreedyTokens, len(tc.GreedyTokens))
 				}
 
 				for i := range got {
 					if got[i] != tc.GreedyTokens[i] {
-						t.Fatalf("token[%d] = %d, ожидали %d (full: %v)", i, got[i], tc.GreedyTokens[i], got)
+						t.Fatalf("token[%d] = %d, expected %d (full: %v)", i, got[i], tc.GreedyTokens[i], got)
 					}
 				}
 
@@ -151,13 +151,13 @@ func TestGoldenFixture(t *testing.T) {
 
 				next := gogguf.Greedy(logits)
 				if next != tc.GreedyNext {
-					t.Fatalf("greedy next = %d, ожидали %d", next, tc.GreedyNext)
+					t.Fatalf("greedy next = %d, expected %d", next, tc.GreedyNext)
 				}
 
 				for _, want := range tc.TopLogits {
 					got := logits[want.ID]
 					if math.Abs(float64(got-want.Logit)) > 1e-4 {
-						t.Fatalf("logit[%d] = %v, ожидали ~%v", want.ID, got, want.Logit)
+						t.Fatalf("logit[%d] = %v, expected ~%v", want.ID, got, want.Logit)
 					}
 				}
 
@@ -175,13 +175,13 @@ func TestGoldenFixture(t *testing.T) {
 
 				next := gogguf.Greedy(logits)
 				if next != tc.GreedyNext {
-					t.Fatalf("greedy next = %d, ожидали %d", next, tc.GreedyNext)
+					t.Fatalf("greedy next = %d, expected %d", next, tc.GreedyNext)
 				}
 
 				for _, want := range tc.TopLogits {
 					got := logits[want.ID]
 					if math.Abs(float64(got-want.Logit)) > 1e-4 {
-						t.Fatalf("logit[%d] = %v, ожидали ~%v", want.ID, got, want.Logit)
+						t.Fatalf("logit[%d] = %v, expected ~%v", want.ID, got, want.Logit)
 					}
 				}
 			}
@@ -199,5 +199,5 @@ func TestFixtureFilePresent(t *testing.T) {
 		}
 	}
 
-	t.Fatal("qwen3_golden.json не найден в репозитории")
+	t.Fatal("qwen3_golden.json not found in repository")
 }

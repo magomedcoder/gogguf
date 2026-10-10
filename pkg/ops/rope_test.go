@@ -46,7 +46,7 @@ func TestApplyRoPE(t *testing.T) {
 	v := []float32{1, 0, 1, 0}
 	ApplyRoPE(v, 1, 10000)
 	if v[0] == 1 && v[1] == 0 {
-		t.Fatalf("RoPE не изменил вектор: %v", v)
+		t.Fatalf("RoPE did not change vector: %v", v)
 	}
 }
 
@@ -65,12 +65,12 @@ func TestApplyRoPEPartialScaledFactors(t *testing.T) {
 	ApplyRoPEPartial(half, 1, 10000, 4)
 	for i := range scaled {
 		if math.Abs(float64(scaled[i]-half[i])) > 1e-5 {
-			t.Fatalf("[%d] factors=2 pos=2 -> %v, ожидали как pos=1: %v", i, scaled[i], half[i])
+			t.Fatalf("[%d] factors=2 pos=2 -> %v, want same as pos=1: %v", i, scaled[i], half[i])
 		}
 	}
 
 	if math.Abs(float64(scaled[0]-plain[0])) < 1e-4 {
-		t.Fatalf("factors должны менять RoPE: scaled=%v plain=%v", scaled, plain)
+		t.Fatalf("factors must change RoPE: scaled=%v plain=%v", scaled, plain)
 	}
 }
 

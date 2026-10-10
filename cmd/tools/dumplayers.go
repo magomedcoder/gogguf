@@ -16,11 +16,11 @@ import (
 // runDumpLayers writes embed + hidden after each layer (.bin/.json).
 func runDumpLayers(args []string) error {
 	fs := flag.NewFlagSet("dumplayers", flag.ContinueOnError)
-	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")
-	prompt := fs.String("p", "Hello", "промпт")
+	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "path to GGUF")
+	prompt := fs.String("p", "Hello", "prompt")
 	chatMode := fs.Bool("chat", false, "chat template")
-	out := fs.String("o", "", "префикс выхода")
-	ngl := fs.Int("ngl", 0, "слоёв на GPU")
+	out := fs.String("o", "", "output prefix")
+	ngl := fs.Int("ngl", 0, "layers on GPU")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -46,7 +46,7 @@ func runDumpLayers(args []string) error {
 		return err
 	}
 
-	fmt.Printf("записано %s.bin / %s.json (embd=%d layers=%d)\n", prefix, prefix, len(dump.Embed), len(dump.Layers))
+	fmt.Printf("wrote %s.bin / %s.json (embd=%d layers=%d)\n", prefix, prefix, len(dump.Embed), len(dump.Layers))
 
 	return nil
 }
@@ -79,7 +79,7 @@ func collectLayersDump(modelPath, prompt string, chat bool, ngl int) (debug.Laye
 
 	var dump debug.LayersDump
 	if !setLayerHiddenHooks(engine, &dump) {
-		return debug.LayersDump{}, debug.LayersMeta{}, fmt.Errorf("модель не поддерживает debug hooks")
+		return debug.LayersDump{}, debug.LayersMeta{}, fmt.Errorf("model does not support debug hooks")
 	}
 
 	engine.Model.ResetCache()

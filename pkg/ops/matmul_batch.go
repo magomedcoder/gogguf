@@ -13,15 +13,15 @@ func MatMulMatInto(matrix []float32, rows, cols int, x []float32, batch int, out
 	}
 
 	if len(x) < batch*cols {
-		return fmt.Errorf("ops: x слишком короткий для batch=%d", batch)
+		return fmt.Errorf("ops: x too short for batch=%d", batch)
 	}
 
 	if len(out) < batch*rows {
-		return fmt.Errorf("ops: out слишком короткий для batch=%d", batch)
+		return fmt.Errorf("ops: out too short for batch=%d", batch)
 	}
 
 	if len(matrix) < rows*cols {
-		return fmt.Errorf("ops: matrix слишком короткая")
+		return fmt.Errorf("ops: matrix too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -42,21 +42,21 @@ func MatMulMatQ8_0Into(raw []byte, rows, cols int, x []float32, batch int, out [
 	}
 
 	if len(x) < batch*cols {
-		return fmt.Errorf("ops: x слишком короткий для batch=%d", batch)
+		return fmt.Errorf("ops: x too short for batch=%d", batch)
 	}
 
 	if len(out) < batch*rows {
-		return fmt.Errorf("ops: out слишком короткий для batch=%d", batch)
+		return fmt.Errorf("ops: out too short for batch=%d", batch)
 	}
 
 	if cols%quant.QK8_0 != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK8_0)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK8_0)
 	}
 
 	blocksPerRow := cols / quant.QK8_0
 	want := rows * blocksPerRow * quant.BlockQ8_0Size
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q8_0 matrix слишком короткая")
+		return fmt.Errorf("ops: Q8_0 matrix too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -86,7 +86,7 @@ func MatMulMatViaVecInto(batch int, rows, cols int, x, out []float32, mul func(v
 	}
 
 	if len(x) < batch*cols || len(out) < batch*rows {
-		return fmt.Errorf("ops: буферы слишком короткие для batch=%d", batch)
+		return fmt.Errorf("ops: buffers too short for batch=%d", batch)
 	}
 
 	for b := range batch {

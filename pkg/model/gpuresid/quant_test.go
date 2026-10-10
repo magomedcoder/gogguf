@@ -27,7 +27,7 @@ func TestQuantBytes(t *testing.T) {
 		}
 
 		if got != c.want {
-			t.Fatalf("%s: %d байт, ожидали %d", c.t, got, c.want)
+			t.Fatalf("%s: %d bytes, expected %d", c.t, got, c.want)
 		}
 	}
 }
@@ -35,14 +35,14 @@ func TestQuantBytes(t *testing.T) {
 // expert slice must require cols divisible by block size and known type
 func TestQuantBytesErrors(t *testing.T) {
 	if _, err := QuantBytes(format.GgmlQ4_K, 2, 300); err == nil {
-		t.Fatal("ожидали ошибку на cols не кратном QK_K")
+		t.Fatal("expected error for cols not divisible by QK_K")
 	}
 
 	if _, err := QuantBytes(format.GgmlQ2_K, 2, 256); err == nil {
-		t.Fatal("ожидали ошибку на неподдерживаемом типе")
+		t.Fatal("expected error for unsupported type")
 	}
 
 	if _, err := QuantBytes(format.GgmlQ8_0, 0, 64); err == nil {
-		t.Fatal("ожидали ошибку на rows=0")
+		t.Fatal("expected error for rows=0")
 	}
 }

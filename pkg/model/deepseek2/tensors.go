@@ -111,7 +111,7 @@ func loadLayerTensors(w *weights.Store, cfg Config) ([]layerTensors, error) {
 		} else {
 			lt.kvB = p + "attn_kv_b.weight"
 			if _, err := w.Info(lt.kvB); err != nil {
-				return nil, fmt.Errorf("deepseek2: нужен attn_k_b/attn_v_b или attn_kv_b: %w", err)
+				return nil, fmt.Errorf("deepseek2: need attn_k_b/attn_v_b or attn_kv_b: %w", err)
 			}
 		}
 

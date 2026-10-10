@@ -13,7 +13,7 @@ func TestParseAssistantOutputToolCall(t *testing.T) {
 
 	got := ParseAssistantOutput(text)
 	if !got.HasToolCalls() {
-		t.Fatal("ожидали tool_calls")
+		t.Fatal("expected tool_calls")
 	}
 
 	if got.FinishReason() != "tool_calls" {
@@ -46,7 +46,7 @@ func TestParseAssistantOutputNoTools(t *testing.T) {
 	text := "Hello!"
 	got := ParseAssistantOutput(text)
 	if got.HasToolCalls() {
-		t.Fatal("не ожидали tool_calls")
+		t.Fatal("did not expect tool_calls")
 	}
 
 	if got.Content != text {
@@ -102,15 +102,15 @@ func TestFormatMessagesWithToolsFallback(t *testing.T) {
 	}
 
 	if !strings.Contains(got, "get_weather") {
-		t.Fatalf("ожидали имя инструмента в промпте: %q", got)
+		t.Fatalf("expected tool name in prompt: %q", got)
 	}
 
 	if !strings.Contains(got, "<tool_call>") {
-		t.Fatalf("ожидали инструкцию tool_call: %q", got)
+		t.Fatalf("expected tool_call instruction: %q", got)
 	}
 
 	if !strings.Contains(got, "Weather in Moscow?") {
-		t.Fatalf("ожидали user message: %q", got)
+		t.Fatalf("expected user message: %q", got)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestJinjaContextIncludesTools(t *testing.T) {
 	})
 
 	if _, ok := ctx["tools"]; !ok {
-		t.Fatal("ожидали tools в контексте")
+		t.Fatal("expected tools in context")
 	}
 
 	if ctx["tool_choice"] != "auto" {
@@ -155,13 +155,13 @@ func TestJinjaContextIncludesTools(t *testing.T) {
 	}
 
 	if ctx["parallel_tool_calls"] != true {
-		t.Fatal("ожидали parallel_tool_calls=true")
+		t.Fatal("expected parallel_tool_calls=true")
 	}
 
 	msgs := ctx["messages"].([]any)
 	asst := msgs[0].(map[string]any)
 	if _, ok := asst["tool_calls"]; !ok {
-		t.Fatal("ожидали tool_calls в assistant message")
+		t.Fatal("expected tool_calls in assistant message")
 	}
 
 	tool := msgs[1].(map[string]any)
@@ -190,7 +190,7 @@ func TestSelectChatTemplatePrefersToolUse(t *testing.T) {
 	}
 
 	if tmpl != "TOOLS" {
-		t.Fatalf("tmpl = %q, ожидали TOOLS", tmpl)
+		t.Fatalf("tmpl = %q, expected TOOLS", tmpl)
 	}
 
 	tmpl, err = SelectChatTemplate(meta, Options{})
@@ -199,7 +199,7 @@ func TestSelectChatTemplatePrefersToolUse(t *testing.T) {
 	}
 
 	if tmpl != "BASE" {
-		t.Fatalf("tmpl = %q, ожидали BASE", tmpl)
+		t.Fatalf("tmpl = %q, expected BASE", tmpl)
 	}
 }
 

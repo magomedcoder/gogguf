@@ -12,11 +12,11 @@ import (
 func TestAttentionGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 
 	if !b.hasAttn {
-		t.Skip("CUDA attention kernels недоступны")
+		t.Skip("CUDA attention kernels unavailable")
 	}
 
 	defer b.Close()

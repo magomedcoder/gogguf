@@ -30,7 +30,7 @@ func fullLayersFixture(t *testing.T, name string) string {
 			return p
 		}
 	}
-	t.Skipf("full layers fixture %s.bin не найден", name)
+	t.Skipf("full layers fixture %s.bin not found", name)
 
 	return ""
 }
@@ -39,7 +39,7 @@ func collectLayerHidden(t *testing.T, engine *gogguf.Engine, ids []int) debug.La
 	t.Helper()
 	setter, ok := engine.Model.(interface{ SetDebugHooks(*qwen3.DebugHooks) })
 	if !ok {
-		t.Fatal("модель не поддерживает debug hooks")
+		t.Fatal("model does not support debug hooks")
 	}
 
 	var dump debug.LayersDump
@@ -65,7 +65,7 @@ func collectLayerHidden(t *testing.T, engine *gogguf.Engine, ids []int) debug.La
 func TestFullLayersFixture(t *testing.T) {
 	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
-		t.Fatalf("не удалось загрузить модель: %v", err)
+		t.Fatalf("failed to load model: %v", err)
 	}
 
 	cases := []struct {

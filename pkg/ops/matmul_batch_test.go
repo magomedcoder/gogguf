@@ -28,7 +28,7 @@ func TestMatMulMatIntoMatchesVec(t *testing.T) {
 	want := []float32{1, 2, 3, 5, 6, 7}
 	for i := range want {
 		if out[i] != want[i] {
-			t.Fatalf("out=%v, ожидали %v", out, want)
+			t.Fatalf("out=%v, want %v", out, want)
 		}
 	}
 }
@@ -92,11 +92,11 @@ func TestAttentionScoresBatchCausal(t *testing.T) {
 	}
 
 	if dst[0] < 10 || dst[0] > 20 {
-		t.Fatalf("dst b0=%v, ожидали смесь [10..20], 0", dst[:2])
+		t.Fatalf("dst b0=%v, want blend [10..20], 0", dst[:2])
 	}
 
 	if dst[3] < 15 {
-		t.Fatalf("dst b1=%v, ожидали больший вклад по dim1", dst[2:4])
+		t.Fatalf("dst b1=%v, want larger contribution on dim1", dst[2:4])
 	}
 }
 

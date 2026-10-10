@@ -45,7 +45,7 @@ func ReadLogitsBin(r io.Reader) ([]float32, error) {
 	}
 
 	if string(magic) != logitsMagic {
-		return nil, fmt.Errorf("debug: неверный magic %q, ожидали %q", magic, logitsMagic)
+		return nil, fmt.Errorf("debug: invalid magic %q, want %q", magic, logitsMagic)
 	}
 
 	var n uint32

@@ -30,7 +30,7 @@ func fullLogitsFixture(t *testing.T, name string) string {
 		}
 	}
 
-	t.Skipf("full logits fixture %s.bin не найден", name)
+	t.Skipf("full logits fixture %s.bin not found", name)
 
 	return ""
 }
@@ -38,7 +38,7 @@ func fullLogitsFixture(t *testing.T, name string) string {
 func TestFullLogitsFixture(t *testing.T) {
 	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
-		t.Fatalf("не удалось загрузить модель: %v", err)
+		t.Fatalf("failed to load model: %v", err)
 	}
 
 	cases := []struct {

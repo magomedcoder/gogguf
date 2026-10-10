@@ -28,27 +28,27 @@ func TestFormatMistralInstruct(t *testing.T) {
 
 	want := "<s>[INST] Hello [/INST]"
 	if got != want {
-		t.Fatalf("prompt = %q, ожидали %q", got, want)
+		t.Fatalf("prompt = %q, expected %q", got, want)
 	}
 
 	gotSystem := formatMistralInstruct([]Message{
 		{
 			Role:    "system",
-			Content: "Будьте кратки.",
+			Content: "Be brief.",
 		},
 		{
 			Role:    "user",
-			Content: "Привет",
+			Content: "Hello",
 		},
 	}, Options{
 		Metadata: meta,
 	})
 
-	if !strings.Contains(gotSystem, "[INST] Будьте кратки.") {
-		t.Fatalf("system отсутствует в prompt: %q", gotSystem)
+	if !strings.Contains(gotSystem, "[INST] Be brief.") {
+		t.Fatalf("system missing from prompt: %q", gotSystem)
 	}
 
-	if !strings.HasSuffix(gotSystem, "Привет [/INST]") {
-		t.Fatalf("неожиданный суффикс: %q", gotSystem)
+	if !strings.HasSuffix(gotSystem, "Hello [/INST]") {
+		t.Fatalf("unexpected suffix: %q", gotSystem)
 	}
 }

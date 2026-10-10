@@ -81,6 +81,6 @@ func TestParseConfigRejectsBadMoE(t *testing.T) {
 		},
 	}
 	if _, err := deepseek.ParseConfig(r); err == nil {
-		t.Fatal("ожидали ошибку при expert_count=0 и MoE-слоях")
+		t.Fatal("expected error with expert_count=0 and MoE layers")
 	}
 }

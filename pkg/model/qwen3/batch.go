@@ -14,7 +14,7 @@ import (
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
 	b := len(tokenIDs)
 	if b == 0 {
-		return fmt.Errorf("qwen3: пустой batch")
+		return fmt.Errorf("qwen3: empty batch")
 	}
 
 	// batch-path host buffers: resident hidden from device is no longer needed

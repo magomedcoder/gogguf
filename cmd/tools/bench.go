@@ -12,12 +12,12 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/format"
 )
 
-const benchUsage = `bench - измерение скорости inference (prefill, decode, TTFT)
+const benchUsage = `bench - measure inference speed (prefill, decode, TTFT)
 
-Использование:
-  tools bench -m модель.gguf -p "промпт" [-n 128] [-ngl 0] [--runs 3] [--warmup 1]
-  tools bench -m модель.gguf -p "промпт" -ngl 28 --compare        # CPU vs GPU
-  tools bench -m модель.gguf -p "промпт" -ngl 28 -dev 1 -json     # GPU 1 + VRAM в JSON
+Usage:
+  tools bench -m model.gguf -p "prompt" [-n 128] [-ngl 0] [--runs 3] [--warmup 1]
+  tools bench -m model.gguf -p "prompt" -ngl 28 --compare        # CPU vs GPU
+  tools bench -m model.gguf -p "prompt" -ngl 28 -dev 1 -json     # GPU 1 + VRAM in JSON
 
 `
 
@@ -37,21 +37,21 @@ type benchResult struct {
 // runBench runs an inference speed benchmark.
 func runBench(args []string) error {
 	fs := flag.NewFlagSet("bench", flag.ContinueOnError)
-	modelPath := fs.String("m", "", "путь к файлу GGUF")
-	prompt := fs.String("p", "Hello", "текст промпта")
-	maxTokens := fs.Int("n", 128, "число decode-токенов для замера")
-	ngl := fs.Int("ngl", 0, "число transformer-слоёв на GPU (CUDA, -tags cuda)")
-	nBatch := fs.Int("b", 1, "размер chunk prefill (n_batch); >1 ускоряет prefill (Qwen3, работает и с -ngl)")
-	fs.IntVar(nBatch, "n-batch", 1, "алиас -b")
-	ctxLen := fs.Int("c", 0, "макс. длина GPU KV-cache (0 = авто, до 4096)")
-	dev := fs.String("dev", "", "GPU для offload: \"1\" или \"0,1\" (multi-GPU split слоёв)")
-	tensorSplit := fs.String("tensor-split", "", "пропорции слоёв по устройствам с -dev 0,1, например 0.6,0.4")
-	chat := fs.Bool("chat", false, "обернуть промпт в chat template")
-	thinking := fs.Bool("thinking", false, "Qwen3: режим размышления (с --chat)")
-	runs := fs.Int("runs", 1, "число прогонов для усреднения")
-	warmup := fs.Int("warmup", 1, "число прогревочных прогонов (без вывода)")
-	jsonOut := fs.Bool("json", false, "вывод в JSON")
-	compare := fs.Bool("compare", false, "сравнить CPU (ngl=0) и GPU (-ngl)")
+	modelPath := fs.String("m", "", "path to GGUF file")
+	prompt := fs.String("p", "Hello", "prompt text")
+	maxTokens := fs.Int("n", 128, "number of decode tokens to measure")
+	ngl := fs.Int("ngl", 0, "number of transformer layers on GPU (CUDA, -tags cuda)")
+	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 speeds up prefill (Qwen3, works with -ngl)")
+	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
+	ctxLen := fs.Int("c", 0, "max GPU KV-cache length (0 = auto, up to 4096)")
+	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
+	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
+	chat := fs.Bool("chat", false, "wrap prompt in chat template")
+	thinking := fs.Bool("thinking", false, "Qwen3: thinking mode (with --chat)")
+	runs := fs.Int("runs", 1, "number of runs to average")
+	warmup := fs.Int("warmup", 1, "number of warmup runs (no output)")
+	jsonOut := fs.Bool("json", false, "JSON output")
+	compare := fs.Bool("compare", false, "compare CPU (ngl=0) and GPU (-ngl)")
 
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, benchUsage)
@@ -64,7 +64,7 @@ func runBench(args []string) error {
 
 	if *modelPath == "" {
 		fmt.Fprint(os.Stderr, benchUsage)
-		return fmt.Errorf("укажите модель через -m")
+		return fmt.Errorf("specify model via -m")
 	}
 
 	devices, tsplit, err := gogguf.ParseGPUDevices(*dev, *tensorSplit)
@@ -175,7 +175,7 @@ func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat,
 	if ngl <= 0 {
 		layers, err := modelLayerCount(modelPath)
 		if err != nil {
-			return fmt.Errorf("compare: укажите -ngl > 0 или исправьте модель: %w", err)
+			return fmt.Errorf("compare: specify -ngl > 0 or fix the model: %w", err)
 		}
 
 		ngl = layers
@@ -255,8 +255,8 @@ func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat,
 		return writeBenchJSON(out)
 	}
 
-	fmt.Printf("Модель: %s\n", modelPath)
-	fmt.Printf("Сравнение CPU vs GPU (ngl=%d), прогонов=%d, decode=%d tok\n", ngl, runs, maxTokens)
+	fmt.Printf("Model: %s\n", modelPath)
+	fmt.Printf("CPU vs GPU comparison (ngl=%d), runs=%d, decode=%d tok\n", ngl, runs, maxTokens)
 	if vram.total > 0 {
 		fmt.Printf("GPU: %s, VRAM %.0f / %.0f MB\n", gpuEngine.GPUDescription(), vram.used, vram.total)
 	}
@@ -265,13 +265,13 @@ func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat,
 	fmt.Printf("%-10s %12s %12s %12s %12s\n", "", "prefill t/s", "decode t/s", "TTFT ms", "total t/s")
 	fmt.Printf("%-10s %12.1f %12.1f %12.1f %12.1f\n", "CPU", cpuAvg.PrefillTPS, cpuAvg.DecodeTPS, cpuAvg.TTFTMS, cpuAvg.TotalTPS)
 	fmt.Printf("%-10s %12.1f %12.1f %12.1f %12.1f\n", "GPU", gpuAvg.PrefillTPS, gpuAvg.DecodeTPS, gpuAvg.TTFTMS, gpuAvg.TotalTPS)
-	fmt.Printf("%-10s %12.2fx %12.2fx\n", "ускорение", prefillSpeedup, decodeSpeedup)
+	fmt.Printf("%-10s %12.2fx %12.2fx\n", "speedup", prefillSpeedup, decodeSpeedup)
 	fmt.Println()
 
 	if gpuFaster {
-		fmt.Printf("MVP: GPU decode быстрее CPU (%.1f vs %.1f tok/s)\n", gpuAvg.DecodeTPS, cpuAvg.DecodeTPS)
+		fmt.Printf("MVP: GPU decode faster than CPU (%.1f vs %.1f tok/s)\n", gpuAvg.DecodeTPS, cpuAvg.DecodeTPS)
 	} else {
-		fmt.Printf("MVP: GPU decode НЕ быстрее CPU (%.1f vs %.1f tok/s, ускорение %.2fx)\n", gpuAvg.DecodeTPS, cpuAvg.DecodeTPS, decodeSpeedup)
+		fmt.Printf("MVP: GPU decode NOT faster than CPU (%.1f vs %.1f tok/s, speedup %.2fx)\n", gpuAvg.DecodeTPS, cpuAvg.DecodeTPS, decodeSpeedup)
 	}
 
 	return nil
@@ -351,12 +351,12 @@ func writeBenchJSON(out map[string]any) error {
 }
 
 func printBenchHuman(modelPath string, ngl int, loadMS float64, runs int, avg benchResult, gpuName string, vram vramMB) {
-	fmt.Printf("Модель: %s\n", modelPath)
+	fmt.Printf("Model: %s\n", modelPath)
 	if ngl > 0 {
 		if gpuName != "" {
-			fmt.Printf("GPU offload: %d слоёв на %s\n", ngl, gpuName)
+			fmt.Printf("GPU offload: %d layers on %s\n", ngl, gpuName)
 		} else {
-			fmt.Printf("GPU offload: %d слоёв\n", ngl)
+			fmt.Printf("GPU offload: %d layers\n", ngl)
 		}
 	}
 
@@ -364,15 +364,15 @@ func printBenchHuman(modelPath string, ngl int, loadMS float64, runs int, avg be
 		fmt.Printf("VRAM: %.0f / %.0f MB\n", vram.used, vram.total)
 	}
 
-	fmt.Printf("Загрузка: %.1f ms\n", loadMS)
+	fmt.Printf("Load: %.1f ms\n", loadMS)
 	if runs > 1 {
-		fmt.Printf("Прогонов: %d (усреднение)\n", runs)
+		fmt.Printf("Runs: %d (averaged)\n", runs)
 	}
 
 	fmt.Printf("Prefill (%d tok): %.1f ms (%.1f tok/s)\n", avg.PromptTokens, avg.PrefillMS, avg.PrefillTPS)
 	fmt.Printf("TTFT: %.1f ms\n", avg.TTFTMS)
 	fmt.Printf("Decode (%d tok): %.1f ms (%.1f tok/s)\n", avg.DecodeTokens, avg.DecodeMS, avg.DecodeTPS)
-	fmt.Printf("Итого: %.1f ms (%.1f tok/s)\n", avg.TotalMS, avg.TotalTPS)
+	fmt.Printf("Total: %.1f ms (%.1f tok/s)\n", avg.TotalMS, avg.TotalTPS)
 }
 
 // runBenchOnce runs one iteration: prefill + greedy decode for maxTokens steps.

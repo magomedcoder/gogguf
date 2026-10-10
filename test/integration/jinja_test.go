@@ -12,7 +12,7 @@ import (
 func TestJinjaQwen3MatchesFallback(t *testing.T) {
 	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
-		t.Fatalf("не удалось загрузить модель: %v", err)
+		t.Fatalf("failed to load model: %v", err)
 	}
 
 	got, err := chat.FormatUser("Hello", chat.Options{Metadata: engine.Metadata()})
@@ -23,7 +23,7 @@ func TestJinjaQwen3MatchesFallback(t *testing.T) {
 	// fallback without Jinja metadata path - compare that Jinja gives the same result
 	meta := engine.Metadata()
 	if !chat.HasTemplateMeta(meta) {
-		t.Skip("нет chat template")
+		t.Skip("no chat template")
 	}
 
 	// repeated calls must be stable
@@ -32,10 +32,10 @@ func TestJinjaQwen3MatchesFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got != got2 {
-		t.Fatalf("нестабильный рендер: %q vs %q", got, got2)
+		t.Fatalf("unstable render: %q vs %q", got, got2)
 	}
 
 	if got == "" {
-		t.Fatal("пустой prompt")
+		t.Fatal("empty prompt")
 	}
 }

@@ -15,7 +15,7 @@ type RepoSpec struct {
 func SplitRepoTag(hfRepoWithTag string) (RepoSpec, error) {
 	s := strings.TrimSpace(hfRepoWithTag)
 	if s == "" {
-		return RepoSpec{}, fmt.Errorf("пустой HF repo")
+		return RepoSpec{}, fmt.Errorf("empty HF repo")
 	}
 
 	repo, tag := s, ""
@@ -25,7 +25,7 @@ func SplitRepoTag(hfRepoWithTag string) (RepoSpec, error) {
 	}
 
 	if !ValidRepoID(repo) {
-		return RepoSpec{}, fmt.Errorf("неверный формат HF repo, ожидается owner/repo[:quant]: %q", hfRepoWithTag)
+		return RepoSpec{}, fmt.Errorf("invalid HF repo format, expected owner/repo[:quant]: %q", hfRepoWithTag)
 	}
 
 	return RepoSpec{

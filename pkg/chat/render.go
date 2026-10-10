@@ -22,7 +22,7 @@ const (
 func Render(meta format.Metadata, messages []Message, addGenerationPrompt bool, opts Options) (string, error) {
 	tmpl, err := SelectChatTemplate(meta, opts)
 	if err != nil {
-		return "", fmt.Errorf("chat: tokenizer.chat_template не найден")
+		return "", fmt.Errorf("chat: tokenizer.chat_template not found")
 	}
 
 	ctx := jinjaContext(messages, addGenerationPrompt, opts)

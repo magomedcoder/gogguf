@@ -57,7 +57,7 @@ func (f *fakeDevice) HiddenUpload(x []float32) error {
 
 func (f *fakeDevice) HiddenDownload(dst []float32) error {
 	if !f.resident {
-		return fmt.Errorf("%s: residency не активна", f.name)
+		return fmt.Errorf("%s: residency not active", f.name)
 	}
 
 	copy(dst, f.hidden)
@@ -101,16 +101,16 @@ func qkv(m *MultiBackend, layer int) error {
 
 func TestNewMultiBackendErrors(t *testing.T) {
 	if _, err := NewMultiBackend(nil, nil); err == nil {
-		t.Fatal("NewMultiBackend(nil): ожидали ошибку")
+		t.Fatal("NewMultiBackend(nil): expected error")
 	}
 
 	if _, err := NewMultiBackend([]Backend{nil}, nil); err == nil {
-		t.Fatal("NewMultiBackend([nil]): ожидали ошибку")
+		t.Fatal("NewMultiBackend([nil]): expected error")
 	}
 
 	dev := newFakeDevice("CUDA:0")
 	if _, err := NewMultiBackend([]Backend{dev}, []float64{0.5, 0.5}); err == nil {
-		t.Fatal("NewMultiBackend: ожидали ошибку длины tensor-split")
+		t.Fatal("NewMultiBackend: expected tensor-split length error")
 	}
 }
 
@@ -127,7 +127,7 @@ func TestMultiBackendSingleDevice(t *testing.T) {
 	}
 
 	if dev.kvLayers != 4 {
-		t.Fatalf("KVCacheInit: слоёв на устройстве %d, ожидали 4", dev.kvLayers)
+		t.Fatalf("KVCacheInit: layers on device %d, expected 4", dev.kvLayers)
 	}
 
 	if err := m.HiddenUpload([]float32{1, 2, 3, 4}); err != nil {
@@ -141,11 +141,11 @@ func TestMultiBackendSingleDevice(t *testing.T) {
 	}
 
 	if !slices.Equal(dev.qkvLayers, []int{0, 1, 2, 3}) {
-		t.Fatalf("локальные слои = %v, ожидали 0..3", dev.qkvLayers)
+		t.Fatalf("local layers = %v, expected 0..3", dev.qkvLayers)
 	}
 
 	if dev.uploads != 1 || dev.downloads != 0 {
-		t.Fatalf("uploads=%d downloads=%d, ожидали 1/0 (переносов нет)", dev.uploads, dev.downloads)
+		t.Fatalf("uploads=%d downloads=%d, expected 1/0 (no transfers)", dev.uploads, dev.downloads)
 	}
 
 	if err := m.LogitsFromDevice(format.GgmlQ8_0, "n", nil, "h", nil, nil, nil, 8, 4, 1e-6); err != nil {
@@ -153,7 +153,7 @@ func TestMultiBackendSingleDevice(t *testing.T) {
 	}
 
 	if dev.logits != 1 {
-		t.Fatalf("LogitsFromDevice вызван %d раз", dev.logits)
+		t.Fatalf("LogitsFromDevice called %d times", dev.logits)
 	}
 }
 
@@ -170,7 +170,7 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 	}
 
 	if d0.kvLayers != 2 || d1.kvLayers != 2 {
-		t.Fatalf("KV по устройствам = %d/%d, ожидали 2/2", d0.kvLayers, d1.kvLayers)
+		t.Fatalf("KV per device = %d/%d, expected 2/2", d0.kvLayers, d1.kvLayers)
 	}
 
 	x := []float32{1, 2, 3, 4}
@@ -190,7 +190,7 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 
 	// Global layers 0,1 -> local 0,1 on GPU0; layers 2,3 -> local 0,1 on GPU1
 	if !slices.Equal(d0.qkvLayers, []int{0, 1}) || !slices.Equal(d1.qkvLayers, []int{0, 1}) {
-		t.Fatalf("локальные слои: GPU0=%v GPU1=%v", d0.qkvLayers, d1.qkvLayers)
+		t.Fatalf("local layers: GPU0=%v GPU1=%v", d0.qkvLayers, d1.qkvLayers)
 	}
 
 	if !slices.Equal(d0.kvAppends, []int{0, 1}) || !slices.Equal(d1.kvAppends, []int{0, 1}) {
@@ -198,15 +198,15 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 	}
 
 	if d0.uploads != 1 || d0.downloads != 1 {
-		t.Fatalf("GPU0: uploads=%d downloads=%d, ожидали 1/1", d0.uploads, d0.downloads)
+		t.Fatalf("GPU0: uploads=%d downloads=%d, expected 1/1", d0.uploads, d0.downloads)
 	}
 
 	if d1.uploads != 1 || d1.downloads != 0 {
-		t.Fatalf("GPU1: uploads=%d downloads=%d, ожидали 1/0", d1.uploads, d1.downloads)
+		t.Fatalf("GPU1: uploads=%d downloads=%d, expected 1/0", d1.uploads, d1.downloads)
 	}
 
 	if !slices.Equal(d1.hidden, x) {
-		t.Fatalf("hidden на GPU1 = %v, ожидали %v", d1.hidden, x)
+		t.Fatalf("hidden on GPU1 = %v, expected %v", d1.hidden, x)
 	}
 
 	// Last layer's device computes token result
@@ -215,7 +215,7 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 	}
 
 	if d0.logits != 0 || d1.logits != 1 {
-		t.Fatalf("logits: GPU0=%d GPU1=%d, ожидали 0/1", d0.logits, d1.logits)
+		t.Fatalf("logits: GPU0=%d GPU1=%d, expected 0/1", d0.logits, d1.logits)
 	}
 
 	// New token returns hidden to first layer's device and clears GPU1 residency
@@ -224,7 +224,7 @@ func TestMultiBackendLayerSplitMovesHidden(t *testing.T) {
 	}
 
 	if d0.uploads != 2 || d1.resident {
-		t.Fatalf("после нового токена: GPU0 uploads=%d, GPU1 resident=%v", d0.uploads, d1.resident)
+		t.Fatalf("after new token: GPU0 uploads=%d, GPU1 resident=%v", d0.uploads, d1.resident)
 	}
 }
 
@@ -241,7 +241,7 @@ func TestMultiBackendTensorSplit(t *testing.T) {
 	}
 
 	if d0.kvLayers != 21 || d1.kvLayers != 7 {
-		t.Fatalf("KV по устройствам = %d/%d, ожидали 21/7", d0.kvLayers, d1.kvLayers)
+		t.Fatalf("KV per device = %d/%d, expected 21/7", d0.kvLayers, d1.kvLayers)
 	}
 
 	if err := m.HiddenUpload([]float32{1, 2, 3, 4}); err != nil {
@@ -257,7 +257,7 @@ func TestMultiBackendTensorSplit(t *testing.T) {
 	}
 
 	if !slices.Equal(d0.qkvLayers, []int{20}) || !slices.Equal(d1.qkvLayers, []int{0}) {
-		t.Fatalf("границы split: GPU0=%v GPU1=%v", d0.qkvLayers, d1.qkvLayers)
+		t.Fatalf("split boundaries: GPU0=%v GPU1=%v", d0.qkvLayers, d1.qkvLayers)
 	}
 }
 
@@ -275,7 +275,7 @@ func TestMultiBackendVRAMInfoSums(t *testing.T) {
 	}
 
 	if used != 300 || total != 12288 {
-		t.Fatalf("VRAMInfo = %d/%d, ожидали 300/12288", used, total)
+		t.Fatalf("VRAMInfo = %d/%d, expected 300/12288", used, total)
 	}
 }
 
@@ -288,12 +288,12 @@ func TestMultiBackendHiddenResidentRequiresAll(t *testing.T) {
 	}
 
 	if !m.HiddenResident() {
-		t.Fatal("HiddenResident() = false при двух resident-устройствах")
+		t.Fatal("HiddenResident() = false with two resident devices")
 	}
 
 	d1.noResid = true
 	if m.HiddenResident() {
-		t.Fatal("HiddenResident() = true, хотя GPU1 не держит hidden")
+		t.Fatal("HiddenResident() = true, although GPU1 does not hold hidden")
 	}
 }
 
@@ -309,7 +309,7 @@ func TestMultiBackendPlanAndName(t *testing.T) {
 	}
 
 	plan := Describe(m)
-	if plan != "CUDA:0: слои 0-1, CUDA:1: слои 2-3" {
+	if plan != "CUDA:0: layers 0-1, CUDA:1: layers 2-3" {
 		t.Fatalf("Describe = %q", plan)
 	}
 

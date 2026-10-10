@@ -16,7 +16,7 @@ func TestArenaAlloc(t *testing.T) {
 
 	x[0] = 1
 	if a.buf[0] != 1 {
-		t.Fatal("срезы должны указывать в slab")
+		t.Fatal("slices must point into slab")
 	}
 }
 
@@ -77,7 +77,7 @@ func TestKVFromArena(t *testing.T) {
 	a := NewArena(2 * 2 * 4 * kvDim)
 	c := NewKV(2, 4, kvDim, a)
 	if a.Used() == 0 {
-		t.Fatal("ожидали Alloc из arena")
+		t.Fatal("want Alloc from arena")
 	}
 
 	c.Append(1, []float32{1, 2}, []float32{3, 4})

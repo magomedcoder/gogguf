@@ -33,7 +33,7 @@ func CacheDir() (string, error) {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("не удалось определить HF cache: %w", err)
+		return "", fmt.Errorf("failed to resolve HF cache: %w", err)
 	}
 
 	return filepath.Join(home, ".cache", "huggingface", "hub"), nil

@@ -33,7 +33,7 @@ func TestParseConfigGemma2B(t *testing.T) {
 	}
 
 	if cfg.HeadDim != 256 {
-		t.Fatalf("HeadDim=%d, ожидали 256", cfg.HeadDim)
+		t.Fatalf("HeadDim=%d, expected 256", cfg.HeadDim)
 	}
 
 	if cfg.NumKVHeads != 1 {

@@ -19,7 +19,7 @@ func TestLayerOnGPU(t *testing.T) {
 	for _, tc := range cases {
 		got := LayerOnGPU(tc.layer, tc.ngl, total)
 		if got != tc.want {
-			t.Fatalf("LayerOnGPU(%d, %d, %d) = %v, ожидали %v",
+			t.Fatalf("LayerOnGPU(%d, %d, %d) = %v, expected %v",
 				tc.layer, tc.ngl, total, got, tc.want)
 		}
 	}

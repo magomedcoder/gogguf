@@ -5,19 +5,19 @@ import (
 	"os"
 )
 
-const usage = `GoGGUF tools - утилиты отладки и бенчмарка
+const usage = `GoGGUF tools - debugging and benchmark utilities
 
-Использование:
-  tools bench -m файл.gguf -p "..."          бенчмарк prefill/decode/TTFT
-  tools debugtok файл.gguf "промпт"          encode + top logits после prefill
-  tools vocab файл.gguf                      конфиг и special tokens
-  tools greedy -m файл.gguf --chat "..."     greedy decode (JSON token IDs)
-  tools debuglayers -m файл.gguf -p "..."    послойный RMS + logits
-  tools layerlogits -m файл.gguf -p "..."    greedy/top logits по слоям (fixture)
-  tools dumplogits -m файл.gguf -p "..."     полный vocab logits -> .bin/.json
-  tools comparelogits -a dump -b dump        сверка двух dump (или -m CPU vs GPU)
-  tools dumplayers -m файл.gguf -p "..."     embed+hidden по слоям -> .bin/.json
-  tools comparelayers -a dump -b dump        сверка hidden (или -m CPU vs GPU)
+Usage:
+  tools bench -m file.gguf -p "..."          benchmark prefill/decode/TTFT
+  tools debugtok file.gguf "prompt"          encode + top logits after prefill
+  tools vocab file.gguf                      config and special tokens
+  tools greedy -m file.gguf --chat "..."     greedy decode (JSON token IDs)
+  tools debuglayers -m file.gguf -p "..."    per-layer RMS + logits
+  tools layerlogits -m file.gguf -p "..."    greedy/top logits per layer (fixture)
+  tools dumplogits -m file.gguf -p "..."     full vocab logits -> .bin/.json
+  tools comparelogits -a dump -b dump        compare two dumps (or -m CPU vs GPU)
+  tools dumplayers -m file.gguf -p "..."     embed+hidden per layer -> .bin/.json
+  tools comparelayers -a dump -b dump        compare hidden (or -m CPU vs GPU)
 `
 
 func main() {
@@ -49,7 +49,7 @@ func main() {
 	case "comparelayers":
 		err = runCompareLayers(os.Args[2:])
 	default:
-		fmt.Fprintf(os.Stderr, "неизвестная команда: %q\n\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "unknown command: %q\n\n", os.Args[1])
 		fmt.Print(usage)
 		os.Exit(1)
 	}

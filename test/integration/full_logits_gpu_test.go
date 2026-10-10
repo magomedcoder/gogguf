@@ -33,7 +33,7 @@ func TestFullLogitsCPUVsGPU(t *testing.T) {
 
 	gpu, err := forwardPrefill(t, model, "Hello", false, 999)
 	if err != nil {
-		t.Skipf("CUDA недоступен: %v", err)
+		t.Skipf("CUDA unavailable: %v", err)
 	}
 
 	if len(cpu) != len(gpu) {

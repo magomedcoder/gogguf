@@ -17,10 +17,10 @@ type greedyOutput struct {
 // runGreedy generates N tokens greedily and prints JSON.
 func runGreedy(args []string) error {
 	fs := flag.NewFlagSet("greedy", flag.ContinueOnError)
-	model := fs.String("m", "", "путь к GGUF")
-	chatUser := fs.String("chat", "", "user-сообщение (chat template)")
-	prompt := fs.String("p", "", "сырой промпт (без chat template)")
-	maxTokens := fs.Int("n", 50, "число decode-токенов")
+	model := fs.String("m", "", "path to GGUF")
+	chatUser := fs.String("chat", "", "user message (chat template)")
+	prompt := fs.String("p", "", "raw prompt (no chat template)")
+	maxTokens := fs.Int("n", 50, "number of decode tokens")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -50,7 +50,7 @@ func runGreedy(args []string) error {
 	}
 
 	if text == "" {
-		return fmt.Errorf("укажите --chat или -p")
+		return fmt.Errorf("specify --chat or -p")
 	}
 
 	ctx, err := engine.NewContext()

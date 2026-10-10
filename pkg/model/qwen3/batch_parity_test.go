@@ -21,7 +21,7 @@ func testModelPath(t *testing.T) string {
 			return p
 		}
 	}
-	t.Skip("нет Qwen3-0.6B-Q8_0.gguf")
+	t.Skip("missing Qwen3-0.6B-Q8_0.gguf")
 
 	return ""
 }
@@ -69,6 +69,6 @@ func TestNBatchPrefillLogitsParity(t *testing.T) {
 	}
 
 	if maxAbs > 1e-4 {
-		t.Fatalf("max_abs logits n_batch=1 vs 32 = %g (порог 1e-4)", maxAbs)
+		t.Fatalf("max_abs logits n_batch=1 vs 32 = %g (threshold 1e-4)", maxAbs)
 	}
 }

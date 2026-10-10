@@ -17,7 +17,7 @@ func makeQ8Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 	t.Helper()
 
 	if cols%quant.QK8_0 != 0 {
-		t.Fatalf("cols=%d не кратно %d", cols, quant.QK8_0)
+		t.Fatalf("cols=%d not divisible by %d", cols, quant.QK8_0)
 	}
 
 	// exact fp16 scales (2^-7, 2^-6, 2^-5) so CPU reference matches bit-for-bit
@@ -62,7 +62,7 @@ func TestHiddenUploadDownloadRoundtrip(t *testing.T) {
 	}
 
 	if !b.HiddenActive() {
-		t.Fatal("после HiddenUpload ожидали HiddenActive() == true")
+		t.Fatal("after HiddenUpload expected HiddenActive() == true")
 	}
 
 	got := make([]float32, embd)
@@ -91,7 +91,7 @@ func TestHiddenUploadDownloadRoundtrip(t *testing.T) {
 
 	for i := range x {
 		if got[i] != x[i] {
-			t.Fatalf("повторный hidden[%d]=%v want %v", i, got[i], x[i])
+			t.Fatalf("repeated hidden[%d]=%v want %v", i, got[i], x[i])
 		}
 	}
 }
@@ -105,7 +105,7 @@ func TestAttnFFNResidualDeviceResident(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasSwiGLU || !b.hasRMS || !b.hasAdd {
-		t.Skip("нет add/rmsnorm/swiglu")
+		t.Skip("no add/rmsnorm/swiglu")
 	}
 
 	embd, attnDim, ffn := 32, 32, 64
@@ -184,7 +184,7 @@ func TestAttnFFNResidualDeviceResident(t *testing.T) {
 	}
 
 	if !b.HiddenActive() {
-		t.Fatal("после resident residual ожидали HiddenActive() == true")
+		t.Fatal("after resident residual expected HiddenActive() == true")
 	}
 
 	got := make([]float32, embd)
@@ -207,7 +207,7 @@ func TestAttnFFNResidualDeviceResident(t *testing.T) {
 	}
 
 	if b.HiddenActive() {
-		t.Fatal("после host-вызова ожидали HiddenActive() == false")
+		t.Fatal("after host call expected HiddenActive() == false")
 	}
 
 	for i := range want {
@@ -222,7 +222,7 @@ func makeQ4Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 	t.Helper()
 
 	if cols%quant.QK4_0 != 0 {
-		t.Fatalf("cols=%d не кратно %d", cols, quant.QK4_0)
+		t.Fatalf("cols=%d not divisible by %d", cols, quant.QK4_0)
 	}
 
 	scales := []uint16{0x3000, 0x3400, 0x3800} // 0.125, 0.25, 0.5
@@ -258,7 +258,7 @@ func TestFFNSwiGLUQuantQ4_0(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasSwiGLU || !b.hasQ4 {
-		t.Skip("нет swiglu/q4_0 kernels")
+		t.Skip("no swiglu/q4_0 kernels")
 	}
 
 	embd, ffn := 32, 64
@@ -308,7 +308,7 @@ func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasAttn || !b.hasRoPE || !b.hasRMS {
-		t.Skip("нет QKV/RoPE/attn kernels")
+		t.Skip("no QKV/RoPE/attn kernels")
 	}
 
 	embd, nHeads, nKVHeads, headDim := 32, 2, 1, 16
@@ -375,7 +375,7 @@ func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 
 	// QKV does not change residual, hidden should stay on device
 	if !b.HiddenActive() {
-		t.Fatal("после resident QKV ожидали HiddenActive() == true")
+		t.Fatal("after resident QKV expected HiddenActive() == true")
 	}
 
 	for i := range wantAttn {
@@ -416,7 +416,7 @@ func TestLogitsFromDeviceFP32(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasRMS {
-		t.Skip("нет rmsnorm")
+		t.Skip("no rmsnorm")
 	}
 
 	embd, vocab := 32, 48
@@ -474,7 +474,7 @@ func TestLogitsFromDeviceQ8(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasRMS {
-		t.Skip("нет rmsnorm")
+		t.Skip("no rmsnorm")
 	}
 
 	embd, vocab := 64, 96
@@ -523,7 +523,7 @@ func TestKVCacheAppendN(t *testing.T) {
 	defer b.Close()
 
 	if !b.hasAttn {
-		t.Skip("нет attn kernels")
+		t.Skip("no attn kernels")
 	}
 
 	nHeads, nKVHeads, headDim, maxSeq := 2, 1, 4, 16

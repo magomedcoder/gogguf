@@ -26,18 +26,18 @@ func TestParseDeviceList(t *testing.T) {
 		}
 
 		if !slices.Equal(got, tc.want) {
-			t.Fatalf("ParseDeviceList(%q) = %v, ожидали %v", tc.in, got, tc.want)
+			t.Fatalf("ParseDeviceList(%q) = %v, expected %v", tc.in, got, tc.want)
 		}
 	}
 }
 
 func TestParseDeviceListErrors(t *testing.T) {
 	if _, err := ParseDeviceList("-1"); !errors.Is(err, ErrInvalidDevice) {
-		t.Fatalf("ParseDeviceList(-1) = %v, ожидали ErrInvalidDevice", err)
+		t.Fatalf("ParseDeviceList(-1) = %v, expected ErrInvalidDevice", err)
 	}
 
 	if _, err := ParseDeviceList("gpu0"); err == nil {
-		t.Fatal("ParseDeviceList(gpu0): ожидали ошибку разбора")
+		t.Fatal("ParseDeviceList(gpu0): expected parse error")
 	}
 }
 
@@ -56,11 +56,11 @@ func TestParseTensorSplit(t *testing.T) {
 	}
 
 	if _, err := ParseTensorSplit("0,0"); err == nil {
-		t.Fatal("ParseTensorSplit(0,0): ожидали ошибку нулевой суммы")
+		t.Fatal("ParseTensorSplit(0,0): expected zero-sum error")
 	}
 
 	if _, err := ParseTensorSplit("-1,2"); err == nil {
-		t.Fatal("ParseTensorSplit(-1,2): ожидали ошибку отрицательной доли")
+		t.Fatal("ParseTensorSplit(-1,2): expected negative split weight error")
 	}
 }
 
@@ -77,11 +77,11 @@ func TestParseDevices(t *testing.T) {
 	// -tensor-split without -dev assigns devices 0..N-1
 	devs, split, err = ParseDevices("", "0.5,0.3,0.2")
 	if err != nil {
-		t.Fatalf("ParseDevices без -dev: %v", err)
+		t.Fatalf("ParseDevices without -dev: %v", err)
 	}
 
 	if !slices.Equal(devs, []int{0, 1, 2}) || len(split) != 3 {
-		t.Fatalf("ParseDevices без -dev = %v, %v", devs, split)
+		t.Fatalf("ParseDevices without -dev = %v, %v", devs, split)
 	}
 
 	// Empty flags: default device
@@ -90,7 +90,7 @@ func TestParseDevices(t *testing.T) {
 	}
 
 	if _, _, err = ParseDevices("0,1", "0.5,0.3,0.2"); err == nil {
-		t.Fatal("ParseDevices: ожидали ошибку несовпадения длин")
+		t.Fatal("ParseDevices: expected length mismatch error")
 	}
 }
 
@@ -113,11 +113,11 @@ func TestLayerSplitBounds(t *testing.T) {
 	for _, tc := range cases {
 		got := LayerSplitBounds(tc.layers, tc.n, tc.split)
 		if !slices.Equal(got, tc.want) {
-			t.Fatalf("LayerSplitBounds(%d, %d, %v) = %v, ожидали %v", tc.layers, tc.n, tc.split, got, tc.want)
+			t.Fatalf("LayerSplitBounds(%d, %d, %v) = %v, expected %v", tc.layers, tc.n, tc.split, got, tc.want)
 		}
 	}
 
 	if got := LayerSplitBounds(28, 0, nil); got != nil {
-		t.Fatalf("LayerSplitBounds(28, 0) = %v, ожидали nil", got)
+		t.Fatalf("LayerSplitBounds(28, 0) = %v, expected nil", got)
 	}
 }

@@ -11,15 +11,15 @@ import (
 // runCompareLogits compares two dumps or CPU vs GPU prefill.
 func runCompareLogits(args []string) error {
 	fs := flag.NewFlagSet("comparelogits", flag.ContinueOnError)
-	aPath := fs.String("a", "", "префикс/путь dump A (.bin)")
-	bPath := fs.String("b", "", "префикс/путь dump B (.bin)")
-	modelPath := fs.String("m", "", "модель: сравнить CPU (ngl=0) vs GPU")
-	prompt := fs.String("p", "Hello", "промпт для -m")
-	chatMode := fs.Bool("chat", false, "chat template для -m")
-	ngl := fs.Int("ngl", -1, "слоёв GPU (по умолчанию все)")
-	tol := fs.Float64("tol", 1e-4, "допуск |diff|")
-	align := fs.Bool("align", false, "выровнять A по max к B (инвариант softmax)")
-	logprob := fs.Bool("logprob", false, "сравнивать log-softmax вместо raw logits")
+	aPath := fs.String("a", "", "prefix/path dump A (.bin)")
+	bPath := fs.String("b", "", "prefix/path dump B (.bin)")
+	modelPath := fs.String("m", "", "model: compare CPU (ngl=0) vs GPU")
+	prompt := fs.String("p", "Hello", "prompt for -m")
+	chatMode := fs.Bool("chat", false, "chat template for -m")
+	ngl := fs.Int("ngl", -1, "GPU layers (default all)")
+	tol := fs.Float64("tol", 1e-4, "tolerance |diff|")
+	align := fs.Bool("align", false, "align A by max to B (softmax invariant)")
+	logprob := fs.Bool("logprob", false, "compare log-softmax instead of raw logits")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -38,14 +38,14 @@ func runCompareLogits(args []string) error {
 		}
 		_, b, err = debug.LoadLogitsDump(*bPath)
 	default:
-		return fmt.Errorf("укажите -a/-b или -m")
+		return fmt.Errorf("specify -a/-b or -m")
 	}
 	if err != nil {
 		return err
 	}
 
 	if len(a) != len(b) {
-		return fmt.Errorf("разный vocab: A=%d B=%d", len(a), len(b))
+		return fmt.Errorf("different vocab: A=%d B=%d", len(a), len(b))
 	}
 
 	if *logprob {
@@ -59,10 +59,10 @@ func runCompareLogits(args []string) error {
 	fmt.Printf("vocab=%d  max_abs=%.6g@%d  mean_abs=%.6g  rmse=%.6g  over_tol(%g)=%d\n", st.N, st.MaxAbs, st.MaxAbsIdx, st.MeanAbs, st.RMSE, st.Tol, st.OverTol)
 
 	if st.OverTol > 0 {
-		return fmt.Errorf("FAIL: %d позиций > tol %g (max_abs=%.6g @%d)", st.OverTol, *tol, st.MaxAbs, st.MaxAbsIdx)
+		return fmt.Errorf("FAIL: %d positions > tol %g (max_abs=%.6g @%d)", st.OverTol, *tol, st.MaxAbs, st.MaxAbsIdx)
 	}
 
-	fmt.Println("OK: full vocab в допуске")
+	fmt.Println("OK: full vocab within tolerance")
 
 	return nil
 }

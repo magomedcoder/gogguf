@@ -72,6 +72,6 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 		}
 		return llama.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	default:
-		return nil, fmt.Errorf("model: архитектура %q не поддерживается", arch)
+		return nil, fmt.Errorf("model: architecture %q not supported", arch)
 	}
 }

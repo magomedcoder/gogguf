@@ -61,7 +61,7 @@ func downloadFile(url, localPath, token string, expectedSize int64) error {
 		// resume OK
 	default:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("скачивание %s: %s (%s)", url, resp.Status, string(body))
+		return fmt.Errorf("download %s: %s (%s)", url, resp.Status, string(body))
 	}
 
 	var f *os.File
@@ -158,7 +158,7 @@ func finalizeFile(f FileInfo) (string, error) {
 	}
 
 	if _, err := os.Stat(f.LocalPath); err != nil {
-		return f.FinalPath, fmt.Errorf("blob отсутствует: %s", f.LocalPath)
+		return f.FinalPath, fmt.Errorf("blob missing: %s", f.LocalPath)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(f.FinalPath), 0o755); err != nil {
@@ -180,7 +180,7 @@ func finalizeFile(f FileInfo) (string, error) {
 		symlinkMu.Lock()
 		if !symlinksDisabled {
 			symlinksDisabled = true
-			fmt.Fprintln(os.Stderr, "hf: symlink недоступен, копирование в snapshots")
+			fmt.Fprintln(os.Stderr, "hf: symlink unavailable, copying into snapshots")
 		}
 
 		symlinkMu.Unlock()
@@ -226,7 +226,7 @@ func ensureDownloaded(f FileInfo, token string) (string, error) {
 		f.LocalPath = f.FinalPath
 	}
 
-	fmt.Fprintf(os.Stderr, "hf: скачивание %s\n", f.Path)
+	fmt.Fprintf(os.Stderr, "hf: downloading %s\n", f.Path)
 
 	if err := downloadFile(f.URL, f.LocalPath, token, f.Size); err != nil {
 		return "", err

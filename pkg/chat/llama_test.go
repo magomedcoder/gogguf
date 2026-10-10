@@ -20,17 +20,17 @@ func TestFormatLlama3User(t *testing.T) {
 	endHeader := tokenFromVocab(meta, llamaEndHeaderID)
 
 	if !strings.HasPrefix(got, bos) {
-		t.Fatalf("ожидали BOS в начале, получили %q", got[:min(32, len(got))])
+		t.Fatalf("expected BOS at start, got %q", got[:min(32, len(got))])
 	}
 
 	userBlock := startHeader + "user" + endHeader + "\n\nHello"
 	if !strings.Contains(got, userBlock) {
-		t.Fatalf("ожидали user block %q в %q", userBlock, got)
+		t.Fatalf("expected user block %q in %q", userBlock, got)
 	}
 
 	assistantSuffix := startHeader + "assistant" + endHeader
 	if !strings.HasSuffix(strings.TrimSpace(got), assistantSuffix) {
-		t.Fatalf("ожидали суффикс %q, получили %q", assistantSuffix, got[len(got)-min(80, len(got)):])
+		t.Fatalf("expected suffix %q, got %q", assistantSuffix, got[len(got)-min(80, len(got)):])
 	}
 }
 
@@ -49,19 +49,19 @@ func TestFormatLlama2User(t *testing.T) {
 	}
 
 	if !strings.HasPrefix(got, "<s>[INST] ") {
-		t.Fatalf("ожидали Llama2 [INST], got %q", got[:min(40, len(got))])
+		t.Fatalf("expected Llama2 [INST], got %q", got[:min(40, len(got))])
 	}
 
 	if !strings.Contains(got, "<<SYS>>\nBe nice\n<</SYS>>") {
-		t.Fatalf("ожидали <<SYS>>, got %q", got)
+		t.Fatalf("expected <<SYS>>, got %q", got)
 	}
 
 	if !strings.Contains(got, "Hi [/INST]") {
-		t.Fatalf("ожидали user+/INST, got %q", got)
+		t.Fatalf("expected user+/INST, got %q", got)
 	}
 
 	if isLlama3Family(meta) {
-		t.Fatal("Llama2 meta не должна считаться Llama3")
+		t.Fatal("Llama2 meta must not be treated as Llama3")
 	}
 }
 

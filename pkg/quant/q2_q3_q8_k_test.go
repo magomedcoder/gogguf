@@ -9,7 +9,7 @@ import (
 // TestBlockQ2_KSizeMatchesFormat checks Q2_K block size (llama.cpp: 84 bytes)
 func TestBlockQ2_KSizeMatchesFormat(t *testing.T) {
 	if BlockQ2_KSize != 84 {
-		t.Fatalf("BlockQ2_KSize=%d, ожидали 84", BlockQ2_KSize)
+		t.Fatalf("BlockQ2_KSize=%d, want 84", BlockQ2_KSize)
 	}
 }
 
@@ -39,7 +39,7 @@ func TestDequantBlockQ2_K(t *testing.T) {
 // TestBlockQ3_KSizeMatchesFormat checks Q3_K block size (llama.cpp: 110 bytes).
 func TestBlockQ3_KSizeMatchesFormat(t *testing.T) {
 	if BlockQ3_KSize != 110 {
-		t.Fatalf("BlockQ3_KSize=%d, ожидали 110", BlockQ3_KSize)
+		t.Fatalf("BlockQ3_KSize=%d, want 110", BlockQ3_KSize)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestDequantBlockQ3_K(t *testing.T) {
 // TestBlockQ8_KSizeMatchesFormat checks Q8_K block size (llama.cpp: 292 bytes).
 func TestBlockQ8_KSizeMatchesFormat(t *testing.T) {
 	if BlockQ8_KSize != 292 {
-		t.Fatalf("BlockQ8_KSize=%d, ожидали 292", BlockQ8_KSize)
+		t.Fatalf("BlockQ8_KSize=%d, want 292", BlockQ8_KSize)
 	}
 }
 

@@ -35,23 +35,23 @@ func TestParseConfigPhi3Mini(t *testing.T) {
 	}
 
 	if cfg.HeadDim != 96 {
-		t.Fatalf("HeadDim = %d, ожидали 96", cfg.HeadDim)
+		t.Fatalf("HeadDim = %d, expected 96", cfg.HeadDim)
 	}
 
 	if cfg.RopeDim != 96 {
-		t.Fatalf("RopeDim = %d, ожидали 96", cfg.RopeDim)
+		t.Fatalf("RopeDim = %d, expected 96", cfg.RopeDim)
 	}
 
 	if cfg.VocabSize != 32064 {
-		t.Fatalf("VocabSize = %d, ожидали 32064", cfg.VocabSize)
+		t.Fatalf("VocabSize = %d, expected 32064", cfg.VocabSize)
 	}
 
 	if cfg.OrigCtxLen != 4096 {
-		t.Fatalf("OrigCtxLen = %d, ожидали 4096", cfg.OrigCtxLen)
+		t.Fatalf("OrigCtxLen = %d, expected 4096", cfg.OrigCtxLen)
 	}
 
 	if cfg.RopeFreqScale != 1 || cfg.RopeAttnFactor != 1 {
-		t.Fatalf("scale=%v attn=%v, ожидали 1", cfg.RopeFreqScale, cfg.RopeAttnFactor)
+		t.Fatalf("scale=%v attn=%v, expected 1", cfg.RopeFreqScale, cfg.RopeAttnFactor)
 	}
 }
 
@@ -80,15 +80,15 @@ func TestParseConfigPhi3LongRoPE(t *testing.T) {
 	}
 
 	if cfg.OrigCtxLen != 4096 {
-		t.Fatalf("OrigCtxLen = %d, ожидали 4096", cfg.OrigCtxLen)
+		t.Fatalf("OrigCtxLen = %d, expected 4096", cfg.OrigCtxLen)
 	}
 
 	if cfg.RopeFreqScale != 1.0/32 {
-		t.Fatalf("RopeFreqScale = %v, ожидали %v", cfg.RopeFreqScale, float32(1)/32)
+		t.Fatalf("RopeFreqScale = %v, expected %v", cfg.RopeFreqScale, float32(1)/32)
 	}
 
 	if cfg.RopeAttnFactor != 1.1 {
-		t.Fatalf("RopeAttnFactor = %v, ожидали 1.1", cfg.RopeAttnFactor)
+		t.Fatalf("RopeAttnFactor = %v, expected 1.1", cfg.RopeAttnFactor)
 	}
 }
 
@@ -101,6 +101,6 @@ func TestApplyRoPEPartialLeavesTail(t *testing.T) {
 
 	ops.ApplyRoPEPartial(head, 1, 10000, 4)
 	if head[6] != tail || head[7] != 8 {
-		t.Fatalf("хвост головы изменился: %v", head)
+		t.Fatalf("head tail changed: %v", head)
 	}
 }

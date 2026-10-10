@@ -142,7 +142,7 @@ func (m *Model) Close() error {
 // Forward runs the forward pass
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("gemma: пустой ввод")
+		return nil, fmt.Errorf("gemma: empty input")
 	}
 
 	for i, id := range tokenIDs {
@@ -153,7 +153,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 
 		for layer := range m.cfg.NumLayers {
 			if err := m.forwardBlock(layer, pos); err != nil {
-				return nil, fmt.Errorf("gemma: слой %d pos %d: %w", layer, pos, err)
+				return nil, fmt.Errorf("gemma: layer %d pos %d: %w", layer, pos, err)
 			}
 		}
 		m.cache.Advance()
@@ -175,7 +175,7 @@ func (m *Model) EmbeddingDim() int {
 // Embed - last-token RMSNorm(hidden) before lm_head (clears KV)
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("gemma: пустой ввод")
+		return nil, fmt.Errorf("gemma: empty input")
 	}
 
 	m.ResetCache()

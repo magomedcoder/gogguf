@@ -18,7 +18,7 @@ func parse(toks []token) (*program, error) {
 	}
 
 	if !p.at(tokEOF) {
-		return nil, errf("лишние токены после шаблона")
+		return nil, errf("extra tokens after template")
 	}
 
 	return &program{nodes: nodes}, nil
@@ -45,7 +45,7 @@ func (p *parser) parseBlockUntil(endKeywords []string) ([]node, error) {
 			}
 
 			if !p.at(tokIdent) {
-				return nil, errf("ожидали ключевое слово блока")
+				return nil, errf("expected block keyword")
 			}
 
 			kw := p.advance().text
@@ -84,7 +84,7 @@ func (p *parser) parseBlockUntil(endKeywords []string) ([]node, error) {
 			}
 
 			if !p.at(tokExprClose) {
-				return nil, errf("ожидали }}")
+				return nil, errf("expected }}")
 			}
 
 			trimR := p.advance().trimRight
@@ -95,7 +95,7 @@ func (p *parser) parseBlockUntil(endKeywords []string) ([]node, error) {
 			continue
 		}
 
-		return nil, errf("неожиданный токен %v", p.peek().typ)
+		return nil, errf("unexpected token %v", p.peek().typ)
 	}
 	return nodes, nil
 }
@@ -109,7 +109,7 @@ func (p *parser) parseStmt(kw string) ([]node, error) {
 	case "set":
 		return p.parseSet()
 	default:
-		return nil, errf("неизвестный блок %s", kw)
+		return nil, errf("unknown block %s", kw)
 	}
 }
 
@@ -185,7 +185,7 @@ func (p *parser) parseIf() ([]node, error) {
 	}
 
 	if !p.matchStmtKeyword("endif") {
-		return nil, errf("ожидали endif")
+		return nil, errf("expected endif")
 	}
 
 	return []node{ifNode{
@@ -198,14 +198,14 @@ func (p *parser) parseIf() ([]node, error) {
 
 func (p *parser) parseFor() ([]node, error) {
 	if !p.at(tokIdent) {
-		return nil, errf("ожидали переменную цикла")
+		return nil, errf("expected loop variable")
 	}
 
 	vars := []string{p.advance().text}
 	if p.at(tokComma) {
 		p.advance()
 		if !p.at(tokIdent) {
-			return nil, errf("ожидали переменную цикла")
+			return nil, errf("expected loop variable")
 		}
 		vars = append(vars, p.advance().text)
 	}
@@ -215,7 +215,7 @@ func (p *parser) parseFor() ([]node, error) {
 	} else if p.at(tokIdent) && p.peek().text == "in" {
 		p.advance()
 	} else {
-		return nil, errf("ожидали in")
+		return nil, errf("expected in")
 	}
 
 	iter, err := p.parseExpr()
@@ -255,7 +255,7 @@ func (p *parser) parseFor() ([]node, error) {
 	}
 
 	if !p.matchStmtKeyword("endfor") {
-		return nil, errf("ожидали endfor")
+		return nil, errf("expected endfor")
 	}
 
 	return []node{forNode{
@@ -275,7 +275,7 @@ func (p *parser) parseSet() ([]node, error) {
 		}
 
 		if !p.at(tokAssign) {
-			return nil, errf("ожидали = в set")
+			return nil, errf("expected = in set")
 		}
 
 		p.advance()
@@ -307,7 +307,7 @@ func (p *parser) parseSet() ([]node, error) {
 
 func (p *parser) expectStmtClose() (bool, error) {
 	if !p.at(tokStmtClose) {
-		return false, errf("ожидали %%}")
+		return false, errf("expected %%}")
 	}
 
 	trimR := p.advance().trimRight
@@ -324,7 +324,7 @@ func (p *parser) parseSetTarget() (expr, error) {
 	for p.at(tokDot) {
 		p.advance()
 		if !p.at(tokIdent) {
-			return nil, errf("ожидали имя атрибута")
+			return nil, errf("expected attribute name")
 		}
 		e = attrExpr{
 			obj:  e,
@@ -444,7 +444,7 @@ func (p *parser) parseCompare() (expr, error) {
 			not = true
 		}
 		if !p.at(tokIdent) {
-			return nil, errf("ожидали имя теста после is")
+			return nil, errf("expected test name after is")
 		}
 
 		name := p.advance().text
@@ -546,7 +546,7 @@ func (p *parser) parsePostfix() (expr, error) {
 		case p.at(tokDot):
 			p.advance()
 			if !p.at(tokIdent) {
-				return nil, errf("ожидали имя атрибута")
+				return nil, errf("expected attribute name")
 			}
 
 			e = attrExpr{
@@ -561,7 +561,7 @@ func (p *parser) parsePostfix() (expr, error) {
 			}
 
 			if !p.at(tokRBracket) {
-				return nil, errf("ожидали ]")
+				return nil, errf("expected ]")
 			}
 
 			p.advance()
@@ -583,7 +583,7 @@ func (p *parser) parsePostfix() (expr, error) {
 		case p.at(tokPipe):
 			p.advance()
 			if !p.at(tokIdent) {
-				return nil, errf("ожидали имя фильтра")
+				return nil, errf("expected filter name")
 			}
 			name := p.advance().text
 			var args []expr
@@ -642,7 +642,7 @@ func (p *parser) parsePrimary() (expr, error) {
 			return nil, err
 		}
 		if !p.at(tokRParen) {
-			return nil, errf("ожидали )")
+			return nil, errf("expected )")
 		}
 		p.advance()
 		return e, nil
@@ -671,7 +671,7 @@ func (p *parser) parsePrimary() (expr, error) {
 		}
 
 		if !p.at(tokRBracket) {
-			return nil, errf("ожидали ]")
+			return nil, errf("expected ]")
 		}
 
 		p.advance()
@@ -682,7 +682,7 @@ func (p *parser) parsePrimary() (expr, error) {
 	case p.at(tokLBrace):
 		return p.parseObjectLiteral()
 	default:
-		return nil, errf("неожиданный токен в выражении")
+		return nil, errf("unexpected token in expression")
 	}
 }
 
@@ -697,11 +697,11 @@ func (p *parser) parseObjectLiteral() (expr, error) {
 			} else if p.at(tokIdent) {
 				key = p.advance().text
 			} else {
-				return nil, errf("ожидали ключ объекта")
+				return nil, errf("expected object key")
 			}
 
 			if !p.at(tokColon) {
-				return nil, errf("ожидали :")
+				return nil, errf("expected :")
 			}
 
 			p.advance()
@@ -723,7 +723,7 @@ func (p *parser) parseObjectLiteral() (expr, error) {
 	}
 
 	if !p.at(tokRBrace) {
-		return nil, errf("ожидали }")
+		return nil, errf("expected }")
 	}
 
 	p.advance()
@@ -769,7 +769,7 @@ func (p *parser) parseArgs() ([]expr, error) {
 		}
 
 		if !p.at(tokRParen) {
-			return nil, errf("ожидали )")
+			return nil, errf("expected )")
 		}
 
 		p.advance()

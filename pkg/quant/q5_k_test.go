@@ -34,7 +34,7 @@ func TestDequantBlockQ5_K(t *testing.T) {
 	for l := range 32 {
 		want := float32(2)*float32(l%16) - 0.5
 		if math.Abs(float64(out[l]-want)) > 1e-5 {
-			t.Fatalf("out[%d]=%v, ожидали %v", l, out[l], want)
+			t.Fatalf("out[%d]=%v, want %v", l, out[l], want)
 		}
 	}
 
@@ -42,7 +42,7 @@ func TestDequantBlockQ5_K(t *testing.T) {
 	for l := range 32 {
 		want := float32(2)*float32((l*3)%16) - 0.5
 		if math.Abs(float64(out[32+l]-want)) > 1e-5 {
-			t.Fatalf("out[%d]=%v, ожидали %v", 32+l, out[32+l], want)
+			t.Fatalf("out[%d]=%v, want %v", 32+l, out[32+l], want)
 		}
 	}
 }
@@ -67,12 +67,12 @@ func TestDequantBlockQ5_KHighBit(t *testing.T) {
 
 	want := float32(19)
 	if math.Abs(float64(out[0]-want)) > 1e-5 {
-		t.Fatalf("out[0]=%v, ожидали %v (5-й бит)", out[0], want)
+		t.Fatalf("out[0]=%v, want %v (5th bit)", out[0], want)
 	}
 }
 
 func TestBlockQ5_KSizeMatchesFormat(t *testing.T) {
 	if BlockQ5_KSize != 176 {
-		t.Fatalf("BlockQ5_KSize=%d, ожидали 176", BlockQ5_KSize)
+		t.Fatalf("BlockQ5_KSize=%d, want 176", BlockQ5_KSize)
 	}
 }

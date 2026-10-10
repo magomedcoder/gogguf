@@ -115,11 +115,11 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	m.residency = false
 
 	if !m.gpu.HiddenActive() {
-		return fmt.Errorf("llama: слой %d на GPU: %w (hidden state потерян)", layer, cause)
+		return fmt.Errorf("llama: layer %d on GPU: %w (hidden state lost)", layer, cause)
 	}
 
 	if err := m.gpu.HiddenDownload(m.scratch.x); err != nil {
-		return fmt.Errorf("llama: слой %d на GPU: %w (откат на host: %v)", layer, cause, err)
+		return fmt.Errorf("llama: layer %d on GPU: %w (fallback to host: %v)", layer, cause, err)
 	}
 
 	return nil

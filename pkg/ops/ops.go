@@ -16,7 +16,7 @@ func MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]float32, erro
 	}
 
 	if len(matrix) < rows*cols {
-		return nil, fmt.Errorf("ops: matrix слишком короткая")
+		return nil, fmt.Errorf("ops: matrix too short")
 	}
 
 	out := make([]float32, rows)
@@ -33,11 +33,11 @@ func MatMulVecInto(matrix []float32, rows, cols int, vec, out []float32) error {
 	}
 
 	if len(matrix) < rows*cols {
-		return fmt.Errorf("ops: matrix слишком короткая")
+		return fmt.Errorf("ops: matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -59,13 +59,13 @@ func MatMulVecQ8_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	}
 
 	if cols%quant.QK8_0 != 0 {
-		return nil, fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK8_0)
+		return nil, fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK8_0)
 	}
 
 	blocksPerRow := cols / quant.QK8_0
 	want := rows * blocksPerRow * quant.BlockQ8_0Size
 	if len(raw) < want {
-		return nil, fmt.Errorf("ops: Q8_0 matrix слишком короткая")
+		return nil, fmt.Errorf("ops: Q8_0 matrix too short")
 	}
 
 	out := make([]float32, rows)
@@ -83,17 +83,17 @@ func MatMulVecQ8_0Into(raw []byte, rows, cols int, vec, out []float32) error {
 	}
 
 	if cols%quant.QK8_0 != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK8_0)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK8_0)
 	}
 
 	blocksPerRow := cols / quant.QK8_0
 	want := rows * blocksPerRow * quant.BlockQ8_0Size
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q8_0 matrix слишком короткая")
+		return fmt.Errorf("ops: Q8_0 matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -124,13 +124,13 @@ func MatMulVecQ4_0(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	}
 
 	if cols%quant.QK4_0 != 0 {
-		return nil, fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK4_0)
+		return nil, fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK4_0)
 	}
 
 	blocksPerRow := cols / quant.QK4_0
 	want := rows * blocksPerRow * quant.BlockQ4_0Size
 	if len(raw) < want {
-		return nil, fmt.Errorf("ops: Q4_0 matrix слишком короткая")
+		return nil, fmt.Errorf("ops: Q4_0 matrix too short")
 	}
 
 	out := make([]float32, rows)
@@ -148,17 +148,17 @@ func MatMulVecQ4_0Into(raw []byte, rows, cols int, vec, out []float32) error {
 	}
 
 	if cols%quant.QK4_0 != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK4_0)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK4_0)
 	}
 
 	blocksPerRow := cols / quant.QK4_0
 	want := rows * blocksPerRow * quant.BlockQ4_0Size
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q4_0 matrix слишком короткая")
+		return fmt.Errorf("ops: Q4_0 matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -189,13 +189,13 @@ func MatMulVecQ4_K(raw []byte, rows, cols int, vec []float32) ([]float32, error)
 	}
 
 	if cols%quant.QK_K != 0 {
-		return nil, fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK_K)
+		return nil, fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK_K)
 	}
 
 	blocksPerRow := cols / quant.QK_K
 	want := rows * blocksPerRow * quant.BlockQ4_KSize
 	if len(raw) < want {
-		return nil, fmt.Errorf("ops: Q4_K matrix слишком короткая")
+		return nil, fmt.Errorf("ops: Q4_K matrix too short")
 	}
 
 	out := make([]float32, rows)
@@ -213,17 +213,17 @@ func MatMulVecQ4_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	}
 
 	if cols%quant.QK_K != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK_K)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK_K)
 	}
 
 	blocksPerRow := cols / quant.QK_K
 	want := rows * blocksPerRow * quant.BlockQ4_KSize
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q4_K matrix слишком короткая")
+		return fmt.Errorf("ops: Q4_K matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -264,17 +264,17 @@ func MatMulVecQ5_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	}
 
 	if cols%quant.QK_K != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK_K)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK_K)
 	}
 
 	blocksPerRow := cols / quant.QK_K
 	want := rows * blocksPerRow * quant.BlockQ5_KSize
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q5_K matrix слишком короткая")
+		return fmt.Errorf("ops: Q5_K matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {
@@ -315,17 +315,17 @@ func MatMulVecQ6_KInto(raw []byte, rows, cols int, vec, out []float32) error {
 	}
 
 	if cols%quant.QK_K != 0 {
-		return fmt.Errorf("ops: cols=%d не кратно %d", cols, quant.QK_K)
+		return fmt.Errorf("ops: cols=%d not divisible by %d", cols, quant.QK_K)
 	}
 
 	blocksPerRow := cols / quant.QK_K
 	want := rows * blocksPerRow * quant.BlockQ6_KSize
 	if len(raw) < want {
-		return fmt.Errorf("ops: Q6_K matrix слишком короткая")
+		return fmt.Errorf("ops: Q6_K matrix too short")
 	}
 
 	if len(out) < rows {
-		return fmt.Errorf("ops: out слишком короткий")
+		return fmt.Errorf("ops: out too short")
 	}
 
 	parallelForRows(rows, func(rowStart, rowEnd int) {

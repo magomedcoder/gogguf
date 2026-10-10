@@ -15,7 +15,7 @@ const (
 	defaultAlignment = int64(32)
 )
 
-var errReaderAtRequired = errors.New("gguf: источник данных должен реализовывать io.ReaderAt")
+var errReaderAtRequired = errors.New("gguf: data source must implement io.ReaderAt")
 
 // Reader - GGUF file reader
 type Reader struct {
@@ -70,7 +70,7 @@ func (r *Reader) readMetaDataValueScalar(typ Type) (any, error) {
 			return nil, err
 		}
 		if i != 0 && i != 1 {
-			return nil, fmt.Errorf("недопустимое значение bool: %d", i)
+			return nil, fmt.Errorf("invalid bool value: %d", i)
 		}
 		return i == 1, nil
 	case String:
@@ -82,7 +82,7 @@ func (r *Reader) readMetaDataValueScalar(typ Type) (any, error) {
 	case Float64:
 		return read[float64](r.r, r.ByteOrder)
 	default:
-		return nil, fmt.Errorf("недопустимый скалярный тип: %d", typ)
+		return nil, fmt.Errorf("invalid scalar type: %d", typ)
 	}
 }
 
@@ -143,7 +143,7 @@ func (r *Reader) readMetaValue() (any, error) {
 		b := make([]bool, length)
 		for i, v := range a {
 			if v != 0 && v != 1 {
-				return nil, fmt.Errorf("недопустимое значение bool: %d", v)
+				return nil, fmt.Errorf("invalid bool value: %d", v)
 			}
 			b[i] = v == 1
 		}
@@ -165,7 +165,7 @@ func (r *Reader) readMetaValue() (any, error) {
 	case Float64:
 		return readMetaDataValueArray[float64](r, length)
 	default:
-		return nil, fmt.Errorf("неподдерживаемый тип массива: %d", aType)
+		return nil, fmt.Errorf("unsupported array type: %d", aType)
 	}
 }
 
@@ -186,7 +186,7 @@ func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 		return nil, err
 	}
 	if !bytes.Equal(buf[:], []byte(magic)) {
-		return nil, fmt.Errorf("не файл GGUF, неизвестная магическая последовательность: %q", buf)
+		return nil, fmt.Errorf("not a GGUF file, unknown magic sequence: %q", buf)
 	}
 
 	if _, err := readSeeker.Seek(3, io.SeekCurrent); err != nil {
@@ -212,7 +212,7 @@ func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 		return nil, err
 	}
 	if version != 2 && version != 3 {
-		return nil, fmt.Errorf("недопустимая версия: %d (поддерживаются 2 и 3)", version)
+		return nil, fmt.Errorf("invalid version: %d (supported: 2 and 3)", version)
 	}
 
 	r := &Reader{
@@ -254,7 +254,7 @@ func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 	if a, found := r.Metadata["general.alignment"]; found {
 		v, ok := a.(uint32)
 		if !ok {
-			return nil, fmt.Errorf("недопустимый тип выравнивания: %T", a)
+			return nil, fmt.Errorf("invalid alignment type: %T", a)
 		}
 		alignment = int64(v)
 	}
@@ -309,7 +309,7 @@ func (r *Reader) TensorInfo(name string) (*TensorInfo, error) {
 			return &r.Tensors[i], nil
 		}
 	}
-	return nil, fmt.Errorf("тензор %q не найден", name)
+	return nil, fmt.Errorf("tensor %q not found", name)
 }
 
 // TensorSize returns total size of all tensors in file

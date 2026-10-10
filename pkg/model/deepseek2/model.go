@@ -120,7 +120,7 @@ func (m *Model) EmbeddingDim() int {
 
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("deepseek2: пустой ввод")
+		return nil, fmt.Errorf("deepseek2: empty input")
 	}
 
 	for i, tok := range tokenIDs {
@@ -139,7 +139,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
-		return nil, fmt.Errorf("deepseek2: пустой ввод")
+		return nil, fmt.Errorf("deepseek2: empty input")
 	}
 
 	m.ResetCache()
@@ -413,7 +413,7 @@ func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
 	_ = kFull
 	_ = vFull
 	_ = layer
-	return fmt.Errorf("deepseek2: устаревший attn_kv_b (non-MLA GGUF) пока не поддерживается; нужен attn_k_b/attn_v_b")
+	return fmt.Errorf("deepseek2: legacy attn_kv_b (non-MLA GGUF) not supported yet; need attn_k_b/attn_v_b")
 }
 
 func (m *Model) ffnMoE(lt layerTensors, layer int) error {

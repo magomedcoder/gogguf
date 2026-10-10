@@ -43,7 +43,7 @@ func TestMatMulVecQ4_1(t *testing.T) {
 		}
 
 		if math.Abs(float64(got[r]-want)) > 1e-3 {
-			t.Fatalf("строка %d: получили %v, ожидали %v", r, got[r], want)
+			t.Fatalf("row %d: got %v, want %v", r, got[r], want)
 		}
 	}
 }
@@ -83,7 +83,7 @@ func TestMatMulVecQ5_0(t *testing.T) {
 		}
 
 		if math.Abs(float64(got[r]-want)) > 1e-3 {
-			t.Fatalf("строка %d: получили %v, ожидали %v", r, got[r], want)
+			t.Fatalf("row %d: got %v, want %v", r, got[r], want)
 		}
 	}
 }
@@ -124,7 +124,7 @@ func TestMatMulVecQ5_1(t *testing.T) {
 		}
 
 		if math.Abs(float64(got[r]-want)) > 1e-3 {
-			t.Fatalf("строка %d: получили %v, ожидали %v", r, got[r], want)
+			t.Fatalf("row %d: got %v, want %v", r, got[r], want)
 		}
 	}
 }

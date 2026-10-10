@@ -26,7 +26,7 @@ func modelPath(t *testing.T) string {
 		}
 	}
 
-	t.Skip("нет Mistral-7B-Instruct-v0.2-Q4_K_M.gguf")
+	t.Skip("missing Mistral-7B-Instruct-v0.2-Q4_K_M.gguf")
 
 	return ""
 }
@@ -42,7 +42,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 	var g gpu.Backend
 	if ngl > 0 {
 		if g, err = gpu.OpenCUDA(); err != nil {
-			t.Skip("CUDA недоступна:", err)
+			t.Skip("CUDA unavailable:", err)
 		}
 	}
 
@@ -53,7 +53,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 			g.Close()
 		}
 
-		t.Skip("offload недоступен:", err)
+		t.Skip("offload unavailable:", err)
 	}
 
 	return m
@@ -68,14 +68,14 @@ func TestMistralPartialOffloadLogitsParity(t *testing.T) {
 	dev := loadModel(t, ngl)
 	if dev.fused == nil {
 		dev.Close()
-		t.Skip("fused-пути недоступны")
+		t.Skip("fused paths unavailable")
 	}
 
 	got, err := dev.Forward(tokens, 0)
 	if err != nil {
 		dev.Close()
 		if gpu.IsOutOfMemory(err) {
-			t.Skip("не хватило VRAM:", err)
+			t.Skip("insufficient VRAM:", err)
 		}
 		t.Fatal(err)
 	}
@@ -115,6 +115,6 @@ func TestMistralPartialOffloadLogitsParity(t *testing.T) {
 	t.Logf("max|diff|=%v max|logit|=%v argmax cpu=%d gpu=%d", worst, scale, bestCPU, bestGPU)
 
 	if worst > 0.5 {
-		t.Fatalf("logits CPU vs GPU расходятся: max|diff|=%v", worst)
+		t.Fatalf("CPU vs GPU logits diverge: max|diff|=%v", worst)
 	}
 }

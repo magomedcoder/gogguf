@@ -15,7 +15,7 @@ func rmsnormScaleMulPure(dst, x, weight []float32, scale float32) {
 
 func rmsnormInto(dst, x, weight []float32, eps float32) error {
 	if len(dst) != len(x) || len(x) != len(weight) {
-		return fmt.Errorf("ops: RMSNormInto: несовпадение длин")
+		return fmt.Errorf("ops: RMSNormInto: length mismatch")
 	}
 
 	sumSq := dot(x, x)
@@ -26,7 +26,7 @@ func rmsnormInto(dst, x, weight []float32, eps float32) error {
 
 func rmsnorm(x, weight []float32, eps float32) ([]float32, error) {
 	if len(x) != len(weight) {
-		return nil, fmt.Errorf("ops: x и weight разной длины")
+		return nil, fmt.Errorf("ops: x and weight length mismatch")
 	}
 
 	out := make([]float32, len(x))
@@ -48,7 +48,7 @@ func RMSNormBatchInto(dst, x, weight []float32, eps float32, batch, dim int) err
 	}
 
 	if len(dst) < batch*dim || len(x) < batch*dim {
-		return fmt.Errorf("ops: RMSNormBatchInto: буферы слишком короткие")
+		return fmt.Errorf("ops: RMSNormBatchInto: buffers too short")
 	}
 
 	for b := range batch {

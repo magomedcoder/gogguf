@@ -15,13 +15,13 @@ func TestOpenCUDATagged(t *testing.T) {
 			t.Logf("OpenCUDA(): %v", err)
 		}
 
-		t.Skip("CUDA недоступна")
+		t.Skip("CUDA unavailable")
 	}
 
 	defer b.Close()
 
 	if b == nil {
-		t.Fatal("OpenCUDA() вернул nil backend без ошибки")
+		t.Fatal("OpenCUDA() returned nil backend without error")
 	}
 }
 
@@ -29,7 +29,7 @@ func TestOpenCUDATagged(t *testing.T) {
 func TestOpenCUDADeviceTagged(t *testing.T) {
 	b, err := OpenCUDADevice(0)
 	if err != nil {
-		t.Skipf("CUDA недоступна: %v", err)
+		t.Skipf("CUDA unavailable: %v", err)
 	}
 	defer b.Close()
 
@@ -39,17 +39,17 @@ func TestOpenCUDADeviceTagged(t *testing.T) {
 	}
 
 	if total == 0 || used > total {
-		t.Fatalf("VRAMInfo = %d/%d байт", used, total)
+		t.Fatalf("VRAMInfo = %d/%d bytes", used, total)
 	}
 
 	t.Logf("%s: VRAM %d/%d MB", b.Name(), used>>20, total>>20)
 
 	if _, err := OpenCUDADevice(1024); err == nil {
-		t.Fatal("OpenCUDADevice(1024): ожидали ошибку диапазона")
+		t.Fatal("OpenCUDADevice(1024): expected out-of-range error")
 	}
 
 	if _, err := OpenCUDADevice(-1); !errors.Is(err, ErrInvalidDevice) {
-		t.Fatalf("OpenCUDADevice(-1) = %v, ожидали ErrInvalidDevice", err)
+		t.Fatalf("OpenCUDADevice(-1) = %v, expected ErrInvalidDevice", err)
 	}
 }
 
@@ -57,12 +57,12 @@ func TestOpenCUDADeviceTagged(t *testing.T) {
 func TestOpenCUDADevicesSingle(t *testing.T) {
 	b, err := OpenCUDADevices([]int{0})
 	if err != nil {
-		t.Skipf("CUDA недоступна: %v", err)
+		t.Skipf("CUDA unavailable: %v", err)
 	}
 	defer b.Close()
 
 	if _, ok := b.(*MultiBackend); ok {
-		t.Fatal("OpenCUDADevices([0]) вернул MultiBackend вместо одного устройства")
+		t.Fatal("OpenCUDADevices([0]) returned MultiBackend instead of single device")
 	}
 
 	if Describe(b) != b.Name() {

@@ -15,7 +15,7 @@ import (
 )
 
 // ErrUnavailable: Metal backend does not compute yet
-var ErrUnavailable = errors.New("metal: backend не реализован (scaffold)")
+var ErrUnavailable = errors.New("metal: backend not implemented (scaffold)")
 
 // Backend - Metal device stub: implements full gpu.Backend interface but any compute call returns ErrUnavailable
 type Backend struct {

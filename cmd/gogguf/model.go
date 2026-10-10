@@ -11,12 +11,12 @@ import (
 func resolveModelPath(m, hfRepo string) (string, error) {
 	switch {
 	case m != "" && hfRepo != "":
-		return "", fmt.Errorf("укажите либо -m, либо -hf, не оба")
+		return "", fmt.Errorf("specify either -m or -hf, not both")
 	case m != "":
 		return m, nil
 	case hfRepo != "":
 		return hf.Resolve(hfRepo)
 	default:
-		return "", fmt.Errorf("укажите модель через -m файл.gguf или -hf owner/repo[:quant]")
+		return "", fmt.Errorf("specify model via -m file.gguf or -hf owner/repo[:quant]")
 	}
 }

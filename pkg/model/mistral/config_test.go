@@ -34,15 +34,15 @@ func TestParseConfigMistral7B(t *testing.T) {
 	}
 
 	if cfg.HeadDim != 128 {
-		t.Fatalf("HeadDim = %d, ожидали 128", cfg.HeadDim)
+		t.Fatalf("HeadDim = %d, expected 128", cfg.HeadDim)
 	}
 
 	if cfg.RopeFreqBase != 1000000 {
-		t.Fatalf("RopeFreqBase = %v, ожидали 1000000", cfg.RopeFreqBase)
+		t.Fatalf("RopeFreqBase = %v, expected 1000000", cfg.RopeFreqBase)
 	}
 
 	if cfg.SlidingWindow != 4096 {
-		t.Fatalf("SlidingWindow = %d, ожидали 4096", cfg.SlidingWindow)
+		t.Fatalf("SlidingWindow = %d, expected 4096", cfg.SlidingWindow)
 	}
 }
 
@@ -112,7 +112,7 @@ func TestParseConfigLlamaMixtralMoE(t *testing.T) {
 	}
 
 	if !cfg.MoENormWeights {
-		t.Fatal("Mixtral MoE должен renorm веса")
+		t.Fatal("Mixtral MoE must renorm weights")
 	}
 }
 

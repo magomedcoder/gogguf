@@ -81,7 +81,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 
 	if (load_driver(drv, &lib) != 0) {
 		if (errbuf && errbuf_len > 0) {
-			snprintf(errbuf, errbuf_len, "libcuda.so не найден");
+			snprintf(errbuf, errbuf_len, "libcuda.so not found");
 		}
 
 		return -1;
@@ -100,7 +100,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 	if (drv->cuDeviceGetCount(&count) != CUDA_SUCCESS || count <= 0) {
 		dlclose(lib);
 		if (errbuf && errbuf_len > 0) {
-			snprintf(errbuf, errbuf_len, "GPU не найдена");
+			snprintf(errbuf, errbuf_len, "no GPU found");
 		}
 
 		return -4;
@@ -110,7 +110,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 	if (device < 0 || device >= count) {
 		dlclose(lib);
 		if (errbuf && errbuf_len > 0) {
-			snprintf(errbuf, errbuf_len, "устройство %d недоступно: видимых GPU %d (проверьте -dev и CUDA_VISIBLE_DEVICES)", device, count);
+			snprintf(errbuf, errbuf_len, "device %d unavailable: %d visible GPU(s) (check -dev and CUDA_VISIBLE_DEVICES)", device, count);
 		}
 
 		return -8;
@@ -141,7 +141,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 		}
 
 		if (errbuf && errbuf_len > 0) {
-			snprintf(errbuf, errbuf_len, "compute capability %d.%d < %d.%d (нужен Pascal sm_60+); используйте -ngl 0", cc_major, cc_minor, GGUF_CUDA_MIN_CC / 10, GGUF_CUDA_MIN_CC % 10);
+			snprintf(errbuf, errbuf_len, "compute capability %d.%d < %d.%d (requires Pascal sm_60+); use -ngl 0", cc_major, cc_minor, GGUF_CUDA_MIN_CC / 10, GGUF_CUDA_MIN_CC % 10);
 		}
 
 		return -7;
@@ -278,7 +278,7 @@ int gguf_cuda_load_module(cuda_driver_t *drv, CUcontext ctx, const char *ptx,
 				if (jit_log[0] != '\0') {
 					snprintf(errbuf, errbuf_len, "cuModuleLoadDataEx: %s; jit: %s", gguf_cuda_last_error(drv, err), jit_log);
 				} else {
-					snprintf(errbuf, errbuf_len, "cuModuleLoadDataEx: %s (проверьте compute capability >= sm_60)", gguf_cuda_last_error(drv, err));
+					snprintf(errbuf, errbuf_len, "cuModuleLoadDataEx: %s (check compute capability >= sm_60)", gguf_cuda_last_error(drv, err));
 				}
 			}
 			return -1;

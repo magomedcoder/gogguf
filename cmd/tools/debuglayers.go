@@ -34,10 +34,10 @@ type logitMetric struct {
 // runDebugLayers prints per-layer RMS and final logits.
 func runDebugLayers(args []string) error {
 	fs := flag.NewFlagSet("debuglayers", flag.ContinueOnError)
-	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "путь к GGUF")
-	prompt := fs.String("p", "Hello", "промпт")
+	modelPath := fs.String("m", "./models/Qwen3-0.6B-Q8_0.gguf", "path to GGUF")
+	prompt := fs.String("p", "Hello", "prompt")
 	chat := fs.Bool("chat", false, "chat template")
-	topN := fs.Int("top", 5, "число top logits в отчёте")
+	topN := fs.Int("top", 5, "number of top logits in report")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -74,7 +74,7 @@ func runDebugLayers(args []string) error {
 		SetDebugHooks(*qwen3.DebugHooks)
 	})
 	if !ok {
-		return fmt.Errorf("модель не поддерживает debug hooks")
+		return fmt.Errorf("model does not support debug hooks")
 	}
 
 	setter.SetDebugHooks(&qwen3.DebugHooks{

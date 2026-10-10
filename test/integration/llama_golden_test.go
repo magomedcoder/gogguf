@@ -31,7 +31,7 @@ func llamaModelPath(t *testing.T) string {
 		}
 	}
 
-	t.Skip("Llama-3.2-1B-Instruct-Q8_0.gguf не найден")
+	t.Skip("Llama-3.2-1B-Instruct-Q8_0.gguf not found")
 
 	return ""
 }
@@ -53,12 +53,12 @@ func loadLlamaGolden(t *testing.T) goldenFile {
 		}
 	}
 	if data == nil {
-		t.Fatal("llama32_golden.json не найден")
+		t.Fatal("llama32_golden.json not found")
 	}
 
 	var gf goldenFile
 	if err := json.Unmarshal(data, &gf); err != nil {
-		t.Fatalf("не удалось разобрать fixture: %v", err)
+		t.Fatalf("failed to parse fixture: %v", err)
 	}
 
 	return gf
@@ -68,7 +68,7 @@ func TestLlama32GoldenFixture(t *testing.T) {
 	gf := loadLlamaGolden(t)
 	engine, err := gogguf.Load(llamaModelPath(t), gogguf.LoadOptions{})
 	if err != nil {
-		t.Fatalf("не удалось загрузить модель: %v", err)
+		t.Fatalf("failed to load model: %v", err)
 	}
 
 	ctx, err := engine.NewContext()
@@ -86,7 +86,7 @@ func TestLlama32GoldenFixture(t *testing.T) {
 				}
 
 				if len(ids) != len(tc.Encode) || ids[0] != tc.Encode[0] {
-					t.Fatalf("Encode(%q) = %v, ожидали %v", tc.Input, ids, tc.Encode)
+					t.Fatalf("Encode(%q) = %v, expected %v", tc.Input, ids, tc.Encode)
 				}
 
 			case tc.ChatUser != "" && len(tc.GreedyTokens) > 0:
@@ -116,12 +116,12 @@ func TestLlama32GoldenFixture(t *testing.T) {
 
 				got := sess.GeneratedTokens()
 				if len(got) != len(tc.GreedyTokens) {
-					t.Fatalf("greedy tokens = %v, ожидали %v", got, tc.GreedyTokens)
+					t.Fatalf("greedy tokens = %v, expected %v", got, tc.GreedyTokens)
 				}
 
 				for i := range got {
 					if got[i] != tc.GreedyTokens[i] {
-						t.Fatalf("token[%d] = %d, ожидали %d", i, got[i], tc.GreedyTokens[i])
+						t.Fatalf("token[%d] = %d, expected %d", i, got[i], tc.GreedyTokens[i])
 					}
 				}
 
@@ -160,7 +160,7 @@ func TestLlama32GoldenFixture(t *testing.T) {
 				}
 
 				if next != tc.GreedyNext {
-					t.Fatalf("greedy next = %d, ожидали %d", next, tc.GreedyNext)
+					t.Fatalf("greedy next = %d, expected %d", next, tc.GreedyNext)
 				}
 
 			case tc.Input != "" && tc.GreedyNext > 0:
@@ -191,7 +191,7 @@ func TestLlama32GoldenFixture(t *testing.T) {
 				}
 
 				if next != tc.GreedyNext {
-					t.Fatalf("greedy next = %d, ожидали %d", next, tc.GreedyNext)
+					t.Fatalf("greedy next = %d, expected %d", next, tc.GreedyNext)
 				}
 			}
 		})
@@ -203,14 +203,14 @@ func assertGreedyAndTopLogits(t *testing.T, logits []float32, wantNext int, want
 
 	next := gogguf.Greedy(logits)
 	if next != wantNext {
-		t.Fatalf("greedy next = %d, ожидали %d", next, wantNext)
+		t.Fatalf("greedy next = %d, expected %d", next, wantNext)
 	}
 
 	const logitTol = 1e-4
 	for _, want := range wantTop {
 		got := logits[want.ID]
 		if math.Abs(float64(got-want.Logit)) > logitTol {
-			t.Fatalf("logit[%d] = %v, ожидали ~%v", want.ID, got, want.Logit)
+			t.Fatalf("logit[%d] = %v, expected ~%v", want.ID, got, want.Logit)
 		}
 	}
 }

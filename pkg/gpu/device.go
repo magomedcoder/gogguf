@@ -23,7 +23,7 @@ func ParseDeviceList(s string) ([]int, error) {
 
 		n, err := strconv.Atoi(p)
 		if err != nil {
-			return nil, fmt.Errorf("gpu: -dev %q: ожидался номер устройства: %w", p, err)
+			return nil, fmt.Errorf("gpu: -dev %q: expected device index: %w", p, err)
 		}
 
 		devices = append(devices, n)
@@ -50,11 +50,11 @@ func ParseTensorSplit(s string) ([]float64, error) {
 
 		v, err := strconv.ParseFloat(p, 64)
 		if err != nil {
-			return nil, fmt.Errorf("gpu: -tensor-split %q: ожидалось число: %w", p, err)
+			return nil, fmt.Errorf("gpu: -tensor-split %q: expected number: %w", p, err)
 		}
 
 		if v < 0 {
-			return nil, fmt.Errorf("gpu: -tensor-split %q: доля должна быть >= 0", p)
+			return nil, fmt.Errorf("gpu: -tensor-split %q: split weight must be >= 0", p)
 		}
 
 		total += v
@@ -66,7 +66,7 @@ func ParseTensorSplit(s string) ([]float64, error) {
 	}
 
 	if total <= 0 {
-		return nil, fmt.Errorf("gpu: -tensor-split: сумма долей должна быть > 0")
+		return nil, fmt.Errorf("gpu: -tensor-split: sum of split weights must be > 0")
 	}
 
 	return split, nil
@@ -93,7 +93,7 @@ func ParseDevices(devList, splitList string) (devices []int, split []float64, er
 	}
 
 	if len(split) > 0 && len(devices) != len(split) {
-		return nil, nil, fmt.Errorf("gpu: -tensor-split из %d долей при %d устройствах в -dev", len(split), len(devices))
+		return nil, nil, fmt.Errorf("gpu: -tensor-split has %d weights for %d devices in -dev", len(split), len(devices))
 	}
 
 	return devices, split, nil

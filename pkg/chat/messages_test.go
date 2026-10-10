@@ -18,7 +18,7 @@ func TestFormatMessagesUserOnly(t *testing.T) {
 
 	want := formatUserFallback("Hi", Options{})
 	if got != want {
-		t.Fatalf("получили %q, ожидали %q", got, want)
+		t.Fatalf("got %q, expected %q", got, want)
 	}
 }
 
@@ -26,7 +26,7 @@ func TestFormatMessagesWithSystem(t *testing.T) {
 	got, err := FormatMessages([]Message{
 		{
 			Role:    "system",
-			Content: "Вы очень полезны",
+			Content: "You are very helpful",
 		},
 		{
 			Role:    "user",
@@ -38,6 +38,6 @@ func TestFormatMessagesWithSystem(t *testing.T) {
 	}
 
 	if !strings.Contains(got, "system") || !strings.Contains(got, "user") {
-		t.Fatalf("ожидали system и user блоки: %q", got)
+		t.Fatalf("expected system and user blocks: %q", got)
 	}
 }

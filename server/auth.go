@@ -22,7 +22,7 @@ func withAPIKey(next http.Handler, apiKey string) http.Handler {
 
 		got := apiKeyFromRequest(r)
 		if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
-			writeAPIError(w, http.StatusUnauthorized, "неверный или отсутствующий API key", "authentication_error")
+			writeAPIError(w, http.StatusUnauthorized, "invalid or missing API key", "authentication_error")
 			return
 		}
 

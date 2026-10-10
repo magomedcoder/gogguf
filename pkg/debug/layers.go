@@ -35,7 +35,7 @@ type LayersDump struct {
 // WriteLayersBin magic + embd + n_layers + embed + layers
 func WriteLayersBin(w io.Writer, dump LayersDump) error {
 	if len(dump.Embed) == 0 {
-		return fmt.Errorf("debug: пустой embed")
+		return fmt.Errorf("debug: empty embed")
 	}
 	embd := len(dump.Embed)
 	for i, ly := range dump.Layers {
@@ -77,7 +77,7 @@ func ReadLayersBin(r io.Reader) (LayersDump, error) {
 	}
 
 	if string(magic) != layersMagic {
-		return LayersDump{}, fmt.Errorf("debug: неверный magic %q, ожидали %q", magic, layersMagic)
+		return LayersDump{}, fmt.Errorf("debug: invalid magic %q, want %q", magic, layersMagic)
 	}
 
 	var embd, nLayers uint32

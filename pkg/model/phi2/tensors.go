@@ -50,7 +50,7 @@ func loadLayerTensors(w *weights.Store, numLayers int) ([]layerTensors, error) {
 			lt.attnKb = p + "attn_k.bias"
 			lt.attnVb = p + "attn_v.bias"
 			if _, err := w.Info(lt.attnQ); err != nil {
-				return nil, fmt.Errorf("phi2: blk.%d: нет attn_qkv и attn_q", i)
+				return nil, fmt.Errorf("phi2: blk.%d: missing attn_qkv and attn_q", i)
 			}
 		}
 

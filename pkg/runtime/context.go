@@ -28,7 +28,7 @@ type Context struct {
 // NewContext creates an inference context.
 func (e *Engine) NewContext() (*Context, error) {
 	if e.tok == nil {
-		return nil, fmt.Errorf("runtime: tokenizer не загружен")
+		return nil, fmt.Errorf("runtime: tokenizer not loaded")
 	}
 
 	return &Context{

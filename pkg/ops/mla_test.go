@@ -20,7 +20,7 @@ func TestAttentionMLAAbsorbedIdentity(t *testing.T) {
 	}
 
 	if math.Abs(float64(dst[0]-3)) > 1e-5 || math.Abs(float64(dst[1]-4)) > 1e-5 {
-		t.Fatalf("dst=%v, ожидали [3,4]", dst)
+		t.Fatalf("dst=%v, want [3,4]", dst)
 	}
 }
 

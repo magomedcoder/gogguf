@@ -27,11 +27,11 @@ func QuantBytes(t format.GGML, rows, cols int) (int, error) {
 	case format.GgmlQ6_K:
 		blk, size = quant.QK_K, quant.BlockQ6_KSize
 	default:
-		return 0, fmt.Errorf("тип %s не поддерживается", t)
+		return 0, fmt.Errorf("type %s not supported", t)
 	}
 
 	if cols%blk != 0 {
-		return 0, fmt.Errorf("cols=%d не кратно %d", cols, blk)
+		return 0, fmt.Errorf("cols=%d not divisible by %d", cols, blk)
 	}
 
 	return rows * (cols / blk) * size, nil

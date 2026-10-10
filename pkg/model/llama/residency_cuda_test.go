@@ -26,7 +26,7 @@ func modelPath(t *testing.T) string {
 		}
 	}
 
-	t.Skip("нет Llama-3.2-1B-Instruct-Q8_0.gguf")
+	t.Skip("missing Llama-3.2-1B-Instruct-Q8_0.gguf")
 
 	return ""
 }
@@ -42,7 +42,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 	var g gpu.Backend
 	if ngl > 0 {
 		if g, err = gpu.OpenCUDA(); err != nil {
-			t.Skip("CUDA недоступна:", err)
+			t.Skip("CUDA unavailable:", err)
 		}
 	}
 
@@ -52,7 +52,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 			g.Close()
 		}
 
-		t.Skip("offload недоступен:", err)
+		t.Skip("offload unavailable:", err)
 	}
 
 	return m
@@ -62,7 +62,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 func skipOOM(t *testing.T, err error) {
 	t.Helper()
 	if gpu.IsOutOfMemory(err) {
-		t.Skip("не хватило VRAM:", err)
+		t.Skip("insufficient VRAM:", err)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 
 		// layer may silently fall back to host on upload OOM (recoverHiddenFromDevice)
 		if !m.residency || !m.residDevice {
-			t.Skip("residency откатилась на host (вероятно нехватка VRAM)")
+			t.Skip("residency fell back to host (likely insufficient VRAM)")
 		}
 
 		if err := m.logitsFinish(); err != nil {
@@ -89,7 +89,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 		}
 
 		if !m.logitsOnGPU {
-			t.Fatal("logitsOnGPU сброшен: GPU lm_head не сработал")
+			t.Fatal("logitsOnGPU cleared: GPU lm_head failed")
 		}
 
 		return
@@ -102,7 +102,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 	defer m.Close()
 
 	if m.fused == nil {
-		t.Skip("fused-пути недоступны")
+		t.Skip("fused paths unavailable")
 	}
 
 	if err := m.forwardToken(1, 0, false); err != nil {
@@ -139,7 +139,7 @@ func TestLlamaFullOffloadLogitsParity(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		t.Logf("полный offload: %v - повторяем с ngl=4", err)
+		t.Logf("full offload: %v - retrying with ngl=4", err)
 		requireResid = false
 		dev = loadModel(t, 4)
 		got, err = dev.Forward(tokens, 0)
@@ -152,7 +152,7 @@ func TestLlamaFullOffloadLogitsParity(t *testing.T) {
 	defer dev.Close()
 
 	if requireResid && !dev.residDevice {
-		t.Fatal("hidden не остался на устройстве при полном offload")
+		t.Fatal("hidden did not stay on device with full offload")
 	}
 
 	var worst float64
@@ -163,6 +163,6 @@ func TestLlamaFullOffloadLogitsParity(t *testing.T) {
 	}
 
 	if worst > 0.5 {
-		t.Fatalf("logits CPU vs GPU расходятся: max|diff|=%v", worst)
+		t.Fatalf("CPU vs GPU logits diverge: max|diff|=%v", worst)
 	}
 }

@@ -5,16 +5,16 @@ import (
 	"os"
 )
 
-const usage = `GoGGUF - система запуска GGUF-моделей на Go
+const usage = `GoGGUF - GGUF model runtime in Go
 
-Использование:
-  gogguf inspect файл.gguf                    просмотр метаданных и тензоров
-  gogguf info -m файл.gguf                    краткая информация о модели
-  gogguf run -m файл.gguf -p "..."            генерация текста
-  gogguf run -hf owner/repo[:quant] -p "..."  скачать с Hugging Face и запустить
-  gogguf run -m файл.gguf -i                  интерактивный режим (REPL)
-  gogguf serve -m файл.gguf                   HTTP API (SSE streaming)
-  gogguf serve -hf owner/repo[:quant]         HTTP API с моделью с Hugging Face
+Usage:
+  gogguf inspect file.gguf                    view metadata and tensors
+  gogguf info -m file.gguf                    brief model info
+  gogguf run -m file.gguf -p "..."            text generation
+  gogguf run -hf owner/repo[:quant] -p "..."  download from Hugging Face and run
+  gogguf run -m file.gguf -i                  interactive mode (REPL)
+  gogguf serve -m file.gguf                   HTTP API (SSE streaming)
+  gogguf serve -hf owner/repo[:quant]         HTTP API with Hugging Face model
 `
 
 // main is the gogguf CLI entry point.
@@ -28,7 +28,7 @@ func main() {
 	switch os.Args[1] {
 	case "inspect":
 		if len(os.Args) != 3 {
-			fmt.Fprintf(os.Stderr, "использование: gogguf inspect файл.gguf\n")
+			fmt.Fprintf(os.Stderr, "usage: gogguf inspect file.gguf\n")
 			os.Exit(1)
 		}
 		err = runInspect(os.Args[2])
@@ -39,7 +39,7 @@ func main() {
 	case "serve":
 		err = runServe(os.Args[2:])
 	default:
-		fmt.Fprintf(os.Stderr, "неизвестная команда: %q\n\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "unknown command: %q\n\n", os.Args[1])
 		fmt.Print(usage)
 		os.Exit(1)
 	}

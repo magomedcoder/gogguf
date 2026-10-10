@@ -39,7 +39,7 @@ func TestFullLayersCPUVsGPU(t *testing.T) {
 		GPUMaxSeq: 256,
 	})
 	if err != nil {
-		t.Skipf("CUDA недоступен: %v", err)
+		t.Skipf("CUDA unavailable: %v", err)
 	}
 	defer gpuEng.Close()
 

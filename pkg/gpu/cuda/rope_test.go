@@ -12,11 +12,11 @@ import (
 func TestRoPEHeadsGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 
 	if !b.hasRoPE {
-		t.Skip("CUDA rope kernel недоступен")
+		t.Skip("CUDA rope kernel unavailable")
 	}
 
 	defer b.Close()
@@ -43,11 +43,11 @@ func TestRoPEHeadsGPU(t *testing.T) {
 func TestRoPEHeadsNormGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {
-		t.Skip("CUDA недоступна:", err)
+		t.Skip("CUDA unavailable:", err)
 	}
 
 	if !b.hasRoPENorm {
-		t.Skip("CUDA rope_heads_norm kernel недоступен")
+		t.Skip("CUDA rope_heads_norm kernel unavailable")
 	}
 
 	defer b.Close()

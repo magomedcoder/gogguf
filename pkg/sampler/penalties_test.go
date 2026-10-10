@@ -9,11 +9,11 @@ func TestApplyRepeatPenalty(t *testing.T) {
 	ApplyRepeatPenalty(logits, history, 2, 64)
 
 	if logits[2] >= 3 {
-		t.Fatalf("повторяющийся токен 2 должен быть penalized, logits[2]=%v", logits[2])
+		t.Fatalf("repeated token 2 must be penalized, logits[2]=%v", logits[2])
 	}
 
 	if logits[0] != 2 || logits[1] != 1 {
-		t.Fatalf("неповторяющиеся токены не должны меняться: %v", logits)
+		t.Fatalf("non-repeated tokens must not change: %v", logits)
 	}
 }
 
@@ -23,7 +23,7 @@ func TestApplyRepeatPenaltyDisabled(t *testing.T) {
 	ApplyRepeatPenalty(logits, []int{2}, 1, 64)
 	for i := range want {
 		if logits[i] != want[i] {
-			t.Fatalf("penalty=1: logits[%d]=%v, ожидали %v", i, logits[i], want[i])
+			t.Fatalf("penalty=1: logits[%d]=%v, want %v", i, logits[i], want[i])
 		}
 	}
 }
@@ -33,11 +33,11 @@ func TestApplyMinP(t *testing.T) {
 	ApplyMinP(logits, 0.5)
 
 	if logits[2] <= -1e9 {
-		t.Fatal("токен с max prob не должен быть отфильтрован")
+		t.Fatal("token with max prob must not be filtered")
 	}
 
 	if logits[0] > -1e9 || logits[1] > -1e9 {
-		t.Fatalf("слабые токены должны быть отфильтрованы: %v", logits)
+		t.Fatalf("weak tokens must be filtered: %v", logits)
 	}
 }
 
@@ -52,7 +52,7 @@ func TestMinPInChain(t *testing.T) {
 	for range 50 {
 		got := s(logits)
 		if got > 1 {
-			t.Fatalf("min-p отфильтровал слабые токены, но выбран index %d", got)
+			t.Fatalf("min-p filtered weak tokens but selected index %d", got)
 		}
 	}
 }

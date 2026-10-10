@@ -14,7 +14,7 @@ func TestEngineContextLength(t *testing.T) {
 		},
 	}
 	if got := e.ContextLength(); got != 4096 {
-		t.Fatalf("ContextLength() = %d, ожидали 4096", got)
+		t.Fatalf("ContextLength() = %d, expected 4096", got)
 	}
 }
 
@@ -23,6 +23,6 @@ func TestEngineContextLengthUnknown(t *testing.T) {
 		meta: format.Metadata{},
 	}
 	if got := e.ContextLength(); got != 0 {
-		t.Fatalf("ContextLength() = %d, ожидали 0", got)
+		t.Fatalf("ContextLength() = %d, expected 0", got)
 	}
 }

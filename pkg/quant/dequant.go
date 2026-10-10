@@ -40,7 +40,7 @@ func ToFloat32(typ format.GGML, data []byte, n int) ([]float32, error) {
 	case format.GgmlInt32:
 		return dequantI32(data, n)
 	default:
-		return nil, fmt.Errorf("quant: тип %s пока не поддерживается", typ)
+		return nil, fmt.Errorf("quant: type %s not yet supported", typ)
 	}
 }
 
@@ -48,7 +48,7 @@ func ToFloat32(typ format.GGML, data []byte, n int) ([]float32, error) {
 func dequantF32(data []byte, n int) ([]float32, error) {
 	want := n * 4
 	if len(data) < want {
-		return nil, fmt.Errorf("quant: F32 данных недостаточно: нужно %d, есть %d", want, len(data))
+		return nil, fmt.Errorf("quant: insufficient F32 data: need %d, have %d", want, len(data))
 	}
 
 	out := make([]float32, n)
@@ -63,7 +63,7 @@ func dequantF32(data []byte, n int) ([]float32, error) {
 func dequantF16(data []byte, n int) ([]float32, error) {
 	want := n * 2
 	if len(data) < want {
-		return nil, fmt.Errorf("quant: F16 данных недостаточно: нужно %d, есть %d", want, len(data))
+		return nil, fmt.Errorf("quant: insufficient F16 data: need %d, have %d", want, len(data))
 	}
 
 	out := make([]float32, n)
@@ -78,7 +78,7 @@ func dequantF16(data []byte, n int) ([]float32, error) {
 func dequantI32(data []byte, n int) ([]float32, error) {
 	want := n * 4
 	if len(data) < want {
-		return nil, fmt.Errorf("quant: I32 данных недостаточно: нужно %d, есть %d", want, len(data))
+		return nil, fmt.Errorf("quant: insufficient I32 data: need %d, have %d", want, len(data))
 	}
 
 	out := make([]float32, n)

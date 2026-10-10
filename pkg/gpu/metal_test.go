@@ -12,7 +12,7 @@ var _ Backend = (*metal.Backend)(nil)
 func TestMetalScaffoldCompute(t *testing.T) {
 	var b metal.Backend
 	if b.Name() == "" {
-		t.Fatal("Name() пустой")
+		t.Fatal("Name() empty")
 	}
 
 	if _, _, err := b.VRAMInfo(); err != nil {
@@ -20,15 +20,15 @@ func TestMetalScaffoldCompute(t *testing.T) {
 	}
 
 	if b.HiddenResident() {
-		t.Fatal("HiddenResident() = true у заглушки")
+		t.Fatal("HiddenResident() = true on stub")
 	}
 
 	if _, err := b.MatMulVec(nil, 1, 1, nil); err != metal.ErrUnavailable {
-		t.Fatalf("MatMulVec = %v, ожидали ErrUnavailable", err)
+		t.Fatalf("MatMulVec = %v, expected ErrUnavailable", err)
 	}
 
 	if err := b.KVCacheInit(1, 1, 1, 1, 1); err != metal.ErrUnavailable {
-		t.Fatalf("KVCacheInit = %v, ожидали ErrUnavailable", err)
+		t.Fatalf("KVCacheInit = %v, expected ErrUnavailable", err)
 	}
 
 	if err := b.Close(); err != nil {

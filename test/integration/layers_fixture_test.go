@@ -45,12 +45,12 @@ func loadLayersFixture(t *testing.T) layersFile {
 		}
 	}
 	if data == nil {
-		t.Skip("layers fixture не найден")
+		t.Skip("layers fixture not found")
 	}
 
 	var lf layersFile
 	if err := json.Unmarshal(data, &lf); err != nil {
-		t.Fatalf("не удалось разобрать fixture: %v", err)
+		t.Fatalf("failed to parse fixture: %v", err)
 	}
 
 	return lf
@@ -60,14 +60,14 @@ func TestLayersFixture(t *testing.T) {
 	lf := loadLayersFixture(t)
 	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
-		t.Fatalf("не удалось загрузить модель: %v", err)
+		t.Fatalf("failed to load model: %v", err)
 	}
 
 	setter, ok := engine.Model.(interface {
 		SetDebugHooks(*qwen3.DebugHooks)
 	})
 	if !ok {
-		t.Fatal("модель не поддерживает debug hooks")
+		t.Fatal("model does not support debug hooks")
 	}
 
 	for _, tc := range lf.Cases {
@@ -107,22 +107,22 @@ func TestLayersFixture(t *testing.T) {
 			}
 
 			if math.Abs(float64(embedRMS-tc.EmbedRMS)) > 1e-2 {
-				t.Fatalf("embed_rms = %v, ожидали ~%v", embedRMS, tc.EmbedRMS)
+				t.Fatalf("embed_rms = %v, expected ~%v", embedRMS, tc.EmbedRMS)
 			}
 
 			if len(layerRMS) != len(tc.LayerRMS) {
-				t.Fatalf("layer count = %d, ожидали %d", len(layerRMS), len(tc.LayerRMS))
+				t.Fatalf("layer count = %d, expected %d", len(layerRMS), len(tc.LayerRMS))
 			}
 
 			for i := range layerRMS {
 				if math.Abs(float64(layerRMS[i]-tc.LayerRMS[i])) > 1e-1 {
-					t.Fatalf("layer[%d] rms = %v, ожидали ~%v", i, layerRMS[i], tc.LayerRMS[i])
+					t.Fatalf("layer[%d] rms = %v, expected ~%v", i, layerRMS[i], tc.LayerRMS[i])
 				}
 			}
 
 			next := gogguf.Greedy(logits)
 			if next != tc.GreedyNext {
-				t.Fatalf("greedy next = %d, ожидали %d", next, tc.GreedyNext)
+				t.Fatalf("greedy next = %d, expected %d", next, tc.GreedyNext)
 			}
 		})
 	}

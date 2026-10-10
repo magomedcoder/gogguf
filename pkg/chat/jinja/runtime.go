@@ -254,7 +254,7 @@ func execNode(n node, ctx *execCtx, b *strings.Builder) error {
 
 		return nil
 	default:
-		return errf("неизвестный узел")
+		return errf("unknown node")
 	}
 
 	return nil
@@ -295,7 +295,7 @@ func assignTarget(target expr, v value, ctx *execCtx) error {
 		}
 
 		if base.kind != valNamespace && base.kind != valObject {
-			return errf("нельзя присвоить атрибут %s", t.attr)
+			return errf("cannot assign attribute %s", t.attr)
 		}
 
 		if base.obj == nil {
@@ -305,7 +305,7 @@ func assignTarget(target expr, v value, ctx *execCtx) error {
 		base.obj[t.attr] = v
 		return storeBase(t.obj, base, ctx)
 	default:
-		return errf("неподдерживаемая цель присваивания")
+		return errf("unsupported assignment target")
 	}
 }
 
@@ -378,9 +378,9 @@ func evalExpr(e expr, ctx *execCtx) (value, error) {
 	case testExpr:
 		return evalTest(e, ctx)
 	case kwargExpr:
-		return value{}, errf("kwarg вне вызова функции")
+		return value{}, errf("kwarg outside function call")
 	default:
-		return value{}, errf("неизвестное выражение")
+		return value{}, errf("unknown expression")
 	}
 }
 
@@ -466,7 +466,7 @@ func evalBin(e binExpr, ctx *execCtx) (value, error) {
 
 		return boolVal(false), nil
 	default:
-		return value{}, errf("неизвестный бинарный оператор")
+		return value{}, errf("unknown binary operator")
 	}
 }
 
@@ -482,7 +482,7 @@ func evalUnary(e unaryExpr, ctx *execCtx) (value, error) {
 	case tokMinus:
 		return value{kind: valNumber, num: -v.num}, nil
 	default:
-		return value{}, errf("неизвестный унарный оператор")
+		return value{}, errf("unknown unary operator")
 	}
 }
 
@@ -501,7 +501,7 @@ func evalCall(e callExpr, ctx *execCtx) (value, error) {
 	case varExpr:
 		name = fn.name
 	default:
-		return value{}, errf("вызов не-функции")
+		return value{}, errf("call of non-function")
 	}
 
 	switch name {
@@ -531,10 +531,10 @@ func evalCall(e callExpr, ctx *execCtx) (value, error) {
 		return evalRange(args)
 	default:
 		if name == "split" || name == "lstrip" || name == "rstrip" || name == "strip" {
-			return value{}, errf("метод %s нужно вызывать через точку", name)
+			return value{}, errf("method %s must be called with dot syntax", name)
 		}
 
-		return value{}, errf("неизвестная функция %s", name)
+		return value{}, errf("unknown function %s", name)
 	}
 }
 
@@ -598,7 +598,7 @@ func evalRange(args []value) (value, error) {
 
 		return arrayVal(items), nil
 	default:
-		return value{}, errf("range ожидает 1-3 аргумента")
+		return value{}, errf("range expects 1-3 arguments")
 	}
 }
 
@@ -621,7 +621,7 @@ func evalFilter(e filterExpr, ctx *execCtx) (value, error) {
 			return intVal(0), nil
 		}
 	default:
-		return value{}, errf("неизвестный фильтр %s", e.name)
+		return value{}, errf("unknown filter %s", e.name)
 	}
 }
 
@@ -681,7 +681,7 @@ func evalTest(e testExpr, ctx *execCtx) (value, error) {
 	case "none":
 		ok = left.kind == valNone
 	default:
-		return value{}, errf("неизвестный тест is %s", e.name)
+		return value{}, errf("unknown is test %s", e.name)
 	}
 
 	if e.not {
@@ -806,7 +806,7 @@ func valuesEqual(a, b value) bool {
 
 func callStringMethod(self value, method string, argExprs []expr, ctx *execCtx) (value, error) {
 	if self.kind != valString {
-		return value{}, errf("метод %s только для строк", method)
+		return value{}, errf("method %s only for strings", method)
 	}
 
 	args := make([]value, len(argExprs))
@@ -849,6 +849,6 @@ func callStringMethod(self value, method string, argExprs []expr, ctx *execCtx) 
 		}
 		return strVal(strings.Trim(self.str, chars)), nil
 	default:
-		return value{}, errf("неизвестный метод %s", method)
+		return value{}, errf("unknown method %s", method)
 	}
 }

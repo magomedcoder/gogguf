@@ -22,19 +22,19 @@ func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHead
 	}
 
 	if len(dst) < nHeads*vHead {
-		return fmt.Errorf("ops: MLA dst слишком короткий")
+		return fmt.Errorf("ops: MLA dst too short")
 	}
 
 	if len(q) < nHeads*qkDim || len(k) < seqLen*qkDim || len(v) < seqLen*kvLora {
-		return fmt.Errorf("ops: MLA q/k/v слишком короткие")
+		return fmt.Errorf("ops: MLA q/k/v too short")
 	}
 
 	if len(scores) < seqLen {
-		return fmt.Errorf("ops: MLA scores слишком короткий")
+		return fmt.Errorf("ops: MLA scores too short")
 	}
 
 	if len(wvB) < nHeads*vHead*kvLora {
-		return fmt.Errorf("ops: MLA wv_b слишком короткий")
+		return fmt.Errorf("ops: MLA wv_b too short")
 	}
 
 	if scale == 0 {
@@ -76,7 +76,7 @@ func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHead
 // MatMulColMajorInto: out[m] = Σ_k W[k + kDim*m] * vec[k] (ggml_mul_mat layout for wk_b: {kDim, mDim})
 func MatMulColMajorInto(w []float32, kDim, mDim int, vec, out []float32) error {
 	if len(vec) < kDim || len(out) < mDim || len(w) < kDim*mDim {
-		return fmt.Errorf("ops: MatMulColMajor размеры")
+		return fmt.Errorf("ops: MatMulColMajor size mismatch")
 	}
 
 	for m := range mDim {
