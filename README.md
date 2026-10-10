@@ -8,7 +8,7 @@ Use it as a **library** (inference from Go code) or as an **HTTP server** (`gguf
 
 **No external Go dependencies** - standard library only.
 
-Optional: **CUDA** via Driver API (`libcuda.so`, build with `-tags cuda`, CGO).
+**GPU / OS:** see [docs/platforms.md](docs/platforms.md).
 
 ## What works today
 
@@ -61,7 +61,8 @@ API details: [docs/api.md](docs/api.md). UI details: [web-ui/README.md](web-ui/R
 
 ## Documentation
 
-* [Build: CPU, CUDA, Docker](docs/build.md)
+* [Platforms and GPUs (where to run)](docs/platforms.md)
+* [Build: CPU / Docker](docs/build.md)
 * [CLI: `info`, `inspect`, `run`, `serve`](docs/cli.md)
 * [HTTP server API](docs/api.md)
 * [Simple web UI](web-ui/README.md)

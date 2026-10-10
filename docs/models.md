@@ -17,8 +17,7 @@ generation) is implemented only for specific architectures - selected by `genera
 | **DeepSeek**  | `deepseek`             | partial   | Dense lead + MoE; not `deepseek2` (MLA)                     |
 | **DeepSeek2** | `deepseek2`            | partial   | Absorbed MLA + YaRN + MoE (V2/V3 Lite+); MLA on CPU         |
 
-\* TheBloke and convert.py often set `general.architecture: llama` - gogguf detects Mistral via `general.name` / sliding
-window.
+\* TheBloke and convert.py often set `general.architecture: llama` - gogguf detects Mistral via `general.name` / sliding window.
 
 \** Mixtral MoE GGUF: `general.architecture: llama` + `llama.expert_count` > 0.
 
@@ -40,14 +39,13 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 ### Qwen3 capabilities
 
 - Prefill + autoregressive decode, KV-cache
-- **`n_batch` (`-b`)**: multi-token prefill for **dense** Qwen3 only; MoE forced to `1`; GPU path is still loop-B, not true batched GEMM (see [build.md](build.md), [cli.md](cli.md))
-- Full device residency (fused QKV/FFN/logits) when `-ngl` = all layers and native quants (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K)
+- **`n_batch` (`-b`)**: multi-token prefill for **dense** Qwen3 only; MoE forced to `1` (see [cli.md](cli.md))
+- Full device residency when `-ngl` = all layers and native quants - GPU launch: [platforms.md](platforms.md), internals: [build.md](build.md)
 - BPE tokenizer (`tokenizer.ggml.model` / qwen2-style)
 - Chat template: Jinja from GGUF + ChatML/Qwen fallback
 - Thinking block (`--thinking`)
 - Sampling: greedy, temperature, top-k, top-p, min-p, repeat penalty
 - HTTP API (`gogguf serve`), REPL (`-i`)
-- CUDA offload (`-ngl`, `-tags cuda` build): matmul, RMSNorm, RoPE, SwiGLU, attention, GPU KV-cache
 
 ### Supported weight quantizations
 
@@ -55,7 +53,7 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 - **K-quants:** Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K
 - **Unquantized (dequant path):** F16, F32
 
-Native GPU kernels + residency: **FP32, Q8_0, Q4_0, Q4_K, Q5_K, Q6_K**. Others (Q4_1, Q5_0/1, Q2_K, Q3_K, Q8_K) use an FP32 GPU fallback and **disable** residency.
+Native GPU kernels + residency: **FP32, Q8_0, Q4_0, Q4_K, Q5_K, Q6_K** (see [platforms.md](platforms.md) / [build.md](build.md)).
 
 ### Planned weight quantizations
 
@@ -91,13 +89,11 @@ Priority:
 
 ### Cross-cutting (not tied to one model)
 
+OS / GPU support and launch: **[platforms.md](platforms.md)**.
+
 | Task                                        | Status                                        |
 |---------------------------------------------|-----------------------------------------------|
-| CUDA Graphs (matmul)                        | done                                          |
-| CUDA Graphs (layer)                         | done (FFN, residual, QKV+RoPE, attn, head)    |
-| Metal (macOS)                               | scaffold only (`pkg/gpu/metal`, no kernels)   |
-| Multi-GPU (`-dev N`)                        | `-dev N` done; layer split `-dev 0,1` partial |
-| More quantizations (Q5_K, Q8_K, ...)        | done                                          |
+| CUDA Graphs (matmul / layer)                | done                                          |
 | Architecture registry (`pkg/model/<arch>/`) | partial (`qwen3`, `llama`, `mistral`, ...)    |
 | `forwardBatch` on non-Qwen3                 | not done                                      |
 | True batched GPU GEMM                       | not done                                      |

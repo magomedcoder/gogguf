@@ -31,34 +31,29 @@ go run ./cmd/tools vocab ./models/Qwen3-4B-Q8_0.gguf
 Замер скорости inference: TTFT, prefill/decode tok/s. Режим `--compare` - CPU vs GPU.
 
 ```bash
+# сборка GPU / ОС: platforms.md
 CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 
 ./build/tools bench -m ./models/Qwen3-4B-Q8_0.gguf -p "Привет" -n 128 --chat
-
 ./build/tools bench -m model.gguf -p "Привет" -n 64 -ngl 28 --runs 3 --json
-
 ./build/tools bench -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -n 32 --compare -c 2048 --runs 2 --warmup 1
 ```
 
-| Флаг               | По умолчанию | Описание                                                             |
-|--------------------|--------------|----------------------------------------------------------------------|
-| `-m`               | -            | путь к `.gguf`                                                       |
-| `-p`               | `Hello`      | промпт (в коде default - `Hello`)                                    |
-| `-n`               | `128`        | число decode-токенов                                                 |
-| `-ngl`             | `0`          | GPU offload (CUDA); при `--compare` значение `0` означает «все слои» |
-| `-b` / `--n-batch` | `1`          | chunk prefill (как у `run`; смысл - см. [cli.md](cli.md))            |
-| `-c`               | `0`          | макс. длина GPU KV (`0` = авто, до 4096)                             |
-| `-dev`             | пусто        | GPU: `1` или `0,1` (split слоёв)                                     |
-| `-tensor-split`    | пусто        | пропорции слоёв по `-dev`, напр. `0.6,0.4`                           |
-| `--chat`           | `false`      | chat template                                                        |
-| `--runs`           | `1`          | прогонов для усреднения                                              |
-| `--warmup`         | `1`          | прогревочных прогонов                                                |
-| `--json`           | `false`      | вывод в JSON                                                         |
-| `--compare`        | `false`      | CPU (`ngl=0`) vs GPU (`-ngl`)                                        |
+| Флаг                              | По умолчанию | Описание                                                                    |
+|-----------------------------------|--------------|-----------------------------------------------------------------------------|
+| `-m`                              | -            | путь к `.gguf`                                                              |
+| `-p`                              | `Hello`      | промпт (в коде default - `Hello`)                                           |
+| `-n`                              | `128`        | число decode-токенов                                                        |
+| `-ngl` / `-dev` / `-tensor-split` | -            | GPU - см. [platforms.md](platforms.md); при `--compare` `-ngl 0` = все слои |
+| `-b` / `--n-batch`                | `1`          | chunk prefill (как у `run`; смысл - см. [cli.md](cli.md))                   |
+| `-c`                              | `0`          | макс. длина GPU KV (`0` = авто, до 4096)                                    |
+| `--chat`                          | `false`      | chat template                                                               |
+| `--runs`                          | `1`          | прогонов для усреднения                                                     |
+| `--warmup`                        | `1`          | прогревочных прогонов                                                       |
+| `--json`                          | `false`      | вывод в JSON                                                                |
+| `--compare`                       | `false`      | CPU (`ngl=0`) vs GPU (`-ngl`)                                               |
 
-`--compare` печатает таблицу prefill/decode tok/s и вывод, быстрее ли GPU decode CPU.
-
-При `-ngl > 0` в отчёт попадают устройство и VRAM (`cuMemGetInfo`): `VRAM: 812 / 4096 MB` в human-выводе, `vram_used_mb` / `vram_total_mb` при `--json`. Multi-GPU - сумма по устройствам.
+`--compare` печатает таблицу prefill/decode tok/s. Устройство / VRAM: [platforms.md](platforms.md).
 
 ## `greedy`
 

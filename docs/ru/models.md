@@ -37,14 +37,13 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 ### Возможности Qwen3
 
 - Prefill + autoregressive decode, KV-cache
-- **`n_batch` (`-b`)**: multi-token prefill **только для dense** Qwen3; MoE принудительно `1`; на GPU пока loop-B, не true batched GEMM (см. [build.md](build.md), [cli.md](cli.md))
-- Полная device residency (fused QKV/FFN/logits) - при `-ngl` = все слои и нативных quant (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K)
+- **`n_batch` (`-b`)**: multi-token prefill **только для dense** Qwen3; MoE принудительно `1` (см. [cli.md](cli.md))
+- Полная device residency при `-ngl` = все слои и нативных quant - запуск GPU: [platforms.md](platforms.md), детали: [build.md](build.md)
 - Tokenizer BPE (`tokenizer.ggml.model` / qwen2-стиль)
 - Chat template: Jinja из GGUF + fallback ChatML/Qwen
 - Thinking-блок (`--thinking`)
 - Sampling: greedy, temperature, top-k, top-p, min-p, repeat penalty
 - HTTP API (`gogguf serve`), REPL (`-i`)
-- CUDA offload (`-ngl`, сборка `-tags cuda`): matmul, RMSNorm, RoPE, SwiGLU, attention, GPU KV-cache
 
 ### Поддерживаемые квантизации весов
 
@@ -52,7 +51,7 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 - **K-quants:** Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K
 - **Без квантизации (путь dequant):** F16, F32
 
-На GPU с нативными kernels и residency: **FP32, Q8_0, Q4_0, Q4_K, Q5_K, Q6_K**. Остальные (Q4_1, Q5_0/1, Q2_K, Q3_K, Q8_K) на GPU идут через FP32 fallback и **отключают** residency.
+Нативные GPU kernels + residency: **FP32, Q8_0, Q4_0, Q4_K, Q5_K, Q6_K** (см. [platforms.md](platforms.md) / [build.md](build.md)).
 
 ### Планируемые квантизации весов
 
@@ -86,13 +85,11 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 
 ### Сквозные задачи (не привязаны к одной модели)
 
+ОС / GPU и запуск: **[platforms.md](platforms.md)**.
+
 | Задача                                  | Статус                                            |
 |-----------------------------------------|---------------------------------------------------|
-| CUDA Graphs (matmul)                    | сделано                                           |
-| CUDA Graphs (layer)                     | сделано (FFN, residual, QKV+RoPE, attn, head)     |
-| Metal (macOS)                           | только каркас (`pkg/gpu/metal`, без kernels)      |
-| Multi-GPU (`-dev N`)                    | `-dev N` сделано; split слоёв `-dev 0,1` частично |
-| Больше квантизаций (Q5_K, Q8_K, ...)    | сделано                                           |
+| CUDA Graphs (matmul / layer)            | сделано                                           |
 | Реестр архитектур (`pkg/model/<arch>/`) | частично (`qwen3`, `llama`, `mistral`, ...)       |
 | `forwardBatch` на не-Qwen3              | не сделано                                        |
 | True batched GPU GEMM                   | не сделано                                        |

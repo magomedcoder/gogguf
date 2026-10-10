@@ -32,7 +32,7 @@ text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 | `TensorSplit`              | layer proportions for multi-GPU                                            |
 | `GPU`                      | ready backend; otherwise CUDA opens when `NGL > 0`                         |
 
-On macOS, `NGL > 0` without Metal kernels returns an error (see [build.md](build.md)).
+Which OS support GPU: [platforms.md](platforms.md).
 
 ## Step-by-step decode
 
@@ -78,22 +78,20 @@ engine, err := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptio
 defer engine.Close()
 ```
 
-On Windows, mmap currently falls back to a normal file read (real `CreateFileMapping` is tracked under platforms).
+Windows mmap / GPU launch limits: [platforms.md](platforms.md).
 
 ## GPU offload from code
 
+Requires a CUDA build on Linux - see [platforms.md](platforms.md).
+
 ```go
 engine, err := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
-	NGL: 28, // requires build with -tags cuda
+	NGL: 28,
 })
 defer engine.Close()
-```
 
-Or with an explicit device split:
-
-```go
 devs, split, err := gogguf.ParseGPUDevices("0,1", "0.6,0.4")
-engine, err := gogguf.LoadMapped(path, gogguf.LoadOptions{
+engine, err = gogguf.LoadMapped(path, gogguf.LoadOptions{
 	NGL:         28,
 	GPUDevices:  devs,
 	TensorSplit: split,

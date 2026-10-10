@@ -31,13 +31,11 @@ go test -tags=integration ./test/integration/...
 
 В CI тот же файл 1.7B скачивается в job `integration` (см. `.github/workflows/ci.yml`).
 
-CUDA unit-тесты (нужен драйвер + `-tags cuda`):
+CUDA-тесты - только на Linux + NVIDIA (см. [platforms.md](platforms.md)):
 
 ```bash
 CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
 ```
-
-Многие integration GPU-тесты делают skip без модели/GPU.
 
 ## Фикстуры других архитектур
 

@@ -9,7 +9,7 @@
 
 **Внешних Go-зависимостей нет** - только стандартная библиотека.
 
-Опционально: **CUDA** через Driver API (`libcuda.so`, сборка `-tags cuda`, CGO).
+**GPU / ОС:** см. [docs/ru/platforms.md](docs/ru/platforms.md).
 
 ## Что уже работает
 
@@ -54,15 +54,16 @@ go build -o build/gogguf ./cmd/gogguf
 
 ```bash
 cd web-ui
-yarn install   # или npm install
-yarn dev       # http://localhost:5173 - проксирует /api на :8000
+yarn install # или npm install
+yarn dev # http://localhost:5173 - проксирует /api на :8000
 ```
 
 Подробнее про API: [docs/ru/api.md](docs/ru/api.md). Про UI: [web-ui/README-ru.md](web-ui/README-ru.md).
 
 ## Документация
 
-* [Сборка: CPU, CUDA, Docker](docs/ru/build.md)
+* [Платформы и видеокарты (где запускать)](docs/ru/platforms.md)
+* [Сборка: CPU / Docker](docs/ru/build.md)
 * [CLI: `info`, `inspect`, `run`, `serve`](docs/ru/cli.md)
 * [HTTP API сервера](docs/ru/api.md)
 * [Простой web UI](web-ui/README-ru.md)

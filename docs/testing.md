@@ -31,6 +31,12 @@ go test -tags=integration ./test/integration/...
 
 CI downloads the same 1.7B file in the `integration` job (see `.github/workflows/ci.yml`).
 
+CUDA tests need Linux + NVIDIA - see [platforms.md](platforms.md):
+
+```bash
+CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
+```
+
 ## Other architecture fixtures
 
 Some tests look for optional models and skip if missing:
