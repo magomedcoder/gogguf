@@ -2,12 +2,13 @@
 
 Start the server with `gogguf serve` (see [CLI](cli.md)).
 
+
 ## Auth and rate limit
 
-| Flag           | Default | Description                                                                   |
-|----------------|---------|-------------------------------------------------------------------------------|
-| `--api-key`    | empty   | require `Authorization: Bearer <key>` or `X-API-Key`; `/v1/health` stays open |
-| `--rate-limit` | `0`     | max requests per minute per IP (`0` = off); `/v1/health` not counted          |
+| Flag           | Default | Description                                              |
+|----------------|---------|----------------------------------------------------------|
+| `--api-key`    | empty   | require `Authorization: Bearer <key>` or `X-API-Key`     |
+| `--rate-limit` | `0`     | max requests per minute per IP (`0` = off)               |
 
 ```bash
 ./build/gogguf serve -m model.gguf --api-key secret --rate-limit 60
@@ -16,18 +17,17 @@ curl -s 127.0.0.1:8000/v1/models -H "Authorization: Bearer secret"
 curl -s 127.0.0.1:8000/v1/models -H "X-API-Key: secret"
 ```
 
-On failure: `401` (`authentication_error`) or `429` (`rate_limit_error`) with `{"error":{"message":"...","type":"..."}}`
-.
+On failure: `401` (`authentication_error`) or `429` (`rate_limit_error`) with `{"error":{"message":"...","type":"..."}}`.
 
 ## Endpoints
 
-| Method | Path                   | Description                           |
-|--------|------------------------|---------------------------------------|
-| GET    | `/v1/health`           | server health check                   |
-| GET    | `/v1/models`           | list loaded models                    |
-| POST   | `/v1/reset`            | reset server-side KV-cache (new chat) |
-| POST   | `/v1/chat/completions` | chat API (messages + stream)          |
-| POST   | `/v1/embeddings`       | last-token hidden embeddings          |
+| Method | Path                   | Description                             |
+|--------|------------------------|-----------------------------------------|
+| GET    | `/v1/models`           | list loaded models                      |
+| GET    | `/v1/models/{model}`   | retrieve one model                      |
+| POST   | `/v1/chat/completions` | chat completions (messages + stream)    |
+| POST   | `/v1/completions`      | legacy completions (prompt -> generate) |
+| POST   | `/v1/embeddings`       | last-token hidden embeddings            |
 
 ## `GET /v1/models`
 
@@ -36,44 +36,41 @@ On failure: `401` (`authentication_error`) or `429` (`rate_limit_error`) with `{
   "object": "list",
   "data": [
     {
-      "id": "Qwen3-0.6B",
-      "object": "model"
+      "id": "Qwen3-4B",
+      "object": "model",
+      "created": 1710000000,
+      "owned_by": "gogguf"
     }
   ]
 }
 ```
 
-## `POST /v1/reset`
+## `GET /v1/models/{model}`
 
-Clears the server-side KV-cache for multi-turn chat.
-
-```bash
-curl -s -X POST 127.0.0.1:8000/v1/reset
-```
-
-Response: `{"status":"ok"}`
+Same object as in the list, or `404` if the id does not match the loaded model.
 
 ## `POST /v1/chat/completions`
 
 `Content-Type: application/json`
 
-| Field                          | Type          | Default   | Description                           |
-|--------------------------------|---------------|-----------|---------------------------------------|
-| `messages`                     | array         | -         | `{role, content}` (required)          |
-| `model`                        | string        | GGUF name | model id                              |
-| `max_tokens`                   | int           | `128`     | max new tokens                        |
-| `temperature`                  | float         | `0`       | `0` = greedy                          |
-| `top_k`                        | int           | `0`       | top-k sampling                        |
-| `top_p`                        | float         | `1`       | nucleus sampling                      |
-| `min_p`                        | float         | `0`       | min-p sampling                        |
-| `repeat_penalty`               | float         | `1`       | repetition penalty (`1` = off)        |
-| `repeat_last_n`                | int           | `64`      | history window for repeat penalty     |
-| `stop`                         | string[]      | -         | stop sequences                        |
-| `stream`                       | bool          | `false`   | SSE streaming (`data: [DONE]` at end) |
-| `thinking` / `enable_thinking` | bool          | `false`   | Qwen3 thinking mode                   |
-| `tools`                        | array         | -         | OpenAI-style tool definitions         |
-| `tool_choice`                  | string/object | `auto`    | `auto` / `none` / `required` / named  |
-| `parallel_tool_calls`          | bool          | `false`   | allow multiple tool calls in one turn |
+| Field                                                           | Type          | Default   | Description                                     |
+|-----------------------------------------------------------------|---------------|-----------|-------------------------------------------------|
+| `messages`                                                      | array         | -         | `{role, content}` (required)                    |
+| `model`                                                         | string        | GGUF name | model id                                        |
+| `max_tokens`                                                    | int           | `128`     | max new tokens                                  |
+| `max_completion_tokens`                                         | int           | -         | alias for `max_tokens` (preferred by OpenAI)    |
+| `temperature`                                                   | float         | `0`       | `0` = greedy                                    |
+| `top_p`                                                         | float         | `1`       | nucleus sampling                                |
+| `frequency_penalty`                                             | float         | `0`       | mapped to internal repeat penalty when `> 0`    |
+| `presence_penalty`                                              | float         | `0`       | **stub** (accepted, ignored)                    |
+| `n`                                                             | int           | `1`       | only `1` supported                              |
+| `stop`                                                          | string/array  | -         | stop sequences                                  |
+| `stream`                                                        | bool          | `false`   | SSE streaming (`data: [DONE]` at end)           |
+| `stream_options`                                                | object        | -         | `{ "include_usage": true }` for usage in stream |
+| `seed` / `user` / `logit_bias` / `logprobs` / `response_format` | -             | -         | **stubs** (accepted, ignored)                   |
+| `tools`                                                         | array         | -         | OpenAI-style tool definitions                   |
+| `tool_choice`                                                   | string/object | `auto`    | `auto` / `none` / `required` / named            |
+| `parallel_tool_calls`                                           | bool          | `false`   | allow multiple tool calls in one turn           |
 
 `content` may be a string or an array of `{type:"text", text:"..."}` parts.
 
@@ -83,24 +80,19 @@ Non-streaming response:
 
 ```json
 {
+  "id": "chatcmpl-...",
   "object": "chat.completion",
+  "created": 1710000000,
+  "model": "Qwen3-4B",
   "choices": [
     {
+      "index": 0,
       "message": {
         "role": "assistant",
-        "content": "...",
-        "tool_calls": [
-          {
-            "id": "call_0",
-            "type": "function",
-            "function": {
-              "name": "get_weather",
-              "arguments": "{\"location\":\"Moscow\"}"
-            }
-          }
-        ]
+        "content": "..."
       },
-      "finish_reason": "tool_calls"
+      "finish_reason": "stop",
+      "logprobs": null
     }
   ],
   "usage": {
@@ -111,14 +103,9 @@ Non-streaming response:
 }
 ```
 
-If the model does not call a tool, `finish_reason` is `"stop"` and `tool_calls` is omitted.
-Streaming uses SSE chunks: `data: {"choices":[{"delta":{"content":"..."}}]}` and `data: [DONE]`.
-
-Examples:
+Streaming uses SSE chunks with `finish_reason` on the last chunk, then `data: [DONE]`.
 
 ```bash
-curl -s 127.0.0.1:8000/v1/models
-
 curl -s 127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":32}'
@@ -126,6 +113,16 @@ curl -s 127.0.0.1:8000/v1/chat/completions \
 curl -N 127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":true}'
+```
+
+## `POST /v1/completions`
+
+Legacy Completions API: `prompt` (string or string array) -> generation. Supports `stream`, `max_tokens`, sampling, `stop`, `echo`. Prefer `/v1/chat/completions` for chat templates.
+
+```bash
+curl -s 127.0.0.1:8000/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Once upon a time","max_tokens":32}'
 ```
 
 ## `POST /v1/embeddings`
@@ -139,5 +136,3 @@ curl 127.0.0.1:8000/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"input":"Hello world"}'
 ```
-
-Resets the server KV / conversation cache (same as after competing with chat).

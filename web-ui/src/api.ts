@@ -22,15 +22,6 @@ export async function fetchModels(): Promise<ModelInfo[]> {
   }))
 }
 
-export async function resetConversation(): Promise<void> {
-  const res = await fetch(`${API_BASE}/reset`, {
-    method: 'POST'
-  })
-  if (!res.ok) {
-    throw new Error(await res.text())
-  }
-}
-
 export async function* streamChat(
   messages: Message[],
   settings: ChatSettings,
@@ -44,9 +35,7 @@ export async function* streamChat(
       stream: true,
       max_tokens: settings.maxTokens,
       temperature: settings.temperature,
-      thinking: settings.thinking,
-      repeat_penalty: settings.repeatPenalty,
-      min_p: settings.minP,
+      frequency_penalty: settings.frequencyPenalty,
     }),
     signal,
   })
@@ -86,7 +75,8 @@ export async function* streamChat(
 
       const chunk = JSON.parse(data) as ChatStreamChunk
       if (chunk.error) {
-        throw new Error(chunk.error)
+        const msg = typeof chunk.error === 'string' ? chunk.error : chunk.error.message
+        throw new Error(msg || 'stream error')
       }
 
       const content = chunk.choices?.[0]?.delta?.content

@@ -10,25 +10,6 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/runtime"
 )
 
-func TestHealth(t *testing.T) {
-	srv := New(&runtime.Engine{}, "")
-	rec := httptest.NewRecorder()
-	srv.handleHealth(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, expected 200", rec.Code)
-	}
-
-	var resp healthResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp.Status != "ok" {
-		t.Fatalf("status = %q, expected ok", resp.Status)
-	}
-}
-
 func TestModelsFormat(t *testing.T) {
 	srv := New(&runtime.Engine{}, "/models/test.gguf")
 	rec := httptest.NewRecorder()
@@ -48,15 +29,44 @@ func TestModelsFormat(t *testing.T) {
 	}
 }
 
-func TestHandlerRoutes(t *testing.T) {
-	srv := New(&runtime.Engine{}, "")
-	h := srv.Handler()
+// TestOpenAIAPI smoke-checks the registered /v1 surface without a loaded model
+func TestOpenAIAPI(t *testing.T) {
+	h := New(&runtime.Engine{}, "/models/demo.gguf").Handler()
 
-	for _, path := range []string{"/v1/health", "/v1/models"} {
+	type step struct {
+		method string
+		path   string
+		body   string
+		want   int
+	}
+	steps := []step{
+		{http.MethodGet, "/v1/models", "", http.StatusOK},
+		{http.MethodGet, "/v1/models/demo", "", http.StatusOK},
+		{http.MethodGet, "/v1/models/missing", "", http.StatusNotFound},
+		{http.MethodPost, "/v1/chat/completions", `{"messages":[]}`, http.StatusBadRequest},
+		{http.MethodPost, "/v1/completions", `{}`, http.StatusBadRequest},
+		{http.MethodPost, "/v1/embeddings", `{"input":null}`, http.StatusBadRequest},
+		{http.MethodGet, "/v1/health", "", http.StatusNotFound},
+		{http.MethodPost, "/v1/moderations", `{"input":"hi"}`, http.StatusNotFound},
+	}
+
+	for _, s := range steps {
+		var body *bytes.Buffer
+		if s.body != "" {
+			body = bytes.NewBufferString(s.body)
+		}
+
+		var req *http.Request
+		if body != nil {
+			req = httptest.NewRequest(s.method, s.path, body)
+		} else {
+			req = httptest.NewRequest(s.method, s.path, nil)
+		}
+
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: status = %d, expected 200", path, rec.Code)
+		h.ServeHTTP(rec, req)
+		if rec.Code != s.want {
+			t.Fatalf("%s %s: status=%d, want %d, body=%s", s.method, s.path, rec.Code, s.want, rec.Body.String())
 		}
 	}
 }
@@ -106,25 +116,6 @@ func TestParseEmbeddingsInput(t *testing.T) {
 	}
 }
 
-func TestReset(t *testing.T) {
-	srv := New(&runtime.Engine{}, "")
-	rec := httptest.NewRecorder()
-	srv.handleReset(rec, httptest.NewRequest(http.MethodPost, "/v1/reset", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, expected 200", rec.Code)
-	}
-
-	var resp healthResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-
-	if resp.Status != "ok" {
-		t.Fatalf("status = %q, expected ok", resp.Status)
-	}
-}
-
 func TestChatCompletionsBadRequest(t *testing.T) {
 	srv := New(&runtime.Engine{}, "")
 	body := bytes.NewBufferString(`{"messages":[]}`)
@@ -133,5 +124,87 @@ func TestChatCompletionsBadRequest(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, expected 400", rec.Code)
+	}
+}
+
+func TestCompletionsBadRequest(t *testing.T) {
+	srv := New(&runtime.Engine{}, "/models/demo.gguf")
+	h := srv.Handler()
+	rec := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"max_tokens":8}`)
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/completions", body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, expected 400", rec.Code)
+	}
+}
+
+func TestParseCompletionsPrompt(t *testing.T) {
+	got, err := parseCompletionsPrompt(json.RawMessage(`"hi"`))
+	if err != nil || got != "hi" {
+		t.Fatalf("string: got=%q err=%v", got, err)
+	}
+
+	got, err = parseCompletionsPrompt(json.RawMessage(`["a","b"]`))
+	if err != nil || got != "ab" {
+		t.Fatalf("array: got=%q err=%v", got, err)
+	}
+
+	if _, err := parseCompletionsPrompt(json.RawMessage(`null`)); err == nil {
+		t.Fatal("expected error for null prompt")
+	}
+}
+
+func TestModelsOpenAIShape(t *testing.T) {
+	srv := New(&runtime.Engine{}, "/models/Qwen3-4B-Q8_0.gguf")
+	h := srv.Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d", rec.Code)
+	}
+
+	var list modelsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+
+	if list.Object != "list" || len(list.Data) != 1 {
+		t.Fatalf("list=%+v", list)
+	}
+
+	m := list.Data[0]
+	if m.Object != "model" || m.OwnedBy != "gogguf" || m.ID == "" || m.Created == 0 {
+		t.Fatalf("model=%+v", m)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models/"+m.ID, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retrieve status=%d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models/missing", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing status=%d", rec.Code)
+	}
+}
+
+func TestNonOpenAIRoutesRemoved(t *testing.T) {
+	srv := New(&runtime.Engine{}, "")
+	h := srv.Handler()
+	for _, tc := range []struct {
+		method, path string
+	}{
+		{http.MethodGet, "/v1/reset"},
+		{http.MethodGet, "/v1/health"},
+		{http.MethodPost, "/v1/moderations"},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s %s: status=%d, expected 404", tc.method, tc.path, rec.Code)
+		}
 	}
 }

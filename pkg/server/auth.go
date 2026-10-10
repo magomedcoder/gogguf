@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// withAPIKey requires Authorization: Bearer <key> or X-API-Key, except for /v1/health.
+// withAPIKey requires Authorization: Bearer <key> or X-API-Key when apiKey is set.
 func withAPIKey(next http.Handler, apiKey string) http.Handler {
 	if apiKey == "" {
 		return next
@@ -15,11 +15,6 @@ func withAPIKey(next http.Handler, apiKey string) http.Handler {
 
 	want := []byte(apiKey)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/health" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		got := apiKeyFromRequest(r)
 		if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
 			writeAPIError(w, http.StatusUnauthorized, "invalid or missing API key", "authentication_error")

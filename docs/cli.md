@@ -88,7 +88,7 @@ Interactive mode (with `--chat`, history is kept across turns; `/clear` resets i
 
 ## `gguf serve`
 
-HTTP server for text generation API.
+HTTP server with an OpenAI-compatible API (see [api.md](api.md)).
 
 Graceful shutdown on `Ctrl+C` (SIGINT/SIGTERM).
 
@@ -111,7 +111,7 @@ Or from Hugging Face:
 | `-b` / `--n-batch`  | `1`              | prefill chunk size (Qwen3 CPU)                       |
 | `-dev`              | empty            | GPU ordinal(s) for offload: `1` or `0,1`             |
 | `-tensor-split`     | empty            | layer proportions across `-dev` devices              |
-| `--api-key`         | empty            | Bearer / X-API-Key auth (`/v1/health` always open)   |
+| `--api-key`         | empty            | Bearer / X-API-Key auth                              |
 | `--rate-limit`      | `0`              | requests per minute per IP (`0` = off)               |
 
 See [HTTP API](api.md) for endpoints.

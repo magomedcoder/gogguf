@@ -94,11 +94,6 @@ func withRateLimit(next http.Handler, rl *rateLimiter) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/health" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		if !rl.allow(clientIP(r)) {
 			w.Header().Set("Retry-After", "1")
 			writeAPIError(w, http.StatusTooManyRequests, "rate limit exceeded", "rate_limit_error")

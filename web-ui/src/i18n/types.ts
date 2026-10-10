@@ -10,9 +10,7 @@ export type LocaleMessages = {
   settings: {
     maxTokens: string
     temperature: string
-    thinking: string
-    repeatPenalty: string
-    minP: string
+    frequencyPenalty: string
   }
   errors: {
     streamingNotSupported: string

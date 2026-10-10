@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,7 @@ type Server struct {
 	limiter   *rateLimiter
 	mu        sync.Mutex
 	conv      *runtime.Conversation
+	created   int64
 }
 
 // New creates a server. opts may be omitted.
@@ -36,16 +39,18 @@ func New(engine *runtime.Engine, modelPath string, opts ...Options) *Server {
 		modelPath: modelPath,
 		apiKey:    o.APIKey,
 		limiter:   newRateLimiter(o.RateLimitPerMinute),
+		created:   time.Now().Unix(),
 	}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/health", s.handleHealth)
-	mux.HandleFunc("/v1/models", s.handleModels)
-	mux.HandleFunc("/v1/reset", s.handleReset)
-	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
-	mux.HandleFunc("/v1/embeddings", s.handleEmbeddings)
+	// OpenAI-compatible surface only
+	mux.HandleFunc("GET /v1/models", s.handleModels)
+	mux.HandleFunc("GET /v1/models/{model}", s.handleModel)
+	mux.HandleFunc("POST /v1/chat/completions", s.handleChatCompletions)
+	mux.HandleFunc("POST /v1/completions", s.handleCompletions)
+	mux.HandleFunc("POST /v1/embeddings", s.handleEmbeddings)
 
 	var h http.Handler = mux
 	h = withRateLimit(h, s.limiter)
@@ -86,18 +91,40 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-type healthResponse struct {
-	Status string `json:"status"`
-}
-
 type modelsResponse struct {
 	Object string     `json:"object"`
 	Data   []modelRef `json:"data"`
 }
 
 type modelRef struct {
-	ID     string `json:"id"`
-	Object string `json:"object"`
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+func (s *Server) modelID() string {
+	if meta := s.engine.Metadata(); meta != nil {
+		if name, err := meta.String("general.name"); err == nil && name != "" {
+			return name
+		}
+	}
+
+	if s.modelPath != "" {
+		base := filepath.Base(s.modelPath)
+		return strings.TrimSuffix(base, filepath.Ext(base))
+	}
+
+	return "gguf"
+}
+
+func (s *Server) modelRef() modelRef {
+	return modelRef{
+		ID:      s.modelID(),
+		Object:  "model",
+		Created: s.created,
+		OwnedBy: "gogguf",
+	}
 }
 
 func (s *Server) conversation() (*runtime.Conversation, error) {
@@ -113,47 +140,22 @@ func (s *Server) conversation() (*runtime.Conversation, error) {
 	return s.conv, nil
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, healthResponse{Status: "ok"})
-}
-
-func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.conv != nil {
-		s.conv.Reset()
-	}
-
-	writeJSON(w, healthResponse{Status: "ok"})
-}
-
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	name := ""
-	if meta := s.engine.Metadata(); meta != nil {
-		name, _ = meta.String("general.name")
-	}
-	if name == "" {
-		name = "gguf"
-	}
-
 	writeJSON(w, modelsResponse{
 		Object: "list",
-		Data: []modelRef{{
-			ID:     name,
-			Object: "model",
-		}},
+		Data:   []modelRef{s.modelRef()},
 	})
+}
+
+func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("model")
+	ref := s.modelRef()
+	if id != ref.ID {
+		writeAPIError(w, http.StatusNotFound, "model not found", "invalid_request_error")
+		return
+	}
+
+	writeJSON(w, ref)
 }
 
 type apiErrorResponse struct {
@@ -163,6 +165,7 @@ type apiErrorResponse struct {
 type apiErrorBody struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
+	Code    string `json:"code,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

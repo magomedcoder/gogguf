@@ -16,9 +16,7 @@ export interface ModelInfo {
 export interface ChatSettings {
   maxTokens: number
   temperature: number
-  thinking: boolean
-  repeatPenalty: number
-  minP: number
+  frequencyPenalty: number
 }
 
 export interface ChatStreamChunk {
@@ -27,6 +25,9 @@ export interface ChatStreamChunk {
       role?: string
       content?: string
     }
+    finish_reason?: string | null
   }>
-  error?: string
+  error?: string | {
+    message?: string
+  }
 }

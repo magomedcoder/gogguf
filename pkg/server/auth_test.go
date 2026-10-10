@@ -28,13 +28,6 @@ func TestAPIKeyRequired(t *testing.T) {
 		t.Fatalf("type=%q", errBody.Error.Type)
 	}
 
-	// health without API key
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("health: status=%d", rec.Code)
-	}
-
 	// Bearer
 	rec = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
@@ -90,15 +83,6 @@ func TestRateLimit(t *testing.T) {
 	}
 	if ok < 1 || limited < 1 {
 		t.Fatalf("ok=%d limited=%d, expected both >0", ok, limited)
-	}
-
-	// health is not rate-limited
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
-	req.RemoteAddr = "10.0.0.1:1234"
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("health under limit: %d", rec.Code)
 	}
 }
 

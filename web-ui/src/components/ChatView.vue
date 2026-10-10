@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { fetchModels, resetConversation, streamChat } from '@/api'
+import { fetchModels, streamChat } from '@/api'
 import { APP_LOCALES, setLocale } from '@/i18n'
 import type { Message, ModelInfo } from '@/types'
 
@@ -17,9 +17,7 @@ const messagesEl = ref<HTMLElement | null>(null)
 const settings = reactive({
   maxTokens: 512,
   temperature: 0.7,
-  thinking: false,
-  repeatPenalty: 1,
-  minP: 0,
+  frequencyPenalty: 0,
 })
 
 const modelTitle = computed(() => model.value?.name || model.value?.id || 'GoGGUF')
@@ -59,16 +57,11 @@ async function loadModel() {
   }
 }
 
-async function newChat() {
+function newChat() {
   stopGeneration()
   messages.value = []
   input.value = ''
   error.value = ''
-  try {
-    await resetConversation()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  }
 }
 
 function stopGeneration() {
@@ -202,33 +195,14 @@ watch(messages, () => {
             class="w-[72px] rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-2 py-1 text-[#e8e8e8]"
           />
         </label>
-        <label class="inline-flex items-center gap-1.5 text-[#e8e8e8]">
-          <input
-            v-model="settings.thinking"
-            type="checkbox"
-            class="accent-[#6ea8fe]"
-          />
-          {{ t('settings.thinking') }}
-        </label>
         <label class="inline-flex items-center gap-2">
-          {{ t('settings.repeatPenalty') }}
+          {{ t('settings.frequencyPenalty') }}
           <input
-            v-model.number="settings.repeatPenalty"
-            type="number"
-            min="1"
-            max="2"
-            step="0.05"
-            class="w-[72px] rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-2 py-1 text-[#e8e8e8]"
-          />
-        </label>
-        <label class="inline-flex items-center gap-2">
-          {{ t('settings.minP') }}
-          <input
-            v-model.number="settings.minP"
+            v-model.number="settings.frequencyPenalty"
             type="number"
             min="0"
-            max="1"
-            step="0.05"
+            max="2"
+            step="0.1"
             class="w-[72px] rounded-md border border-[#2a2a2a] bg-[#0f0f0f] px-2 py-1 text-[#e8e8e8]"
           />
         </label>

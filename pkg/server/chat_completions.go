@@ -12,23 +12,33 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/sampler"
 )
 
+// OpenAI Chat Completions request (unsupported extras are accepted as stubs / ignored).
 type chatCompletionRequest struct {
-	Model             string          `json:"model"`
-	Messages          []chatMessage   `json:"messages"`
-	MaxTokens         int             `json:"max_tokens"`
-	Temperature       *float64        `json:"temperature,omitempty"`
-	TopK              int             `json:"top_k"`
-	TopP              *float64        `json:"top_p,omitempty"`
-	MinP              float32         `json:"min_p"`
-	RepeatPenalty     float32         `json:"repeat_penalty"`
-	RepeatLastN       int             `json:"repeat_last_n"`
-	Stop              []string        `json:"stop,omitempty"`
-	Stream            bool            `json:"stream"`
-	Thinking          *bool           `json:"thinking"`
-	EnableThinking    *bool           `json:"enable_thinking,omitempty"`
-	Tools             []chat.Tool     `json:"tools,omitempty"`
-	ToolChoice        json.RawMessage `json:"tool_choice,omitempty"`
-	ParallelToolCalls bool            `json:"parallel_tool_calls,omitempty"`
+	Model               string          `json:"model"`
+	Messages            []chatMessage   `json:"messages"`
+	MaxTokens           int             `json:"max_tokens"`
+	MaxCompletionTokens int             `json:"max_completion_tokens"`
+	Temperature         *float64        `json:"temperature,omitempty"`
+	TopP                *float64        `json:"top_p,omitempty"`
+	N                   int             `json:"n"`
+	Stop                json.RawMessage `json:"stop,omitempty"`
+	Stream              bool            `json:"stream"`
+	StreamOptions       *streamOptions  `json:"stream_options,omitempty"`
+	PresencePenalty     *float64        `json:"presence_penalty,omitempty"` // stub
+	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"`
+	Seed                *int64          `json:"seed,omitempty"`       // stub
+	User                string          `json:"user,omitempty"`       // stub
+	LogitBias           json.RawMessage `json:"logit_bias,omitempty"` // stub
+	Logprobs            *bool           `json:"logprobs,omitempty"`   // stub
+	TopLogprobs         *int            `json:"top_logprobs,omitempty"`
+	ResponseFormat      json.RawMessage `json:"response_format,omitempty"` // stub
+	Tools               []chat.Tool     `json:"tools,omitempty"`
+	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
+	ParallelToolCalls   bool            `json:"parallel_tool_calls,omitempty"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type chatMessage struct {
@@ -52,6 +62,7 @@ type chatCompletionChoice struct {
 	Index        int              `json:"index"`
 	Message      chatMessagePlain `json:"message"`
 	FinishReason string           `json:"finish_reason"`
+	Logprobs     *struct{}        `json:"logprobs"` // OpenAI: null when unused
 }
 
 type chatMessagePlain struct {
@@ -76,8 +87,9 @@ type chatStreamChunk struct {
 }
 
 type chatStreamChoice struct {
-	Index int             `json:"index"`
-	Delta chatStreamDelta `json:"delta"`
+	Index        int             `json:"index"`
+	Delta        chatStreamDelta `json:"delta"`
+	FinishReason *string         `json:"finish_reason"`
 }
 
 type chatStreamDelta struct {
@@ -117,6 +129,28 @@ func parseChatMessageContent(raw json.RawMessage) string {
 	return b.String()
 }
 
+func parseStop(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil && s != "" {
+			return []string{s}
+		}
+
+		return nil
+	}
+
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		return arr
+	}
+
+	return nil
+}
+
 func parseToolChoice(raw json.RawMessage) any {
 	if len(raw) == 0 {
 		return nil
@@ -135,24 +169,22 @@ func parseToolChoice(raw json.RawMessage) any {
 	return nil
 }
 
-func (req *chatCompletionRequest) thinkingEnabled() *bool {
-	if req.EnableThinking != nil {
-		return req.EnableThinking
+func (req *chatCompletionRequest) maxNewTokens() int {
+	if req.MaxCompletionTokens > 0 {
+		return req.MaxCompletionTokens
 	}
 
-	return req.Thinking
+	if req.MaxTokens > 0 {
+		return req.MaxTokens
+	}
+
+	return 128
 }
 
 func (req *chatCompletionRequest) samplerConfig() sampler.Config {
-	cfg := sampler.Config{
-		TopK: req.TopK,
-		MinP: req.MinP,
-	}
-
+	cfg := sampler.Config{TopP: 1}
 	if req.TopP != nil {
 		cfg.TopP = float32(*req.TopP)
-	} else {
-		cfg.TopP = 1
 	}
 
 	if req.Temperature != nil {
@@ -162,27 +194,45 @@ func (req *chatCompletionRequest) samplerConfig() sampler.Config {
 	return cfg
 }
 
+// frequencyPenaltyToRepeat maps OpenAI frequency_penalty (-2..2) to repeat_penalty (>=1).
+func frequencyPenaltyToRepeat(p *float64) float32 {
+	if p == nil || *p <= 0 {
+		return 1
+	}
+
+	v := 1 + float32(*p)
+	if v > 2 {
+		return 2
+	}
+
+	return v
+}
+
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error")
 		return
 	}
 
 	var req chatCompletionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
 
 	if len(req.Messages) == 0 {
-		http.Error(w, "messages is required", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "messages is required", "invalid_request_error")
 		return
 	}
 
-	if req.MaxTokens <= 0 {
-		req.MaxTokens = 128
+	if req.N > 1 {
+		writeAPIError(w, http.StatusBadRequest, "n > 1 is not supported (stub: only n=1)", "invalid_request_error")
+		return
 	}
 
+	// Stubs: presence_penalty, seed, user, logit_bias, logprobs, response_format are accepted and ignored.
+
+	stops := parseStop(req.Stop)
 	msgs := make([]chat.Message, 0, len(req.Messages))
 	for _, m := range req.Messages {
 		content := parseChatMessageContent(m.Content)
@@ -196,22 +246,17 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prompt, err := chat.FormatMessages(msgs, chat.Options{
-		Thinking:          req.thinkingEnabled(),
 		Metadata:          s.engine.Metadata(),
 		Tools:             req.Tools,
 		ToolChoice:        parseToolChoice(req.ToolChoice),
 		ParallelToolCalls: req.ParallelToolCalls,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, err.Error(), "server_error")
 		return
 	}
 
-	modelName, _ := s.engine.Metadata().String("general.name")
-	if modelName == "" {
-		modelName = "gguf"
-	}
-
+	modelName := s.modelID()
 	if req.Model != "" {
 		modelName = req.Model
 	}
@@ -221,39 +266,40 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	conv, err := s.conversation()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, err.Error(), "server_error")
 		return
 	}
 
 	genParams := runtime.GenerateParams{
-		MaxTokens:     req.MaxTokens,
+		MaxTokens:     req.maxNewTokens(),
 		Sampler:       sampler.New(req.samplerConfig()),
-		RepeatPenalty: req.RepeatPenalty,
-		RepeatLastN:   req.RepeatLastN,
-		Stop:          req.Stop,
+		RepeatPenalty: frequencyPenaltyToRepeat(req.FrequencyPenalty),
+		RepeatLastN:   64,
+		Stop:          stops,
 	}
 
 	if req.Stream {
-		s.serveChatStream(w, conv, prompt, modelName, genParams)
+		includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
+		s.serveChatStream(w, conv, prompt, modelName, genParams, includeUsage)
 		return
 	}
 
 	snap := conv.TokenCount()
 	sess, err := conv.StartGeneration(prompt)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, err.Error(), "server_error")
 		return
 	}
 
 	if err := sess.GenerateSteps(genParams); err != nil {
 		conv.Rollback(snap)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, err.Error(), "server_error")
 		return
 	}
 
 	conv.Commit(sess)
 
-	text := trimStopSuffix(sess.GeneratedText(), req.Stop)
+	text := trimStopSuffix(sess.GeneratedText(), stops)
 	parsed := chat.ParseAssistantOutput(text)
 	writeJSON(w, chatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
@@ -268,6 +314,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				ToolCalls: parsed.ToolCalls,
 			},
 			FinishReason: parsed.FinishReason(),
+			Logprobs:     nil,
 		}},
 		Usage: chatCompletionUsage{
 			PromptTokens:     sess.PromptTokenCount(),
@@ -288,10 +335,17 @@ func trimStopSuffix(text string, stops []string) string {
 	return text
 }
 
-func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams) {
+func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams, includeUsage bool) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming is not supported", http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "streaming is not supported", "server_error")
+		return
+	}
+
+	snap := conv.TokenCount()
+	sess, err := conv.StartGeneration(prompt)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error(), "server_error")
 		return
 	}
 
@@ -302,15 +356,16 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	created := time.Now().Unix()
 
-	writeChunk := func(delta chatStreamDelta, usage *chatCompletionUsage) {
+	writeChunk := func(delta chatStreamDelta, finish *string, usage *chatCompletionUsage) {
 		chunk := chatStreamChunk{
 			ID:      id,
 			Object:  "chat.completion.chunk",
 			Created: created,
 			Model:   model,
 			Choices: []chatStreamChoice{{
-				Index: 0,
-				Delta: delta,
+				Index:        0,
+				Delta:        delta,
+				FinishReason: finish,
 			}},
 			Usage: usage,
 		}
@@ -319,44 +374,34 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 		flusher.Flush()
 	}
 
-	snap := conv.TokenCount()
-	sess, err := conv.StartGeneration(prompt)
-	if err != nil {
-		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-		flusher.Flush()
-		return
-	}
-
-	writeChunk(chatStreamDelta{
-		Role: "assistant",
-	},
-		nil,
-	)
+	writeChunk(chatStreamDelta{Role: "assistant"}, nil, nil)
 
 	params.OnToken = func(tokenID int) bool {
-		writeChunk(chatStreamDelta{
-			Content: sess.DecodeToken(tokenID)},
-			nil,
-		)
-
+		writeChunk(chatStreamDelta{Content: sess.DecodeToken(tokenID)}, nil, nil)
 		return true
 	}
 
 	err = sess.GenerateSteps(params)
 	if err != nil {
 		conv.Rollback(snap)
-		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
+		fmt.Fprintf(w, "data: {\"error\":{\"message\":%q,\"type\":\"server_error\"}}\n\n", err.Error())
 		flusher.Flush()
 		return
 	}
 
 	conv.Commit(sess)
 
-	writeChunk(chatStreamDelta{}, &chatCompletionUsage{
-		PromptTokens:     sess.PromptTokenCount(),
-		CompletionTokens: sess.GeneratedCount(),
-		TotalTokens:      sess.PromptTokenCount() + sess.GeneratedCount(),
-	})
+	finish := "stop"
+	var usage *chatCompletionUsage
+	if includeUsage {
+		usage = &chatCompletionUsage{
+			PromptTokens:     sess.PromptTokenCount(),
+			CompletionTokens: sess.GeneratedCount(),
+			TotalTokens:      sess.PromptTokenCount() + sess.GeneratedCount(),
+		}
+	}
+
+	writeChunk(chatStreamDelta{}, &finish, usage)
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()

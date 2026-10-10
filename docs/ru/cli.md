@@ -88,7 +88,7 @@ Hub: `MODEL_ENDPOINT`.
 
 ## `gguf serve`
 
-HTTP-сервер для генерации текста по API.
+HTTP-сервер с OpenAI-совместимым API (см. [api.md](api.md)).
 
 Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 
@@ -111,7 +111,7 @@ Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 | `-b` / `--n-batch`  | `1`              | размер chunk prefill (Qwen3 CPU)                |
 | `-dev`              | пусто            | GPU для offload: `1` или `0,1` (split слоёв)    |
 | `-tensor-split`     | пусто            | пропорции слоёв по устройствам `-dev`           |
-| `--api-key`         | пусто            | auth Bearer / X-API-Key (`/v1/health` открыт)   |
+| `--api-key`         | пусто            | auth Bearer / X-API-Key                         |
 | `--rate-limit`      | `0`              | запросов в минуту на IP (`0` = без лимита)      |
 
 Подробнее об эндпоинтах: [HTTP API](api.md).

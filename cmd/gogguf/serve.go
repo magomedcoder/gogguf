@@ -23,8 +23,8 @@ func runServe(args []string) error {
 	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
 	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
-	apiKey := fs.String("api-key", "", "API key (Bearer / X-API-Key); empty = no auth; /v1/health is public")
-	rateLimit := fs.Int("rate-limit", 0, "requests per minute per IP (0 = unlimited); /v1/health excluded")
+	apiKey := fs.String("api-key", "", "API key (Bearer / X-API-Key); empty = no auth")
+	rateLimit := fs.Int("rate-limit", 0, "requests per minute per IP (0 = unlimited)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
