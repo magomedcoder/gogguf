@@ -11,6 +11,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/model/mistral"
 	"github.com/magomedcoder/gogguf/pkg/model/phi2"
 	"github.com/magomedcoder/gogguf/pkg/model/phi3"
+	"github.com/magomedcoder/gogguf/pkg/model/qwen2"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
@@ -48,10 +49,9 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 	case "qwen3moe":
 		return qwen3.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, opts.NBatch)
 	case "qwen2":
-		// DeepSeek-R1-Distill-Qwen and other distill models with arch=qwen2 (no QK-norm)
-		return mistral.LoadQwen2(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return qwen2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "qwen2moe":
-		return mistral.LoadQwen2MoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return qwen2.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "mistral":
 		return mistral.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
 	case "gemma":

@@ -38,8 +38,8 @@ func TestKVAppendAdvance(t *testing.T) {
 	c := NewKV(2, 8, kvDim, nil)
 	k := []float32{1, 2, 3, 4}
 	v := []float32{5, 6, 7, 8}
-	c.Append(0, k, v)
-	c.Append(1, k, v)
+	_ = c.Append(0, k, v)
+	_ = c.Append(1, k, v)
 	if c.Len() != 0 {
 		t.Fatalf("Len before Advance = %d", c.Len())
 	}
@@ -57,7 +57,7 @@ func TestKVAppendAdvance(t *testing.T) {
 		t.Fatalf("len K after Advance = %d", len(c.KLayer(0)))
 	}
 
-	c.Append(0, []float32{9, 10, 11, 12}, v)
+	_ = c.Append(0, []float32{9, 10, 11, 12}, v)
 	if len(c.KLayer(0)) != 2*kvDim {
 		t.Fatalf("len K after 2 append = %d", len(c.KLayer(0)))
 	}
@@ -80,7 +80,7 @@ func TestKVFromArena(t *testing.T) {
 		t.Fatal("want Alloc from arena")
 	}
 
-	c.Append(1, []float32{1, 2}, []float32{3, 4})
+	_ = c.Append(1, []float32{1, 2}, []float32{3, 4})
 	if c.VLayer(1)[1] != 4 {
 		t.Fatal(c.VLayer(1))
 	}

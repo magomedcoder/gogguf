@@ -58,10 +58,11 @@ func loadLayerLogitsFixture(t *testing.T) layerLogitsFile {
 
 func TestLayerLogitsFixture(t *testing.T) {
 	lf := loadLayerLogitsFixture(t)
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	ctx, err := engine.NewContext()
 	if err != nil {

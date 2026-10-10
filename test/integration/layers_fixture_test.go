@@ -58,10 +58,11 @@ func loadLayersFixture(t *testing.T) layersFile {
 
 func TestLayersFixture(t *testing.T) {
 	lf := loadLayersFixture(t)
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	setter, ok := engine.Model.(interface {
 		SetDebugHooks(*qwen3.DebugHooks)

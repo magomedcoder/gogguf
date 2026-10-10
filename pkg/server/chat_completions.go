@@ -261,10 +261,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		modelName = req.Model
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	conv, err := s.conversation()
+	conv, err := s.conversationForSession(sessionIDFromRequest(r, req.User))
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error(), "server_error")
 		return
@@ -276,6 +273,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		RepeatPenalty: frequencyPenaltyToRepeat(req.FrequencyPenalty),
 		RepeatLastN:   64,
 		Stop:          stops,
+	}
+
+	s.inferMu.Lock()
+	defer s.inferMu.Unlock()
+
+	if err := s.ensureKV(conv); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error(), "server_error")
+		return
 	}
 
 	if req.Stream {

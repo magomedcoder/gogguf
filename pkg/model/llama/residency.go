@@ -90,7 +90,10 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []f
 	if err := m.qkvAttnGPU(layer, pos, ln, nil, k, v, attn); err != nil {
 		return err
 	}
-	m.cache.Append(layer, k, v)
+
+	if err := m.cache.Append(layer, k, v); err != nil {
+		return err
+	}
 
 	return m.attnFFNGPU(layer, ln, nil, attn)
 }

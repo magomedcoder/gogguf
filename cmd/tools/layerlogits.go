@@ -38,10 +38,11 @@ func runLayerLogits(args []string) error {
 		return err
 	}
 
-	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(*modelPath, gogguf.LoadOptions{})
 	if err != nil {
 		return err
 	}
+	defer engine.Close()
 
 	ctx, err := engine.NewContext()
 	if err != nil {

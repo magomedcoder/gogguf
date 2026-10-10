@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/dispatch"
 	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
@@ -290,7 +291,9 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	// fused QKV reads attention from GPU KV-cache: when gpuKVStale it is incomplete
 	if onGPU && gpuresid.QKVResidencyEnabled() && !m.gpuKVStale {
 		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
-			m.cache.Append(layer, m.scratch.k, m.scratch.v)
+			if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
+				return err
+			}
 			usedQKVResidency = true
 		}
 	}
@@ -312,7 +315,9 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		m.applyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, pos, layer)
 
 		kvPos := m.cache.Len()
-		m.cache.Append(layer, m.scratch.k, m.scratch.v)
+		if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
+			return err
+		}
 		// token missed GPU KV-cache - disable GPU attention until ResetCache
 		if onGPU && !m.gpuKVStale {
 			if err := m.gpu.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v); err != nil {
@@ -373,54 +378,10 @@ func (m *Model) ffnGPU(layer int, x, out []float32) error {
 
 func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, layer int) error {
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		got, err := m.matmulGPU(name, rows, cols, vec)
-		if err != nil {
-			return err
-		}
-		copy(out, got)
-		return nil
+		return dispatch.MatMulGPUInto(m.gpu, m.weights, name, rows, cols, vec, out)
 	}
 
-	raw, err := m.weights.Raw(name)
-	if err != nil {
-		return err
-	}
-
-	info, err := m.weights.Info(name)
-	if err != nil {
-		return err
-	}
-
-	switch info.Type {
-	case format.GgmlQ8_0:
-		return ops.MatMulVecQ8_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_0:
-		return ops.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_1:
-		return ops.MatMulVecQ4_1Into(raw, rows, cols, vec, out)
-	case format.GgmlQ5_0:
-		return ops.MatMulVecQ5_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ5_1:
-		return ops.MatMulVecQ5_1Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_K:
-		return ops.MatMulVecQ4_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ5_K:
-		return ops.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ6_K:
-		return ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ2_K:
-		return ops.MatMulVecQ2_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ3_K:
-		return ops.MatMulVecQ3_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ8_K:
-		return ops.MatMulVecQ8_KInto(raw, rows, cols, vec, out)
-	default:
-		f32, err := m.weights.Floats(name)
-		if err != nil {
-			return err
-		}
-		return ops.MatMulVecInto(f32, rows, cols, vec, out)
-	}
+	return dispatch.MatMulRawInto(m.weights, name, rows, cols, vec, out)
 }
 
 func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32, error) {

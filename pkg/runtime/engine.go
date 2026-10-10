@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
@@ -11,34 +12,50 @@ import (
 
 // Engine loads a GGUF model for inference.
 type Engine struct {
-	Model model.Model
-	tok   *tokenizer.Tokenizer
-	meta  format.Metadata
-	opts  Options
-	gpu   gpu.Backend
+	Model  model.Model
+	tok    *tokenizer.Tokenizer
+	meta   format.Metadata
+	opts   Options
+	gpu    gpu.Backend
+	source io.Closer // file and/or mmap; closed by Close
 }
 
-// LoadMapped loads the model via mmap (zero-copy weights).
+// LoadMapped loads the model via mmap (zero-copy weights on Unix; full read on Windows).
+// The Engine owns the mapping/file; call Close when done.
 func LoadMapped(path string, opts Options) (*Engine, error) {
 	mr, err := format.OpenFileMapped(path)
 	if err != nil {
 		return nil, err
 	}
-	return loadFromReader(mr.Reader, opts)
+
+	eng, err := loadFromReader(mr.Reader, opts, mr)
+	if err != nil {
+		_ = mr.Close()
+		return nil, err
+	}
+
+	return eng, nil
 }
 
-// Load opens a GGUF file and loads the model.
+// Load opens a GGUF file with copy-on-read weights (no mmap). Prefer LoadMapped.
+// The Engine owns the file handle; call Close when done.
 func Load(path string, opts Options) (*Engine, error) {
-	r, err := format.OpenFile(path)
+	r, closer, err := format.OpenFileOwned(path)
 	if err != nil {
 		return nil, err
 	}
-	return loadFromReader(r, opts)
+
+	eng, err := loadFromReader(r, opts, closer)
+	if err != nil {
+		_ = closer.Close()
+		return nil, err
+	}
+
+	return eng, nil
 }
 
-func loadFromReader(r *format.Reader, opts Options) (*Engine, error) {
-	// Open backend here so Engine knows the device (name, VRAM, layer plan); model.Load calls Normalize again but with GPU ready.
-	mopts := opts.modelOpts()
+func loadFromReader(r *format.Reader, opts Options, source io.Closer) (*Engine, error) {
+	mopts := opts
 	if err := mopts.Normalize(); err != nil {
 		return nil, err
 	}
@@ -50,15 +67,17 @@ func loadFromReader(r *format.Reader, opts Options) (*Engine, error) {
 
 	tok, err := tokenizer.FromGGUF(r)
 	if err != nil {
+		_ = m.Close()
 		return nil, err
 	}
 
 	return &Engine{
-		Model: m,
-		tok:   tok,
-		meta:  r.Metadata,
-		opts:  opts,
-		gpu:   mopts.GPU,
+		Model:  m,
+		tok:    tok,
+		meta:   r.Metadata,
+		opts:   opts,
+		gpu:    mopts.GPU,
+		source: source,
 	}, nil
 }
 
@@ -165,14 +184,25 @@ func (e *Engine) encodeForEmbed(text string) ([]int, error) {
 	return append([]int{bos}, ids...), nil
 }
 
-// Close releases GPU and other model resources.
+// Close releases GPU, model resources, and the underlying file/mmap.
 func (e *Engine) Close() error {
-	if e == nil || e.Model == nil {
+	if e == nil {
 		return nil
 	}
-	err := e.Model.Close()
-	e.Model = nil
+
+	var err error
+	if e.Model != nil {
+		err = e.Model.Close()
+		e.Model = nil
+	}
+
 	e.gpu = nil
+	if e.source != nil {
+		if e2 := e.source.Close(); err == nil {
+			err = e2
+		}
+		e.source = nil
+	}
 
 	return err
 }

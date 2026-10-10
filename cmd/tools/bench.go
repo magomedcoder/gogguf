@@ -109,7 +109,7 @@ func readVRAM(engine *gogguf.Engine) vramMB {
 
 func runBenchSingle(modelPath, prompt string, maxTokens, ngl, nBatch, ctxLen int, chat, thinking bool, runs, warmup int, jsonOut bool, gpuOpts benchGPUOptions) error {
 	loadStart := time.Now()
-	engine, err := gogguf.Load(modelPath, gogguf.LoadOptions{
+	engine, err := gogguf.LoadMapped(modelPath, gogguf.LoadOptions{
 		NGL:         ngl,
 		GPUMaxSeq:   ctxLen,
 		NBatch:      nBatch,
@@ -119,6 +119,7 @@ func runBenchSingle(modelPath, prompt string, maxTokens, ngl, nBatch, ctxLen int
 	if err != nil {
 		return err
 	}
+	defer engine.Close()
 	loadMS := durationMS(time.Since(loadStart))
 
 	promptText, err := resolveBenchPrompt(engine, prompt, chat, thinking)
@@ -181,7 +182,7 @@ func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat,
 		ngl = layers
 	}
 
-	cpuEngine, err := gogguf.Load(modelPath, gogguf.LoadOptions{
+	cpuEngine, err := gogguf.LoadMapped(modelPath, gogguf.LoadOptions{
 		NGL: 0,
 	})
 	if err != nil {
@@ -203,7 +204,7 @@ func runBenchCompare(modelPath, prompt string, maxTokens, ngl, ctxLen int, chat,
 		return fmt.Errorf("CPU bench: %w", err)
 	}
 
-	gpuEngine, err := gogguf.Load(modelPath, gogguf.LoadOptions{
+	gpuEngine, err := gogguf.LoadMapped(modelPath, gogguf.LoadOptions{
 		NGL:         ngl,
 		GPUMaxSeq:   ctxLen,
 		GPUDevices:  gpuOpts.devices,

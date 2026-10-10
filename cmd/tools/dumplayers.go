@@ -52,10 +52,11 @@ func runDumpLayers(args []string) error {
 }
 
 func collectLayersDump(modelPath, prompt string, chat bool, ngl int) (debug.LayersDump, debug.LayersMeta, error) {
-	engine, err := gogguf.Load(modelPath, gogguf.LoadOptions{NGL: ngl})
+	engine, err := gogguf.LoadMapped(modelPath, gogguf.LoadOptions{NGL: ngl})
 	if err != nil {
 		return debug.LayersDump{}, debug.LayersMeta{}, err
 	}
+	defer engine.Close()
 
 	ctx, err := engine.NewContext()
 	if err != nil {

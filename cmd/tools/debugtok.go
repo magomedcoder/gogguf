@@ -13,10 +13,11 @@ func runDebugTok(args []string) error {
 		path = args[0]
 	}
 
-	engine, err := gogguf.Load(path, gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(path, gogguf.LoadOptions{})
 	if err != nil {
 		return err
 	}
+	defer engine.Close()
 
 	tok := engine.Tokenizer()
 	text := "Hello"

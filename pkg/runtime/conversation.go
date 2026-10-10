@@ -6,9 +6,15 @@ import (
 )
 
 // Conversation keeps KV-cache across multi-turn requests with incremental prefill.
+//
+// Limitations: the model has a single KV-cache; HTTP serve serializes inference
+// and reloads KV per Conversation when switching sessions. Chat prefix reuse
+// only works when the new prompt tokenizes to an exact prefix of the cached
+// tokens; otherwise Reset() runs.
 type Conversation struct {
-	ctx    *Context
-	tokens []int
+	ctx        *Context
+	tokens     []int
+	lastLogits []float32 // logits after last Forward / decode; reused on empty delta
 }
 
 // NewConversation creates a dialog session that reuses KV-cache.
@@ -19,7 +25,27 @@ func (c *Context) NewConversation() *Conversation {
 // Reset clears token history and KV-cache.
 func (conv *Conversation) Reset() {
 	conv.tokens = conv.tokens[:0]
+	conv.lastLogits = nil
 	conv.ctx.engine.Model.ResetCache()
+}
+
+// LoadKVCache resets model KV and replays conv.tokens (shared-model multi-session serve).
+func (conv *Conversation) LoadKVCache() error {
+	conv.ctx.engine.Model.ResetCache()
+	conv.lastLogits = nil
+	if len(conv.tokens) == 0 {
+		return nil
+	}
+
+	saved := append([]int(nil), conv.tokens...)
+	logits, err := conv.ctx.engine.Model.Forward(saved, 0)
+	if err != nil {
+		return err
+	}
+
+	conv.storeLogits(logits)
+
+	return nil
 }
 
 // TokenCount returns token count in cache (prompt + generated).
@@ -35,21 +61,52 @@ func (conv *Conversation) StartGeneration(prompt string) (*GenerationSession, er
 // Commit appends generated tokens to cache history.
 func (conv *Conversation) Commit(sess *GenerationSession) {
 	conv.tokens = append(conv.tokens, sess.generated...)
+	conv.storeLogits(sess.logits)
+}
+
+func (conv *Conversation) storeLogits(logits []float32) {
+	if len(logits) == 0 {
+		conv.lastLogits = nil
+		return
+	}
+
+	if len(conv.lastLogits) == len(logits) && logitsPtrEqual(conv.lastLogits, logits) {
+		return
+	}
+
+	if cap(conv.lastLogits) < len(logits) {
+		conv.lastLogits = make([]float32, len(logits))
+	} else {
+		conv.lastLogits = conv.lastLogits[:len(logits)]
+	}
+
+	copy(conv.lastLogits, logits)
+}
+
+func logitsPtrEqual(a, b []float32) bool {
+	if len(a) == 0 {
+		return len(b) == 0
+	}
+
+	return &a[0] == &b[0]
 }
 
 func (conv *Conversation) rollback(tokenLen int) {
 	saved := append([]int(nil), conv.tokens[:tokenLen]...)
 	conv.ctx.engine.Model.ResetCache()
 	conv.tokens = conv.tokens[:0]
+	conv.lastLogits = nil
 	if len(saved) == 0 {
 		return
 	}
 
-	if _, err := conv.ctx.engine.Model.Forward(saved, 0); err != nil {
+	logits, err := conv.ctx.engine.Model.Forward(saved, 0)
+	if err != nil {
 		return
 	}
 
 	conv.tokens = saved
+	conv.storeLogits(logits)
 }
 
 // Rollback restores cache to a previous token count (on generation error).
@@ -113,16 +170,16 @@ func (conv *Conversation) startGeneration(prompt string) (*GenerationSession, er
 			conv.rollback(prevLen)
 			return nil, err
 		}
-
 		conv.tokens = append(conv.tokens, newTokens...)
+		conv.storeLogits(logits)
 	} else if cached == 0 {
 		return nil, fmt.Errorf("runtime: empty prompt")
 	} else {
-		last := conv.tokens[len(conv.tokens)-1]
-		logits, err = conv.ctx.engine.Model.Forward([]int{last}, len(conv.tokens)-1)
-		if err != nil {
-			return nil, err
+		// Empty delta: reuse cached logits (do not re-Forward last token - that double-appends KV).
+		if len(conv.lastLogits) == 0 {
+			return nil, fmt.Errorf("runtime: empty delta without cached logits")
 		}
+		logits = conv.lastLogits
 	}
 
 	return &GenerationSession{

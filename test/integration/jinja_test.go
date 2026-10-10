@@ -10,10 +10,11 @@ import (
 )
 
 func TestJinjaQwen3MatchesFallback(t *testing.T) {
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	got, err := chat.FormatUser("Hello", chat.Options{Metadata: engine.Metadata()})
 	if err != nil {

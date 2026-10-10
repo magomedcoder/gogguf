@@ -31,8 +31,8 @@ func runRun(args []string) error {
 	chat := fs.Bool("chat", false, "wrap prompt in Qwen chat template")
 	thinking := fs.Bool("thinking", false, "Qwen3: enable thinking mode (with --chat)")
 	interactive := fs.Bool("i", false, "interactive mode (REPL)")
-	ngl := fs.Int("ngl", 0, "number of transformer layers on GPU (CUDA, build: -tags cuda)")
-	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 speeds up prefill (Qwen3, works with -ngl)")
+	ngl := fs.Int("ngl", 0, "GPU layers (CUDA, -tags cuda); on macOS unsupported until Metal kernels; residency toggles: GGUF_HIDDEN/QKV/ATTN_FFN_RESIDENCY=0 (see docs/build.md)")
+	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 speeds up prefill (Qwen3 dense; MoE/other arch serial)")
 	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
 	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
@@ -54,7 +54,7 @@ func runRun(args []string) error {
 		return fmt.Errorf("specify prompt via -p or use -i")
 	}
 
-	engine, err := gogguf.Load(path, gogguf.LoadOptions{
+	engine, err := gogguf.LoadMapped(path, gogguf.LoadOptions{
 		NGL:         *ngl,
 		NBatch:      *nBatch,
 		GPUDevices:  devices,
@@ -63,6 +63,7 @@ func runRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer engine.Close()
 	if *ngl > 0 {
 		fmt.Fprintf(os.Stderr, "GPU offload: %d layers on %s\n", *ngl, engine.GPUDescription())
 	}

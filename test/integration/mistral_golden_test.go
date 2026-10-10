@@ -65,10 +65,11 @@ func loadMistralGolden(t *testing.T) goldenFile {
 
 func TestMistral72GoldenFixture(t *testing.T) {
 	gf := loadMistralGolden(t)
-	engine, err := gogguf.Load(mistralModelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(mistralModelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	ctx, err := engine.NewContext()
 	if err != nil {

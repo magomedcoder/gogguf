@@ -72,7 +72,7 @@ func TestAttentionScoresMultiToken(t *testing.T) {
 		3, 4,
 	}
 
-	out, err := AttentionScores(q, k, v, 2, nHeads, nKV, headDim)
+	out, err := testAttentionScores(q, k, v, 2, nHeads, nKV, headDim)
 	if err != nil {
 		t.Fatal(err)
 	}

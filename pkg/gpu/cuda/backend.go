@@ -344,8 +344,20 @@ func (b *Backend) MatMulVec(matrix []float32, rows, cols int, vec []float32) ([]
 }
 
 func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int, vec []float32) ([]float32, error) {
-	if err := validateMatMul(matrix, rows, cols, vec); err != nil {
+	out := make([]float32, rows)
+	if err := b.MatMulVecCachedInto(name, matrix, rows, cols, vec, out); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// MatMulVecCachedInto writes matmul result into dst [rows] (no extra host alloc for the result).
+func (b *Backend) MatMulVecCachedInto(name string, matrix []float32, rows, cols int, vec, dst []float32) error {
+	if err := validateMatMul(matrix, rows, cols, vec); err != nil {
+		return err
+	}
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecCachedInto dst too short")
 	}
 
 	b.mu.Lock()
@@ -367,14 +379,13 @@ func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int,
 			C.int(rows), C.int(cols),
 		)
 		if rc != 0 {
-			return nil, uploadFail("matrix", name, rc)
+			return uploadFail("matrix", name, rc)
 		}
 
 		gm = gpuMatrix{ptr: ptr, rows: rows, cols: cols}
 		b.matrices[name] = gm
 	}
 
-	out := make([]float32, rows)
 	b.prepareVecUpload(vec)
 	rc := C.gguf_cuda_matmul_vec_device(
 		&b.drv,
@@ -383,20 +394,32 @@ func (b *Backend) MatMulVecCached(name string, matrix []float32, rows, cols int,
 		&b.matmulPool,
 		gm.ptr,
 		(*C.float)(unsafe.Pointer(&vec[0])),
-		(*C.float)(unsafe.Pointer(&out[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
 		C.int(rows),
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_device %q: code %d", name, int(rc))
+		return fmt.Errorf("cuda: matmul_vec_device %q: code %d", name, int(rc))
+	}
+	return nil
+}
+
+func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ8_0CachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
 	}
 
 	return out, nil
 }
 
-func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+func (b *Backend) MatMulVecQ8_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
 	if err := validateQ8MatMul(raw, rows, cols, vec); err != nil {
-		return nil, err
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ8_0CachedInto dst too short")
 	}
 
 	b.mu.Lock()
@@ -418,7 +441,7 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, uploadFail("q8_0", name, rc)
+			return uploadFail("q8_0", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -430,7 +453,6 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 		b.matricesQ8[name] = gm
 	}
 
-	out := make([]float32, rows)
 	b.prepareVecUpload(vec)
 	rc := C.gguf_cuda_matmul_vec_q8_0_device(
 		&b.drv,
@@ -439,23 +461,36 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 		&b.matmulPool,
 		gm.ptr,
 		(*C.float)(unsafe.Pointer(&vec[0])),
-		(*C.float)(unsafe.Pointer(&out[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
 		C.int(rows),
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q8_0 %q: code %d", name, int(rc))
+		return fmt.Errorf("cuda: matmul_vec_q8_0 %q: code %d", name, int(rc))
 	}
 
-	return out, nil
+	return nil
 }
 
 func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
-	if !b.hasQ4 {
-		return nil, fmt.Errorf("cuda: q4_0 matmul kernel unavailable")
-	}
-	if err := validateQ4MatMul(raw, rows, cols, vec); err != nil {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ4_0CachedInto(name, raw, rows, cols, vec, out); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+func (b *Backend) MatMulVecQ4_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	if !b.hasQ4 {
+		return fmt.Errorf("cuda: q4_0 matmul kernel unavailable")
+	}
+
+	if err := validateQ4MatMul(raw, rows, cols, vec); err != nil {
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ4_0CachedInto dst too short")
 	}
 
 	b.mu.Lock()
@@ -477,7 +512,7 @@ func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, uploadFail("q4_0", name, rc)
+			return uploadFail("q4_0", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -489,7 +524,6 @@ func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, v
 		b.matricesQ4[name] = gm
 	}
 
-	out := make([]float32, rows)
 	b.prepareVecUpload(vec)
 	rc := C.gguf_cuda_matmul_vec_q4_0_device(
 		&b.drv,
@@ -498,23 +532,37 @@ func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, v
 		&b.matmulPool,
 		gm.ptr,
 		(*C.float)(unsafe.Pointer(&vec[0])),
-		(*C.float)(unsafe.Pointer(&out[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
 		C.int(rows),
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q4_0 %q: code %d", name, int(rc))
+		return fmt.Errorf("cuda: matmul_vec_q4_0 %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ4_KCachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
 	}
 
 	return out, nil
 }
 
-func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+func (b *Backend) MatMulVecQ4_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
 	if !b.hasQ4K {
-		return nil, fmt.Errorf("cuda: q4_k matmul kernel unavailable")
+		return fmt.Errorf("cuda: q4_k matmul kernel unavailable")
 	}
+
 	if err := validateQ4KMatMul(raw, rows, cols, vec); err != nil {
-		return nil, err
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ4_KCachedInto dst too short")
 	}
 
 	b.mu.Lock()
@@ -536,7 +584,7 @@ func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, uploadFail("q4_k", name, rc)
+			return uploadFail("q4_k", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -548,7 +596,6 @@ func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, v
 		b.matricesQ4K[name] = gm
 	}
 
-	out := make([]float32, rows)
 	b.prepareVecUpload(vec)
 	rc := C.gguf_cuda_matmul_vec_q4_k_device(
 		&b.drv,
@@ -557,24 +604,37 @@ func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, v
 		&b.matmulPool,
 		gm.ptr,
 		(*C.float)(unsafe.Pointer(&vec[0])),
-		(*C.float)(unsafe.Pointer(&out[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
 		C.int(rows),
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q4_k %q: code %d", name, int(rc))
+		return fmt.Errorf("cuda: matmul_vec_q4_k %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ5_KCachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
 	}
 
 	return out, nil
 }
 
-func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+func (b *Backend) MatMulVecQ5_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
 	if !b.hasQ5K {
-		return nil, fmt.Errorf("cuda: q5_k matmul kernel unavailable")
+		return fmt.Errorf("cuda: q5_k matmul kernel unavailable")
 	}
 
 	if err := validateQ5KMatMul(raw, rows, cols, vec); err != nil {
-		return nil, err
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ5_KCachedInto dst too short")
 	}
 
 	b.mu.Lock()
@@ -596,7 +656,7 @@ func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, uploadFail("q5_k", name, rc)
+			return uploadFail("q5_k", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -608,7 +668,6 @@ func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, v
 		b.matricesQ5K[name] = gm
 	}
 
-	out := make([]float32, rows)
 	b.prepareVecUpload(vec)
 	rc := C.gguf_cuda_matmul_vec_q5_k_device(
 		&b.drv,
@@ -617,23 +676,37 @@ func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, v
 		&b.matmulPool,
 		gm.ptr,
 		(*C.float)(unsafe.Pointer(&vec[0])),
-		(*C.float)(unsafe.Pointer(&out[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
 		C.int(rows),
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q5_k %q: code %d", name, int(rc))
+		return fmt.Errorf("cuda: matmul_vec_q5_k %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ6_KCachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
 	}
 
 	return out, nil
 }
 
-func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+func (b *Backend) MatMulVecQ6_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
 	if !b.hasQ6K {
-		return nil, fmt.Errorf("cuda: q6_k matmul kernel unavailable")
+		return fmt.Errorf("cuda: q6_k matmul kernel unavailable")
 	}
+
 	if err := validateQ6KMatMul(raw, rows, cols, vec); err != nil {
-		return nil, err
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ6_KCachedInto dst too short")
 	}
 
 	b.mu.Lock()
@@ -655,7 +728,7 @@ func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, v
 			C.size_t(len(raw)),
 		)
 		if rc != 0 {
-			return nil, uploadFail("q6_k", name, rc)
+			return uploadFail("q6_k", name, rc)
 		}
 
 		gm = gpuQ8Matrix{
@@ -668,7 +741,6 @@ func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, v
 		b.matricesQ6K[name] = gm
 	}
 
-	out := make([]float32, rows)
 	b.prepareVecUpload(vec)
 	rc := C.gguf_cuda_matmul_vec_q6_k_device(
 		&b.drv,
@@ -677,15 +749,15 @@ func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, v
 		&b.matmulPool,
 		gm.ptr,
 		(*C.float)(unsafe.Pointer(&vec[0])),
-		(*C.float)(unsafe.Pointer(&out[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
 		C.int(rows),
 		C.int(cols),
 	)
 	if rc != 0 {
-		return nil, fmt.Errorf("cuda: matmul_vec_q6_k %q: code %d", name, int(rc))
+		return fmt.Errorf("cuda: matmul_vec_q6_k %q: code %d", name, int(rc))
 	}
 
-	return out, nil
+	return nil
 }
 
 // ropeModeNeoX / ropeModeNorm - graph cache key for selected RoPE kernel

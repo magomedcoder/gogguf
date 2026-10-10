@@ -36,10 +36,11 @@ func fullLogitsFixture(t *testing.T, name string) string {
 }
 
 func TestFullLogitsFixture(t *testing.T) {
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	cases := []struct {
 		name    string

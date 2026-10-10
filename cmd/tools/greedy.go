@@ -34,10 +34,11 @@ func runGreedy(args []string) error {
 		}
 	}
 
-	engine, err := gogguf.Load(*model, gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(*model, gogguf.LoadOptions{})
 	if err != nil {
 		return err
 	}
+	defer engine.Close()
 
 	text := *prompt
 	if *chatUser != "" {

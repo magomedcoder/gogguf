@@ -13,6 +13,9 @@ type GenerationSession struct {
 	promptTokens []int
 	generated    []int
 	logits       []float32
+	logitsBuf    []float32 // reused for penalty copy
+	historyBuf   []int     // reused prompt+generated for repeat penalty
+	stopBuf      strings.Builder
 }
 
 // StartGeneration encodes the prompt, runs prefill, and returns a decode session.
@@ -65,6 +68,9 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 	}
 
 	s.generated = append(s.generated, next)
+	if len(params.Stop) > 0 {
+		s.stopBuf.WriteString(s.ctx.tok.Decode([]int{next}))
+	}
 
 	startPos := len(s.promptTokens) + len(s.generated) - 1
 	if ctxLen := s.ctx.engine.ContextLength(); ctxLen > 0 && startPos >= ctxLen {
@@ -81,25 +87,38 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 }
 
 func (s *GenerationSession) prepareLogits(params GenerateParams) []float32 {
-	logits := make([]float32, len(s.logits))
-	copy(logits, s.logits)
-
-	if params.RepeatPenalty > 0 && params.RepeatPenalty != 1 {
-		lastN := params.RepeatLastN
-		if lastN == 0 {
-			lastN = 64
-		}
-		sampler.ApplyRepeatPenalty(logits, s.tokenHistory(), params.RepeatPenalty, lastN)
+	needPenalty := params.RepeatPenalty > 0 && params.RepeatPenalty != 1
+	if !needPenalty {
+		return s.logits
 	}
 
-	return logits
+	if cap(s.logitsBuf) < len(s.logits) {
+		s.logitsBuf = make([]float32, len(s.logits))
+	} else {
+		s.logitsBuf = s.logitsBuf[:len(s.logits)]
+	}
+	copy(s.logitsBuf, s.logits)
+
+	lastN := params.RepeatLastN
+	if lastN == 0 {
+		lastN = 64
+	}
+	sampler.ApplyRepeatPenalty(s.logitsBuf, s.tokenHistoryView(), params.RepeatPenalty, lastN)
+
+	return s.logitsBuf
 }
 
-func (s *GenerationSession) tokenHistory() []int {
-	out := make([]int, len(s.promptTokens)+len(s.generated))
-	copy(out, s.promptTokens)
-	copy(out[len(s.promptTokens):], s.generated)
-	return out
+func (s *GenerationSession) tokenHistoryView() []int {
+	n := len(s.promptTokens) + len(s.generated)
+	if cap(s.historyBuf) < n {
+		s.historyBuf = make([]int, n)
+	} else {
+		s.historyBuf = s.historyBuf[:n]
+	}
+
+	copy(s.historyBuf, s.promptTokens)
+	copy(s.historyBuf[len(s.promptTokens):], s.generated)
+	return s.historyBuf
 }
 
 // GeneratedTokens returns IDs of generated tokens.
@@ -136,6 +155,7 @@ func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 		maxTokens = 128
 	}
 
+	s.stopBuf.Reset()
 	for i := 0; i < maxTokens; i++ {
 		id, err := s.DecodeStepWith(params)
 		if err != nil {
@@ -150,7 +170,7 @@ func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 			return nil
 		}
 
-		if hitStopSequence(s.GeneratedText(), params.Stop) {
+		if len(params.Stop) > 0 && hitStopSequence(s.stopBuf.String(), params.Stop) {
 			return nil
 		}
 	}

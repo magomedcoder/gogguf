@@ -51,6 +51,16 @@ func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) erro
 
 	m.emitLogitsDebug()
 
+	// Batch prefill uses host x; restore device-resident hidden for decode when enabled.
+	if m.residency && m.gpu != nil {
+		last := m.scratch.x[(b-1)*embd : b*embd]
+		if err := m.gpu.HiddenUpload(last); err != nil {
+			m.residency = false
+		} else {
+			m.residDevice = true
+		}
+	}
+
 	return nil
 }
 
@@ -104,7 +114,9 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	}
 
 	pastLen := m.cache.Len()
-	m.cache.AppendN(layer, k, v, batch)
+	if err := m.cache.AppendN(layer, k, v, batch); err != nil {
+		return err
+	}
 
 	// §4: mirror chunk K/V into GPU KV-cache, else decode after batch-prefill sees incomplete cache.
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
@@ -193,12 +205,10 @@ func (m *Model) matmulBatchInto(name string, rows, cols int, x, out []float32, b
 
 func (m *Model) matmulBatchGPU(name string, rows, cols int, x, out []float32, batch int) error {
 	for b := range batch {
-		got, err := m.matmulGPU(name, rows, cols, x[b*cols:(b+1)*cols])
-		if err != nil {
+		dst := out[b*rows : (b+1)*rows]
+		if err := m.matmulGPUInto(name, rows, cols, x[b*cols:(b+1)*cols], dst); err != nil {
 			return err
 		}
-
-		copy(out[b*rows:(b+1)*rows], got[:rows])
 	}
 
 	return nil

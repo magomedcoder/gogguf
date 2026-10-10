@@ -51,7 +51,8 @@ func LoadFloats(info *format.TensorInfo) ([]float32, error) {
 	return quant.ToFloat32(info.Type, raw, int(info.ValuesCount()))
 }
 
-// FromGGUF loads a tensor from GGUF.
+// FromGGUF loads and fully dequantizes a tensor from GGUF.
+// Deprecated for inference hot paths - prefer weights.Store + quant matmul.
 func FromGGUF(info *format.TensorInfo) (*Tensor, error) {
 	raw, err := LoadRaw(info)
 	if err != nil {

@@ -15,7 +15,7 @@ generation) is implemented only for specific architectures - selected by `genera
 | **Mistral**   | `mistral` / `llama`*   | supported | NeoX RoPE, GQA; golden Mistral-7B-v0.2; auto-detect by name |
 | **Mixtral**   | `llama`**              | partial   | MoE 8x7B; `llama.expert_count`; NeoX via mistral            |
 | **DeepSeek**  | `deepseek`             | partial   | Dense lead + MoE; not `deepseek2` (MLA)                     |
-| **DeepSeek2** | `deepseek2`            | partial   | Absorbed MLA + YaRN + MoE (V2/V3 Lite+)                     |
+| **DeepSeek2** | `deepseek2`            | partial   | Absorbed MLA + YaRN + MoE (V2/V3 Lite+); MLA on CPU         |
 
 \* TheBloke and convert.py often set `general.architecture: llama` - gogguf detects Mistral via `general.name` / sliding
 window.
@@ -39,7 +39,9 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 
 ### Qwen3 capabilities
 
-- Prefill + autoregressive decode, KV-cache; **n_batch** (`-b`) for CPU multi-token prefill
+- Prefill + autoregressive decode, KV-cache
+- **`n_batch` (`-b`)**: multi-token prefill for **dense** Qwen3 only; MoE forced to `1`; GPU path is still loop-B, not true batched GEMM (see [build.md](build.md), [cli.md](cli.md))
+- Full device residency (fused QKV/FFN/logits) when `-ngl` = all layers and native quants (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K)
 - BPE tokenizer (`tokenizer.ggml.model` / qwen2-style)
 - Chat template: Jinja from GGUF + ChatML/Qwen fallback
 - Thinking block (`--thinking`)
@@ -52,6 +54,8 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 - **Legacy:** Q4_0, Q4_1, Q5_0, Q5_1, Q8_0
 - **K-quants:** Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K
 - **Unquantized (dequant path):** F16, F32
+
+Native GPU kernels + residency: **FP32, Q8_0, Q4_0, Q4_K, Q5_K, Q6_K**. Others (Q4_1, Q5_0/1, Q2_K, Q3_K, Q8_K) use an FP32 GPU fallback and **disable** residency.
 
 ### Planned weight quantizations
 
@@ -83,6 +87,8 @@ Priority:
 | -        | Vision (multimodal) | -                               | planned   |
 | -        | Embeddings          | -                               | planned   |
 
+“Embeddings” in the table means dedicated embedding models. HTTP `/v1/embeddings` already returns last-token hidden for generative GGUF (see [api.md](api.md)).
+
 ### Cross-cutting (not tied to one model)
 
 | Task                                        | Status                                        |
@@ -93,6 +99,8 @@ Priority:
 | Multi-GPU (`-dev N`)                        | `-dev N` done; layer split `-dev 0,1` partial |
 | More quantizations (Q5_K, Q8_K, ...)        | done                                          |
 | Architecture registry (`pkg/model/<arch>/`) | partial (`qwen3`, `llama`, `mistral`, ...)    |
+| `forwardBatch` on non-Qwen3                 | not done                                      |
+| True batched GPU GEMM                       | not done                                      |
 
 ## Adding a new architecture
 

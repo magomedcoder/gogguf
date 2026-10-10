@@ -18,8 +18,8 @@ type scratch struct {
 	moeAcc []float32
 	tmp    []float32
 	qLora  []float32
+	qPe    []float32 // RoPE scratch for one Q head
 	logits []float32
-	out    []float32
 }
 
 func newScratch(cfg Config) scratch {
@@ -31,7 +31,7 @@ func newScratch(cfg Config) scratch {
 
 	qLora := max(cfg.QLoraRank, 1)
 
-	need := 4*cfg.EmbeddingDim + qFull + qAbs + cfg.qkDim() + cfg.KVLoraRank + attn + cfg.ContextLength + 2*ffn + nExp + qLora + 2*cfg.VocabSize + cfg.qkDim()
+	need := 4*cfg.EmbeddingDim + qFull + qAbs + cfg.qkDim() + cfg.KVLoraRank + attn + cfg.ContextLength + 2*ffn + nExp + qLora + cfg.VocabSize + cfg.qkDim()
 	a := mempool.NewArena(need)
 	return scratch{
 		x:      a.Alloc(cfg.EmbeddingDim),
@@ -49,7 +49,7 @@ func newScratch(cfg Config) scratch {
 		moeAcc: a.Alloc(cfg.EmbeddingDim),
 		tmp:    a.Alloc(cfg.EmbeddingDim),
 		qLora:  a.Alloc(qLora),
+		qPe:    a.Alloc(cfg.RopeDim),
 		logits: a.Alloc(cfg.VocabSize),
-		out:    a.Alloc(cfg.VocabSize),
 	}
 }

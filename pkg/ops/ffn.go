@@ -2,18 +2,6 @@ package ops
 
 import "math"
 
-// SwiGLU computes silu(gate) * up element-wise
-func SwiGLU(gate, up []float32) []float32 {
-	out := make([]float32, len(gate))
-	copy(out, gate)
-	for i := range out {
-		out[i] = SiLU(out[i])
-	}
-	vecMulInPlace(out, up)
-
-	return out
-}
-
 const (
 	geluCoefA   = 0.044715
 	sqrt2OverPi = 0.7978845608028654 // sqrt(2/π)

@@ -82,12 +82,13 @@ func prefillCPUAndGPU(modelPath, prompt string, chat bool, ngl int) (cpu, gpu []
 }
 
 func prefillLogits(modelPath, prompt string, chat bool, ngl int) ([]float32, error) {
-	engine, err := gogguf.Load(modelPath, gogguf.LoadOptions{
+	engine, err := gogguf.LoadMapped(modelPath, gogguf.LoadOptions{
 		NGL: ngl,
 	})
 	if err != nil {
 		return nil, err
 	}
+	defer engine.Close()
 
 	ctx, err := engine.NewContext()
 	if err != nil {

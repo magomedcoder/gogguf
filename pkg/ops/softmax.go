@@ -9,21 +9,31 @@ func SoftmaxInPlace(x []float32) {
 	}
 
 	maxVal := vectorMax(x)
-
-	var sum float64
-	for i, v := range x {
-		e := math.Exp(float64(v - maxVal))
-		x[i] = float32(e)
-		sum += e
+	sum := softmaxExpInPlace(x, maxVal)
+	if sum == 0 {
+		return
 	}
 
 	vecScaleInPlace(x, float32(1/sum))
 }
 
-// Softmax returns softmax(x)
-func Softmax(x []float32) []float32 {
-	out := make([]float32, len(x))
-	copy(out, x)
-	SoftmaxInPlace(out)
-	return out
+func softmaxExpInPlace(x []float32, maxVal float32) float32 {
+	var sum float32
+	n := len(x)
+	i := 0
+	for ; i+3 < n; i += 4 {
+		for j := range 4 {
+			e := float32(math.Exp(float64(x[i+j] - maxVal)))
+			x[i+j] = e
+			sum += e
+		}
+	}
+
+	for ; i < n; i++ {
+		e := float32(math.Exp(float64(x[i] - maxVal)))
+		x[i] = e
+		sum += e
+	}
+
+	return sum
 }

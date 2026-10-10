@@ -36,25 +36,28 @@ func MatMulVecQ4_1Into(raw []byte, rows, cols int, vec, out []float32) error {
 		return fmt.Errorf("ops: out too short")
 	}
 
-	parallelForRows(rows, func(rowStart, rowEnd int) {
-		matMulVecQ4_1Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	return parallelForRowsErr(rows, func(rowStart, rowEnd int) error {
+		return matMulVecQ4_1Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
 	})
-
-	return nil
 }
 
-func matMulVecQ4_1Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) {
+func matMulVecQ4_1Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) error {
 	for r := rowStart; r < rowEnd; r++ {
 		var sum float32
 		rowOff := r * blocksPerRow * quant.BlockQ4_1Size
 		for b := range blocksPerRow {
 			block := raw[rowOff+b*quant.BlockQ4_1Size:]
 			vecOff := b * quant.QK4_1
-			dot, _ := quant.DotBlockQ4_1(block, vec[vecOff:vecOff+quant.QK4_1])
+			dot, errDot := quant.DotBlockQ4_1(block, vec[vecOff:vecOff+quant.QK4_1])
+			if errDot != nil {
+				return errDot
+			}
 			sum += dot
 		}
 		out[r] = sum
 	}
+
+	return nil
 }
 
 // MatMulVecQ5_0 multiplies Q5_0 matrix [rows*cols] by float32 vector [cols]
@@ -87,25 +90,28 @@ func MatMulVecQ5_0Into(raw []byte, rows, cols int, vec, out []float32) error {
 		return fmt.Errorf("ops: out too short")
 	}
 
-	parallelForRows(rows, func(rowStart, rowEnd int) {
-		matMulVecQ5_0Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	return parallelForRowsErr(rows, func(rowStart, rowEnd int) error {
+		return matMulVecQ5_0Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
 	})
-
-	return nil
 }
 
-func matMulVecQ5_0Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) {
+func matMulVecQ5_0Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) error {
 	for r := rowStart; r < rowEnd; r++ {
 		var sum float32
 		rowOff := r * blocksPerRow * quant.BlockQ5_0Size
 		for b := range blocksPerRow {
 			block := raw[rowOff+b*quant.BlockQ5_0Size:]
 			vecOff := b * quant.QK5_0
-			dot, _ := quant.DotBlockQ5_0(block, vec[vecOff:vecOff+quant.QK5_0])
+			dot, errDot := quant.DotBlockQ5_0(block, vec[vecOff:vecOff+quant.QK5_0])
+			if errDot != nil {
+				return errDot
+			}
 			sum += dot
 		}
 		out[r] = sum
 	}
+
+	return nil
 }
 
 // MatMulVecQ5_1 multiplies Q5_1 matrix [rows*cols] by float32 vector [cols]
@@ -138,25 +144,28 @@ func MatMulVecQ5_1Into(raw []byte, rows, cols int, vec, out []float32) error {
 		return fmt.Errorf("ops: out too short")
 	}
 
-	parallelForRows(rows, func(rowStart, rowEnd int) {
-		matMulVecQ5_1Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	return parallelForRowsErr(rows, func(rowStart, rowEnd int) error {
+		return matMulVecQ5_1Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
 	})
-
-	return nil
 }
 
-func matMulVecQ5_1Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) {
+func matMulVecQ5_1Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) error {
 	for r := rowStart; r < rowEnd; r++ {
 		var sum float32
 		rowOff := r * blocksPerRow * quant.BlockQ5_1Size
 		for b := range blocksPerRow {
 			block := raw[rowOff+b*quant.BlockQ5_1Size:]
 			vecOff := b * quant.QK5_1
-			dot, _ := quant.DotBlockQ5_1(block, vec[vecOff:vecOff+quant.QK5_1])
+			dot, errDot := quant.DotBlockQ5_1(block, vec[vecOff:vecOff+quant.QK5_1])
+			if errDot != nil {
+				return errDot
+			}
 			sum += dot
 		}
 		out[r] = sum
 	}
+
+	return nil
 }
 
 // EmbeddingQ4_1Into dequantizes an embedding row into dst

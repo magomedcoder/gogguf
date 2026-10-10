@@ -1,5 +1,7 @@
 package mempool
 
+import "fmt"
+
 // KV - fixed CPU KV-cache: maxSeq*kvDim buffers, append-free writes.
 // Per-layer token counter (like append); Len/Advance are separate
 type KV struct {
@@ -55,28 +57,29 @@ func (c *KV) Len() int {
 }
 
 // Append appends K/V of one token to layer.
-func (c *KV) Append(layer int, k, v []float32) {
-	c.AppendN(layer, k, v, 1)
+func (c *KV) Append(layer int, k, v []float32) error {
+	return c.AppendN(layer, k, v, 1)
 }
 
 // AppendN appends K/V of n tokens to layer (k/v: [n*kvDim]).
-func (c *KV) AppendN(layer int, k, v []float32, n int) {
+func (c *KV) AppendN(layer int, k, v []float32, n int) error {
 	if n < 1 || layer < 0 || layer >= len(c.layers) {
-		return
+		return fmt.Errorf("mempool: invalid KV AppendN layer=%d n=%d", layer, n)
 	}
 
 	l := &c.layers[layer]
-	for i := range n {
-		if l.n >= c.maxSeq {
-			return
-		}
+	if l.n+n > c.maxSeq {
+		return fmt.Errorf("mempool: KV overflow layer=%d have=%d add=%d maxSeq=%d", layer, l.n, n, c.maxSeq)
+	}
 
+	for i := range n {
 		off := l.n * c.kvDim
 		src := i * c.kvDim
 		copy(l.k[off:off+c.kvDim], k[src:src+c.kvDim])
 		copy(l.v[off:off+c.kvDim], v[src:src+c.kvDim])
 		l.n++
 	}
+	return nil
 }
 
 // Advance marks token completion.

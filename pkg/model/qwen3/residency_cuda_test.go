@@ -10,6 +10,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/testutil"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
@@ -53,10 +54,7 @@ func loadResidentModel(t *testing.T, gpuMaxSeq, nBatch int) *Model {
 }
 
 func skipOOM(t *testing.T, err error) {
-	t.Helper()
-	if gpu.IsOutOfMemory(err) {
-		t.Skip("insufficient VRAM:", err)
-	}
+	testutil.SkipOOM(t, err)
 }
 
 // §1+§2: on full Q8_0 offload residency enables; hidden stays on device between layers; logits computed on GPU

@@ -26,7 +26,7 @@ func TestFullLayersCPUVsGPU(t *testing.T) {
 		tol = f
 	}
 
-	cpuEng, err := gogguf.Load(model, gogguf.LoadOptions{
+	cpuEng, err := gogguf.LoadMapped(model, gogguf.LoadOptions{
 		NGL: 0,
 	})
 	if err != nil {
@@ -34,7 +34,7 @@ func TestFullLayersCPUVsGPU(t *testing.T) {
 	}
 	defer cpuEng.Close()
 
-	gpuEng, err := gogguf.Load(model, gogguf.LoadOptions{
+	gpuEng, err := gogguf.LoadMapped(model, gogguf.LoadOptions{
 		NGL:       999,
 		GPUMaxSeq: 256,
 	})

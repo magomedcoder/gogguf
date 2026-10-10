@@ -24,7 +24,7 @@
 
 ## `gguf run`
 
-Генерация текста: prefill промпта -> autoregressive decode -> вывод в stdout.
+Генерация текста: prefill промпта -> autoregressive decode -> stdout.
 
 ```bash
 ./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -n 64
@@ -36,31 +36,30 @@
 ./build/gogguf run -hf Qwen/Qwen3-4B-GGUF:Q8_0 --chat -p "Привет" -n 64
 ```
 
-| Флаг                | По умолчанию | Описание                                               |
-|---------------------|--------------|--------------------------------------------------------|
-| `-m`                | -            | путь к файлу `.gguf` (взаимоисключающе с `-hf`)        |
-| `-hf` / `--hf-repo` | -            | Hugging Face `owner/repo[:quant]` (скачать + кэш)      |
-| `-p`                | -            | текст промпта                                          |
-| `-n`                | `128`        | максимум новых токенов                                 |
-| `--temp`            | `0`          | температура sampling (`0` = greedy)                    |
-| `--top-k`           | `0`          | top-k (`0` = выключено)                                |
-| `--top-p`           | `1`          | nucleus sampling (`1` = выключено)                     |
-| `--min-p`           | `0`          | min-p sampling (`0` = выключено)                       |
-| `--repeat-penalty`  | `1`          | штраф за повтор токенов (`1` = выключено)              |
-| `--repeat-last-n`   | `64`         | окно истории для repeat penalty                        |
-| `--seed`            | `0`          | seed PRNG                                              |
-| `--chat`            | `false`      | обернуть промпт в ChatML/Qwen template                 |
-| `--thinking`        | `false`      | режим размышления Qwen3 (с `--chat`)                   |
-| `-i`                | `false`      | интерактивный режим (REPL)                             |
-| `-ngl`              | `0`          | matmul N transformer-слоёв на GPU (CUDA-сборка)        |
-| `-b` / `--n-batch`  | `1`          | размер chunk prefill (Qwen3 CPU; >1 - длинный prefill) |
-| `-dev`              | пусто        | GPU для offload: `1` или `0,1` (split слоёв)           |
-| `-tensor-split`     | пусто        | пропорции слоёв по устройствам `-dev`, напр. `0.6,0.4` |
+| Флаг                | По умолчанию | Описание                                                                                                                                                                                                                 |
+|---------------------|--------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-m`                | -            | путь к `.gguf` (взаимоисключающе с `-hf`)                                                                                                                                                                                |
+| `-hf` / `--hf-repo` | -            | Hugging Face `owner/repo[:quant]` (скачать + кэш)                                                                                                                                                                        |
+| `-p`                | -            | текст промпта                                                                                                                                                                                                            |
+| `-n`                | `128`        | максимум новых токенов                                                                                                                                                                                                   |
+| `--temp`            | `0`          | температура sampling (`0` = greedy)                                                                                                                                                                                      |
+| `--top-k`           | `0`          | top-k (`0` = выкл.)                                                                                                                                                                                                      |
+| `--top-p`           | `1`          | nucleus (`1` = выкл.)                                                                                                                                                                                                    |
+| `--min-p`           | `0`          | min-p (`0` = выкл.)                                                                                                                                                                                                      |
+| `--repeat-penalty`  | `1`          | штраф за повтор (`1` = выкл.)                                                                                                                                                                                            |
+| `--repeat-last-n`   | `64`         | окно истории для repeat penalty                                                                                                                                                                                          |
+| `--seed`            | `0`          | seed PRNG                                                                                                                                                                                                                |
+| `--chat`            | `false`      | обернуть промпт в ChatML/Qwen template                                                                                                                                                                                   |
+| `--thinking`        | `false`      | режим размышления Qwen3 (только с `--chat`)                                                                                                                                                                              |
+| `-i`                | `false`      | интерактивный REPL (stdin)                                                                                                                                                                                               |
+| `-ngl`              | `0`          | offload N слоёв на GPU (CUDA-сборка); на macOS без Metal kernels не работает. Fused residency: `GGUF_HIDDEN_RESIDENCY`, `GGUF_QKV_RESIDENCY`, `GGUF_ATTN_FFN_RESIDENCY` (значение `0` - выкл., см. [build.md](build.md)) |
+| `-b` / `--n-batch`  | `1`          | размер chunk prefill; **`>1` только Qwen3 dense** (MoE принудительно `1`; остальные arch - serial). Не true batched GPU GEMM - loop по токенам/чанками                                                                   |
+| `-dev`              | пусто        | GPU ordinal(s): `1` или `0,1` (split слоёв)                                                                                                                                                                              |
+| `-tensor-split`     | пусто        | пропорции слоёв по `-dev`, напр. `0.6,0.4`                                                                                                                                                                               |
 
-Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`. Для gated/private: `HF_TOKEN`. Зеркало
-Hub: `MODEL_ENDPOINT`.
+Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`. Gated/private: `HF_TOKEN`. Зеркало Hub: `MODEL_ENDPOINT`.
 
-Для **Qwen3 Instruct** используйте `--chat`, иначе модель ответит некорректно.
+Для **Qwen3 Instruct** нужен `--chat`, иначе ответ будет некорректным.
 
 Пример с sampling:
 
@@ -80,7 +79,7 @@ Hub: `MODEL_ENDPOINT`.
 ./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -ngl 36
 ```
 
-Интерактивный режим (с `--chat` история диалога сохраняется между репликами; `/clear` - сброс):
+Интерактивный режим (с `--chat` история сохраняется между репликами; `/clear` - сброс):
 
 ```bash
 ./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -i
@@ -102,16 +101,16 @@ Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 ./build/gogguf serve -hf Qwen/Qwen3-4B-GGUF:Q8_0 --host 127.0.0.1:8000
 ```
 
-| Флаг                | По умолчанию     | Описание                                        |
-|---------------------|------------------|-------------------------------------------------|
-| `-m`                | -                | путь к файлу `.gguf` (взаимоисключающе с `-hf`) |
-| `-hf` / `--hf-repo` | -                | Hugging Face `owner/repo[:quant]`               |
-| `--host`            | `127.0.0.1:8000` | адрес HTTP-сервера                              |
-| `-ngl`              | `0`              | matmul N transformer-слоёв на GPU (CUDA-сборка) |
-| `-b` / `--n-batch`  | `1`              | размер chunk prefill (Qwen3 CPU)                |
-| `-dev`              | пусто            | GPU для offload: `1` или `0,1` (split слоёв)    |
-| `-tensor-split`     | пусто            | пропорции слоёв по устройствам `-dev`           |
-| `--api-key`         | пусто            | auth Bearer / X-API-Key                         |
-| `--rate-limit`      | `0`              | запросов в минуту на IP (`0` = без лимита)      |
+| Флаг                | По умолчанию     | Описание                                                     |
+|---------------------|------------------|--------------------------------------------------------------|
+| `-m`                | -                | путь к `.gguf` (взаимоисключающе с `-hf`)                    |
+| `-hf` / `--hf-repo` | -                | Hugging Face `owner/repo[:quant]`                            |
+| `--host`            | `127.0.0.1:8000` | адрес HTTP-сервера                                           |
+| `-ngl`              | `0`              | GPU-слои (CUDA); env residency - см. [build.md](build.md)    |
+| `-b` / `--n-batch`  | `1`              | chunk prefill (Qwen3 dense; MoE/другие arch остаются serial) |
+| `-dev`              | пусто            | GPU ordinal(s): `1` или `0,1`                                |
+| `-tensor-split`     | пусто            | пропорции слоёв по `-dev`                                    |
+| `--api-key`         | пусто            | auth Bearer / X-API-Key                                      |
+| `--rate-limit`      | `0`              | запросов в минуту на IP (`0` = без лимита)                   |
 
-Подробнее об эндпоинтах: [HTTP API](api.md).
+Эндпоинты и сессии (`X-Session-Id`): [HTTP API](api.md).

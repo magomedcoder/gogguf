@@ -3,7 +3,10 @@ package ops
 import (
 	"fmt"
 	"math"
+	"sync"
 )
+
+var headScoresPool = sync.Pool{New: func() any { return new([]float32) }}
 
 // AttentionScoresInto writes attention to dst [nHeads*headDim]
 // scores - buffer length >= seqLen for softmax weights (reused across heads)
@@ -27,46 +30,56 @@ func AttentionScoresIntoSoftcap(dst, q, k, v, scores []float32, seqLen, nHeads, 
 
 	groupSize := nHeads / nKVHeads
 	scale := float32(1 / math.Sqrt(float64(headDim)))
-	headScores := scores[:seqLen]
 	useCap := softcap != 0
 	capF := float64(softcap)
 
-	for h := range nHeads {
-		kvHead := h / groupSize
-		qOff := h * headDim
-
-		for t := range seqLen {
-			kOff := t*nKVHeads*headDim + kvHead*headDim
-			s := float64(dot(q[qOff:qOff+headDim], k[kOff:kOff+headDim]) * scale)
-			if useCap {
-				s = capF * math.Tanh(s/capF)
-			}
-			headScores[t] = float32(s)
+	headScores := scores[:seqLen]
+	if nHeads < 4 || seqLen*headDim < 256 {
+		for h := range nHeads {
+			attentionOneHead(dst, q, k, v, headScores, h, groupSize, seqLen, nKVHeads, headDim, scale, useCap, capF)
 		}
 
-		SoftmaxInPlace(headScores)
-
-		outOff := h * headDim
-		vStride := nKVHeads * headDim
-		vBase := kvHead * headDim
-		for i := range headDim {
-			dst[outOff+i] = dotStride(headScores, v, vBase+i, vStride, seqLen)
-		}
+		return nil
 	}
+
+	parallelForWork(nHeads, 4, func(start, end int) {
+		scratchPtr := headScoresPool.Get().(*[]float32)
+		local := *scratchPtr
+		if cap(local) < seqLen {
+			local = make([]float32, seqLen)
+			*scratchPtr = local
+		} else {
+			local = local[:seqLen]
+		}
+		defer headScoresPool.Put(scratchPtr)
+
+		for h := start; h < end; h++ {
+			attentionOneHead(dst, q, k, v, local, h, groupSize, seqLen, nKVHeads, headDim, scale, useCap, capF)
+		}
+	})
 
 	return nil
 }
 
-// AttentionScores computes scaled dot-product attention for one position
-// q: [nHeads*headDim]
-// k: [seqLen*nKVHeads*headDim]
-// v: [seqLen*nKVHeads*headDim]
-func AttentionScores(q, k, v []float32, seqLen, nHeads, nKVHeads, headDim int) ([]float32, error) {
-	out := make([]float32, nHeads*headDim)
-	scores := make([]float32, seqLen)
-	if err := AttentionScoresInto(out, q, k, v, scores, seqLen, nHeads, nKVHeads, headDim); err != nil {
-		return nil, err
+func attentionOneHead(dst, q, k, v, headScores []float32, h, groupSize, seqLen, nKVHeads, headDim int, scale float32, useCap bool, capF float64) {
+	kvHead := h / groupSize
+	qOff := h * headDim
+
+	for t := range seqLen {
+		kOff := t*nKVHeads*headDim + kvHead*headDim
+		s := float64(dot(q[qOff:qOff+headDim], k[kOff:kOff+headDim]) * scale)
+		if useCap {
+			s = capF * math.Tanh(s/capF)
+		}
+		headScores[t] = float32(s)
 	}
 
-	return out, nil
+	SoftmaxInPlace(headScores)
+
+	outOff := h * headDim
+	vStride := nKVHeads * headDim
+	vBase := kvHead * headDim
+	for i := range headDim {
+		dst[outOff+i] = dotStride(headScores, v, vBase+i, vStride, seqLen)
+	}
 }

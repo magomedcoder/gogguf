@@ -15,7 +15,7 @@ func TestAppendNAdvanceN(t *testing.T) {
 		90, 100, 110, 120,
 	}
 
-	kv.AppendN(0, k, v, 3)
+	_ = kv.AppendN(0, k, v, 3)
 	if got := len(kv.KLayer(0)); got != 12 {
 		t.Fatalf("KLayer len=%d", got)
 	}

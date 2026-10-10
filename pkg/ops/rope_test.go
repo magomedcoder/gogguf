@@ -6,7 +6,7 @@ import (
 )
 
 func TestSoftmax(t *testing.T) {
-	out := Softmax([]float32{1, 2, 3})
+	out := testSoftmax([]float32{1, 2, 3})
 	var sum float32
 	for _, v := range out {
 		sum += v
@@ -94,7 +94,7 @@ func TestAttentionScoresSingleToken(t *testing.T) {
 	k := []float32{1, 0}
 	v := []float32{2, 3}
 
-	out, err := AttentionScores(q, k, v, 1, nHeads, nKV, headDim)
+	out, err := testAttentionScores(q, k, v, 1, nHeads, nKV, headDim)
 	if err != nil {
 		t.Fatal(err)
 	}

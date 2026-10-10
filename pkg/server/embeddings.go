@@ -58,13 +58,10 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Embed resets KV-cache; reset conversation too so chat stays consistent with cache.
-	if s.conv != nil {
-		s.conv.Reset()
-	}
+	s.inferMu.Lock()
+	defer s.inferMu.Unlock()
+	// Embed resets model KV; chat Conversations keep token history and reload KV on next infer.
+	s.kvConv = nil
 
 	modelName := req.Model
 	if modelName == "" {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/dispatch"
 	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/model/moe"
 	"github.com/magomedcoder/gogguf/pkg/ops"
@@ -133,8 +134,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, err
 	}
 
-	copy(m.scratch.out, m.scratch.logits)
-	return m.scratch.out, nil
+	return m.scratch.logits, nil
 }
 
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
@@ -336,7 +336,8 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 	for h := 0; h < cfg.NumHeads; h++ {
 		src := m.scratch.qFull[h*headK : (h+1)*headK]
 		qNope := src[:cfg.QKNopeDim]
-		qPe := append([]float32(nil), src[cfg.QKNopeDim:]...)
+		qPe := m.scratch.qPe[:cfg.RopeDim]
+		copy(qPe, src[cfg.QKNopeDim:])
 		ops.ApplyRoPEPartialScaled(qPe, pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
 
 		// wk_b head: {qk_nope, kv_lora}
@@ -352,8 +353,9 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 	// to cache: K = concat(kv_cmpr, k_pe), V = kv_cmpr
 	copy(m.scratch.kCache[:cfg.KVLoraRank], m.scratch.vCache)
 	copy(m.scratch.kCache[cfg.KVLoraRank:], kPe)
-	m.cache.Append(layer, m.scratch.kCache, m.scratch.vCache)
-
+	if err := m.cache.Append(layer, m.scratch.kCache, m.scratch.vCache); err != nil {
+		return err
+	}
 	seqLen := m.cache.Len() + 1
 	if err := ops.AttentionMLAAbsorbedInto(
 		m.scratch.attn,
@@ -402,14 +404,11 @@ func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
 		copy(vFull[h*cfg.VHeadDim:(h+1)*cfg.VHeadDim], out[cfg.QKNopeDim:])
 	}
 
-	// RoPE on the Q tail
-	q := append([]float32(nil), m.scratch.qFull...)
 	for h := 0; h < cfg.NumHeads; h++ {
-		ops.ApplyRoPEPartialScaled(q[h*headK+cfg.QKNopeDim:h*headK+headK], pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+		ops.ApplyRoPEPartialScaled(m.scratch.qFull[h*headK+cfg.QKNopeDim:h*headK+headK], pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
 	}
 
 	// Legacy path without absorbed MLA is not implemented (needs separate MHA cache).
-	_ = q
 	_ = kFull
 	_ = vFull
 	_ = layer
@@ -441,36 +440,17 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		return m.sharedExpert(lt, layer)
 	}
 
-	gateW, err := m.weights.Floats(lt.gateExps)
-	if err != nil {
-		return err
-	}
-
-	upW, err := m.weights.Floats(lt.upExps)
-	if err != nil {
-		return err
-	}
-
-	downW, err := m.weights.Floats(lt.downExps)
-	if err != nil {
-		return err
-	}
-
-	expertElems := ffn * embd
 	gateBuf := m.scratch.gate[:ffn]
 	upBuf := m.scratch.up[:ffn]
 	for i, ei := range idxs {
-		gOff := ei * expertElems
-		if err := ops.MatMulVecInto(gateW[gOff:gOff+expertElems], ffn, embd, m.scratch.h, gateBuf); err != nil {
+		if err := dispatch.MatMulExpertInto(m.weights, lt.gateExps, ei, ffn, embd, m.scratch.h, gateBuf); err != nil {
 			return err
 		}
-
-		if err := ops.MatMulVecInto(upW[gOff:gOff+expertElems], ffn, embd, m.scratch.h, upBuf); err != nil {
+		if err := dispatch.MatMulExpertInto(m.weights, lt.upExps, ei, ffn, embd, m.scratch.h, upBuf); err != nil {
 			return err
 		}
-
 		ops.SwiGLUInPlace(gateBuf, upBuf)
-		if err := ops.MatMulVecInto(downW[gOff:gOff+expertElems], embd, ffn, gateBuf, m.scratch.tmp); err != nil {
+		if err := dispatch.MatMulExpertInto(m.weights, lt.downExps, ei, embd, ffn, gateBuf, m.scratch.tmp); err != nil {
 			return err
 		}
 
@@ -550,47 +530,7 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 		}
 	}
 
-	raw, err := m.weights.Raw(name)
-	if err != nil {
-		return err
-	}
-
-	info, err := m.weights.Info(name)
-	if err != nil {
-		return err
-	}
-
-	switch info.Type {
-	case format.GgmlQ8_0:
-		return ops.MatMulVecQ8_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_0:
-		return ops.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_1:
-		return ops.MatMulVecQ4_1Into(raw, rows, cols, vec, out)
-	case format.GgmlQ5_0:
-		return ops.MatMulVecQ5_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ5_1:
-		return ops.MatMulVecQ5_1Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_K:
-		return ops.MatMulVecQ4_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ5_K:
-		return ops.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ6_K:
-		return ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ2_K:
-		return ops.MatMulVecQ2_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ3_K:
-		return ops.MatMulVecQ3_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ8_K:
-		return ops.MatMulVecQ8_KInto(raw, rows, cols, vec, out)
-	default:
-		f32, err := m.weights.Floats(name)
-		if err != nil {
-			return err
-		}
-
-		return ops.MatMulVecInto(f32, rows, cols, vec, out)
-	}
+	return dispatch.MatMulRawInto(m.weights, name, rows, cols, vec, out)
 }
 
 func (m *Model) logitsFromHidden(x []float32) error {

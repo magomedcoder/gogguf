@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/dispatch"
 	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/model/moe"
 	"github.com/magomedcoder/gogguf/pkg/ops"
@@ -265,7 +266,10 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	ops.ApplyRoPEHeadsNorm(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
 
 	kvPos := m.cache.Len()
-	m.cache.Append(layer, m.scratch.k, m.scratch.v)
+	if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
+		return err
+	}
+
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		_ = m.gpu.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
 	}
@@ -342,39 +346,18 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		return m.sharedExpert(lt, layer)
 	}
 
-	gateW, err := m.weights.Floats(lt.gateExps)
-	if err != nil {
-		return err
-	}
-
-	upW, err := m.weights.Floats(lt.upExps)
-	if err != nil {
-		return err
-	}
-
-	downW, err := m.weights.Floats(lt.downExps)
-	if err != nil {
-		return err
-	}
-
-	expertElems := ffn * embd
 	gateBuf := m.scratch.gate[:ffn]
 	upBuf := m.scratch.up[:ffn]
 
 	for i, ei := range idxs {
-		gOff := ei * expertElems
-		uOff := ei * expertElems
-		dOff := ei * expertElems
-		if err := ops.MatMulVecInto(gateW[gOff:gOff+expertElems], ffn, embd, m.scratch.h, gateBuf); err != nil {
+		if err := dispatch.MatMulExpertInto(m.weights, lt.gateExps, ei, ffn, embd, m.scratch.h, gateBuf); err != nil {
 			return err
 		}
-
-		if err := ops.MatMulVecInto(upW[uOff:uOff+expertElems], ffn, embd, m.scratch.h, upBuf); err != nil {
+		if err := dispatch.MatMulExpertInto(m.weights, lt.upExps, ei, ffn, embd, m.scratch.h, upBuf); err != nil {
 			return err
 		}
-
 		ops.SwiGLUInPlace(gateBuf, upBuf)
-		if err := ops.MatMulVecInto(downW[dOff:dOff+expertElems], embd, ffn, gateBuf, m.scratch.tmp); err != nil {
+		if err := dispatch.MatMulExpertInto(m.weights, lt.downExps, ei, embd, ffn, gateBuf, m.scratch.tmp); err != nil {
 			return err
 		}
 
@@ -498,55 +481,10 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 	}
 
 	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		got, err := m.matmulGPU(name, rows, cols, vec)
-		if err != nil {
-			return err
-		}
-		copy(out, got)
-		return nil
+		return dispatch.MatMulGPUInto(m.gpu, m.weights, name, rows, cols, vec, out)
 	}
 
-	raw, err := m.weights.Raw(name)
-	if err != nil {
-		return err
-	}
-
-	info, err := m.weights.Info(name)
-	if err != nil {
-		return err
-	}
-
-	switch info.Type {
-	case format.GgmlQ8_0:
-		return ops.MatMulVecQ8_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_0:
-		return ops.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_1:
-		return ops.MatMulVecQ4_1Into(raw, rows, cols, vec, out)
-	case format.GgmlQ5_0:
-		return ops.MatMulVecQ5_0Into(raw, rows, cols, vec, out)
-	case format.GgmlQ5_1:
-		return ops.MatMulVecQ5_1Into(raw, rows, cols, vec, out)
-	case format.GgmlQ4_K:
-		return ops.MatMulVecQ4_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ5_K:
-		return ops.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ6_K:
-		return ops.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ2_K:
-		return ops.MatMulVecQ2_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ3_K:
-		return ops.MatMulVecQ3_KInto(raw, rows, cols, vec, out)
-	case format.GgmlQ8_K:
-		return ops.MatMulVecQ8_KInto(raw, rows, cols, vec, out)
-	default:
-		f32, err := m.weights.Floats(name)
-		if err != nil {
-			return err
-		}
-
-		return ops.MatMulVecInto(f32, rows, cols, vec, out)
-	}
+	return dispatch.MatMulRawInto(m.weights, name, rows, cols, vec, out)
 }
 
 func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32, error) {

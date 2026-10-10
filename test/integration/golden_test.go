@@ -38,10 +38,11 @@ func modelPath(t *testing.T) string {
 }
 
 func TestTokenizerHello(t *testing.T) {
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	ids, err := engine.Tokenizer().Encode("Hello")
 	if err != nil {
@@ -54,10 +55,11 @@ func TestTokenizerHello(t *testing.T) {
 }
 
 func TestGreedyNextAfterChatPrefill(t *testing.T) {
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	prompt, err := chat.FormatUser("Hello", chat.Options{
 		Metadata: engine.Metadata(),
@@ -85,10 +87,11 @@ func TestGreedyNextAfterChatPrefill(t *testing.T) {
 }
 
 func TestGreedyGenerationShort(t *testing.T) {
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	ctx, err := engine.NewContext()
 	if err != nil {
@@ -122,11 +125,13 @@ func TestLoadMappedMatchesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	mapped, err := gogguf.LoadMapped(path, gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model via mmap: %v", err)
 	}
+	defer mapped.Close()
 
 	prompt, err := chat.FormatUser("Hello", chat.Options{
 		Metadata: engine.Metadata(),

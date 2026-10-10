@@ -64,13 +64,14 @@ func TestFullLogitsCPUVsGPU(t *testing.T) {
 
 func forwardPrefill(t *testing.T, model, prompt string, chatMode bool, ngl int) ([]float32, error) {
 	t.Helper()
-	engine, err := gogguf.Load(model, gogguf.LoadOptions{
+	engine, err := gogguf.LoadMapped(model, gogguf.LoadOptions{
 		NGL:       ngl,
 		GPUMaxSeq: 256,
 	})
 	if err != nil {
 		return nil, err
 	}
+	defer engine.Close()
 	defer engine.Close()
 
 	ctx, err := engine.NewContext()

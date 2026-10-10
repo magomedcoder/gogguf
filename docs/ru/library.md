@@ -8,6 +8,8 @@ import "github.com/magomedcoder/gogguf"
 engine, err := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 0, // matmul N слоёв на GPU; <= block_count, нужна CUDA-сборка
 })
+defer engine.Close() // освободить VRAM / backend при NGL > 0
+
 ctx, err := engine.NewContext()
 
 prompt, err := gogguf.FormatChatUser("Привет", gogguf.ChatOptions{
@@ -18,6 +20,19 @@ text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 	Sampler:   gogguf.Greedy,
 })
 ```
+
+### `LoadOptions` (важные поля)
+
+| Поле                       | Смысл                                                                  |
+|----------------------------|------------------------------------------------------------------------|
+| `NGL`                      | число слоёв на GPU (`-ngl`)                                            |
+| `NBatch`                   | chunk prefill (`-b`); `>1` эффективно только для Qwen3 dense; MoE -> 1 |
+| `GPUMaxSeq`                | макс. длина GPU KV (`0` = auto, до 4096)                               |
+| `GPUDevice` / `GPUDevices` | ordinal(s) после `CUDA_VISIBLE_DEVICES`                                |
+| `TensorSplit`              | пропорции слоёв при multi-GPU                                          |
+| `GPU`                      | готовый backend; иначе при `NGL > 0` откроется CUDA                    |
+
+На macOS `NGL > 0` без Metal kernels вернёт ошибку (см. [build.md](build.md)).
 
 ## Пошаговый decode
 
@@ -53,17 +68,35 @@ text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 
 ## Загрузка через mmap (zero-copy веса)
 
+Предпочтительный путь для больших файлов (как у CLI `run`/`serve`):
+
 ```go
 engine, err := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
-	NGL: 0,
+	NGL:    0,
+	NBatch: 1,
 })
+defer engine.Close()
 ```
+
+На Windows mmap сейчас через обычное чтение файла (настоящий `CreateFileMapping` - в планах платформ).
 
 ## GPU offload из кода
 
 ```go
-engine, err := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
+engine, err := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 28, // нужна сборка -tags cuda
+})
+defer engine.Close()
+```
+
+Или с явным устройством:
+
+```go
+devs, split, err := gogguf.ParseGPUDevices("0,1", "0.6,0.4")
+engine, err := gogguf.LoadMapped(path, gogguf.LoadOptions{
+	NGL:         28,
+	GPUDevices:  devs,
+	TensorSplit: split,
 })
 ```
 
@@ -85,9 +118,12 @@ import (
 	"github.com/magomedcoder/gogguf/server"
 )
 
-engine, _ := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{})
+engine, _ := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{})
+defer engine.Close()
 
 srv := server.New(engine, "./models/Qwen3-4B-Q8_0.gguf")
 
 srv.ListenAndServe("127.0.0.1:8000")
 ```
+
+Сессии и эндпоинты - как у CLI serve: см. [api.md](api.md).

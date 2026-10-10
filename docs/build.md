@@ -2,6 +2,8 @@
 
 ## Local build
 
+Requires **Go 1.26+**.
+
 ```bash
 go build -o build/gogguf ./cmd/gogguf
 ```
@@ -46,15 +48,22 @@ For **Qwen3 dense** with `-ngl` = all layers (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K w
 | `output_norm` + `lm_head`                                  | GPU                      | `LogitsFromDevice`, one DtoH of `vocab` floats |
 | sampling, KV mirror, HTTP                                  | CPU                      | `attn`/`k`/`v` of a layer still go DtoH        |
 
-Partly on GPU: `-b > 1` prefill (chunk matmul is CPU-GEMM, K/V mirrored into GPU KV), other architectures (Llama / Mistral: matmul + FFN + attention, no full residency), MoE experts (CPU), DeepSeek2 MLA (CPU only).
+Partly on GPU: `-b > 1` prefill (chunk matmul is CPU-GEMM or loop-B GPU matmul, K/V mirrored into GPU KV), other architectures (Llama / Mistral: matmul + FFN + attention, no full residency; **`forwardBatch` / `-b > 1` only on Qwen3 dense today**), MoE experts (CPU), DeepSeek2 MLA (CPU only).
+
+**Prefill batching (`-b` / `n_batch`):** MoE models force `n_batch=1` (serial prefill). Only Qwen3 **dense** uses multi-token prefill chunks; there is no true batched GPU GEMM across the batch yet (GPU path loops per row). Llama, Mistral, Gemma, Phi, DeepSeek, etc. always run one token at a time regardless of `-b`.
+
+**`gpuKVStale`:** If GPU KV append fails or the cache is shorter than the prompt (e.g. `-gpu-max-seq`), fused GPU attention is skipped until `ResetCache()` / a new session - host KV remains authoritative. Batch prefill mirrors K/V into GPU KV when possible; decode after batch restores device-resident hidden when full residency is enabled.
 Weight types without native kernels (Q4_1, Q5_0/1, Q2_K, Q3_K, Q8_K) fall back to the FP32 path and disable residency.
 
 ### Device selection and multi-GPU
 
 ```bash
 ./build/gogguf run   -m model.gguf -ngl 28 -dev 1 -p "Hi" # second visible GPU
+
 ./build/gogguf serve -m model.gguf -ngl 28 -dev 0,1 # split layers across two GPUs
+
 ./build/tools bench  -m model.gguf -ngl 28 -dev 0,1 -tensor-split 0.75,0.25
+
 CUDA_VISIBLE_DEVICES=1 ./build/gogguf run -m model.gguf -ngl 28 -p "Hi"
 ```
 

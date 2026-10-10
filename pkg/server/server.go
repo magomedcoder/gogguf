@@ -18,14 +18,21 @@ type Options struct {
 	RateLimitPerMinute int    // 0 = unlimited; token bucket per IP
 }
 
+// SessionIDHeader selects a multi-turn conversation when set (OpenAI `user` is a fallback key).
+const SessionIDHeader = "X-Session-Id"
+
 type Server struct {
 	engine    *runtime.Engine
 	modelPath string
 	apiKey    string
 	limiter   *rateLimiter
-	mu        sync.Mutex
-	conv      *runtime.Conversation
 	created   int64
+
+	sessionsMu sync.Mutex
+	sessions   map[string]*runtime.Conversation
+
+	inferMu sync.Mutex
+	kvConv  *runtime.Conversation // conversation whose token history matches model KV; nil if stale/empty
 }
 
 // New creates a server. opts may be omitted.
@@ -127,17 +134,65 @@ func (s *Server) modelRef() modelRef {
 	}
 }
 
-func (s *Server) conversation() (*runtime.Conversation, error) {
-	if s.conv == nil {
-		ctx, err := s.engine.NewContext()
-		if err != nil {
-			return nil, err
-		}
-
-		s.conv = ctx.NewConversation()
+func sessionIDFromRequest(r *http.Request, user string) string {
+	if id := strings.TrimSpace(r.Header.Get(SessionIDHeader)); id != "" {
+		return id
 	}
 
-	return s.conv, nil
+	if u := strings.TrimSpace(user); u != "" {
+		return "user:" + u
+	}
+
+	return ""
+}
+
+func (s *Server) newConversation() (*runtime.Conversation, error) {
+	ctx, err := s.engine.NewContext()
+	if err != nil {
+		return nil, err
+	}
+
+	return ctx.NewConversation(), nil
+}
+
+// conversationForSession returns a per-request Conversation or one keyed by sessionID.
+func (s *Server) conversationForSession(sessionID string) (*runtime.Conversation, error) {
+	if sessionID == "" {
+		return s.newConversation()
+	}
+
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+
+	if conv, ok := s.sessions[sessionID]; ok {
+		return conv, nil
+	}
+
+	conv, err := s.newConversation()
+	if err != nil {
+		return nil, err
+	}
+
+	if s.sessions == nil {
+		s.sessions = make(map[string]*runtime.Conversation)
+	}
+
+	s.sessions[sessionID] = conv
+	return conv, nil
+}
+
+// ensureKV loads model KV-cache to match conv when another session or embeddings used the model.
+func (s *Server) ensureKV(conv *runtime.Conversation) error {
+	if s.kvConv == conv {
+		return nil
+	}
+
+	if err := conv.LoadKVCache(); err != nil {
+		return err
+	}
+
+	s.kvConv = conv
+	return nil
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {

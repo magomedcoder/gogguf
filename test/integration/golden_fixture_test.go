@@ -65,10 +65,11 @@ func loadGolden(t *testing.T) goldenFile {
 
 func TestGoldenFixture(t *testing.T) {
 	gf := loadGolden(t)
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	for _, tc := range gf.Cases {
 		t.Run(tc.Name, func(t *testing.T) {

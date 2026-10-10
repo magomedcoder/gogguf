@@ -10,6 +10,23 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/runtime"
 )
 
+func TestSessionIDFromRequest(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set(SessionIDHeader, "abc")
+	if got := sessionIDFromRequest(req, "u1"); got != "abc" {
+		t.Fatalf("header: got %q", got)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	if got := sessionIDFromRequest(req, "u1"); got != "user:u1" {
+		t.Fatalf("user fallback: got %q", got)
+	}
+
+	if got := sessionIDFromRequest(req, ""); got != "" {
+		t.Fatalf("empty: got %q", got)
+	}
+}
+
 func TestModelsFormat(t *testing.T) {
 	srv := New(&runtime.Engine{}, "/models/test.gguf")
 	rec := httptest.NewRecorder()

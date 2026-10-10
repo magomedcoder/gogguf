@@ -41,8 +41,23 @@ func AddBiasInPlace(a, bias []float32) {
 
 // SwiGLUInPlace computes silu(gate)*up, result in gate
 func SwiGLUInPlace(gate, up []float32) {
-	for i := range gate {
-		gate[i] = SiLU(gate[i])
-	}
+	siluInPlace(gate)
 	vecMulInPlace(gate, up)
+}
+
+func siluInPlace(x []float32) {
+	n := len(x)
+	i := 0
+	for ; i+3 < n; i += 4 {
+		for j := range 4 {
+			idx := i + j
+			v := x[idx]
+			x[idx] = v / (1 + float32(math.Exp(float64(-v))))
+		}
+	}
+
+	for ; i < n; i++ {
+		v := x[i]
+		x[i] = v / (1 + float32(math.Exp(float64(-v))))
+	}
 }

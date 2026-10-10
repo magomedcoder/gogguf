@@ -169,14 +169,27 @@ func (r *Reader) readMetaValue() (any, error) {
 	}
 }
 
-// OpenFile opens GGUF file
+// OpenFile opens GGUF file. The caller does not receive the *os.File;
+// prefer OpenFileOwned when the file must be closed after use.
 func OpenFile(filename string) (*Reader, error) {
+	r, _, err := OpenFileOwned(filename)
+	return r, err
+}
+
+// OpenFileOwned opens GGUF and returns a closer for the underlying *os.File.
+func OpenFileOwned(filename string) (*Reader, io.Closer, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return Open(f)
+	r, err := Open(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+
+	return r, f, nil
 }
 
 // Open opens GGUF file from r. r must be at file start and implement io.ReaderAt for tensor data reads

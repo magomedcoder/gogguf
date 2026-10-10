@@ -50,12 +50,14 @@ type (
 	SamplerConfig     = sampler.Config
 )
 
-// Load loads the model and tokenizer from a GGUF file.
+// Load loads the model with copy-on-read weights (no mmap). Prefer LoadMapped.
+// Call Engine.Close when done.
 func Load(path string, opts LoadOptions) (*Engine, error) {
 	return runtime.Load(path, opts)
 }
 
-// LoadMapped loads the model via mmap (zero-copy weights).
+// LoadMapped loads via mmap (zero-copy on Unix; full-file read on Windows).
+// The Engine owns the mapping/file - call Close when done.
 func LoadMapped(path string, opts LoadOptions) (*Engine, error) {
 	return runtime.LoadMapped(path, opts)
 }

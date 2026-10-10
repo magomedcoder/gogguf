@@ -40,7 +40,7 @@ func skipOOM(t *testing.T, err error) {
 func TestGPUFullOffloadLogitsParity(t *testing.T) {
 	path := testModelPath(t)
 
-	cpuEng, err := gogguf.Load(path, gogguf.LoadOptions{})
+	cpuEng, err := gogguf.LoadMapped(path, gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestGPUFullOffloadLogitsParity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gpuEng, err := gogguf.Load(path, gogguf.LoadOptions{NGL: 999})
+	gpuEng, err := gogguf.LoadMapped(path, gogguf.LoadOptions{NGL: 999})
 	if err != nil {
 		t.Skip("GPU offload unavailable:", err)
 	}
@@ -81,7 +81,7 @@ func TestGPUNBatchPrefillParity(t *testing.T) {
 
 	// run engines sequentially: two full weight copies may not fit in VRAM
 	run := func(nBatch int) (prefill, decode []float32) {
-		eng, err := gogguf.Load(path, gogguf.LoadOptions{NGL: 999, NBatch: nBatch})
+		eng, err := gogguf.LoadMapped(path, gogguf.LoadOptions{NGL: 999, NBatch: nBatch})
 		if err != nil {
 			t.Skip("GPU offload unavailable:", err)
 		}

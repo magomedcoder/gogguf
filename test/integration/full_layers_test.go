@@ -63,10 +63,11 @@ func collectLayerHidden(t *testing.T, engine *gogguf.Engine, ids []int) debug.La
 
 // TestFullLayersFixture compares embed + hidden of each layer against a CPU fixture (tol 1e-4).
 func TestFullLayersFixture(t *testing.T) {
-	engine, err := gogguf.Load(modelPath(t), gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(modelPath(t), gogguf.LoadOptions{})
 	if err != nil {
 		t.Fatalf("failed to load model: %v", err)
 	}
+	defer engine.Close()
 
 	cases := []struct {
 		name    string

@@ -36,26 +36,26 @@ Download from Hugging Face (cached under `~/.cache/huggingface/hub`):
 ./build/gogguf run -hf Qwen/Qwen3-4B-GGUF:Q8_0 --chat -p "Hello" -n 64
 ```
 
-| Flag                | Default | Description                                             |
-|---------------------|---------|---------------------------------------------------------|
-| `-m`                | -       | path to `.gguf` file (mutually exclusive with `-hf`)    |
-| `-hf` / `--hf-repo` | -       | Hugging Face `owner/repo[:quant]` (download + cache)    |
-| `-p`                | -       | prompt text                                             |
-| `-n`                | `128`   | max new tokens                                          |
-| `--temp`            | `0`     | sampling temperature (`0` = greedy)                     |
-| `--top-k`           | `0`     | top-k (`0` = off)                                       |
-| `--top-p`           | `1`     | nucleus sampling (`1` = off)                            |
-| `--min-p`           | `0`     | min-p sampling (`0` = off)                              |
-| `--repeat-penalty`  | `1`     | repetition penalty (`1` = off)                          |
-| `--repeat-last-n`   | `64`    | history window for repeat penalty                       |
-| `--seed`            | `0`     | PRNG seed                                               |
-| `--chat`            | `false` | wrap prompt in ChatML/Qwen template                     |
-| `--thinking`        | `false` | Qwen3 thinking mode (with `--chat`)                     |
-| `-i`                | `false` | interactive REPL (stdin)                                |
-| `-ngl`              | `0`     | matmul N transformer layers on GPU (CUDA build)         |
-| `-b` / `--n-batch`  | `1`     | prefill chunk size (Qwen3 CPU; >1 speeds long prefill)  |
-| `-dev`              | empty   | GPU ordinal(s) for offload: `1` or `0,1` (layer split)  |
-| `-tensor-split`     | empty   | layer proportions across `-dev` devices, e.g. `0.6,0.4` |
+| Flag                | Default | Description                                                                                                                                                                                      |
+|---------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-m`                | -       | path to `.gguf` file (mutually exclusive with `-hf`)                                                                                                                                             |
+| `-hf` / `--hf-repo` | -       | Hugging Face `owner/repo[:quant]` (download + cache)                                                                                                                                             |
+| `-p`                | -       | prompt text                                                                                                                                                                                      |
+| `-n`                | `128`   | max new tokens                                                                                                                                                                                   |
+| `--temp`            | `0`     | sampling temperature (`0` = greedy)                                                                                                                                                              |
+| `--top-k`           | `0`     | top-k (`0` = off)                                                                                                                                                                                |
+| `--top-p`           | `1`     | nucleus sampling (`1` = off)                                                                                                                                                                     |
+| `--min-p`           | `0`     | min-p sampling (`0` = off)                                                                                                                                                                       |
+| `--repeat-penalty`  | `1`     | repetition penalty (`1` = off)                                                                                                                                                                   |
+| `--repeat-last-n`   | `64`    | history window for repeat penalty                                                                                                                                                                |
+| `--seed`            | `0`     | PRNG seed                                                                                                                                                                                        |
+| `--chat`            | `false` | wrap prompt in ChatML/Qwen template                                                                                                                                                              |
+| `--thinking`        | `false` | Qwen3 thinking mode (with `--chat`)                                                                                                                                                              |
+| `-i`                | `false` | interactive REPL (stdin)                                                                                                                                                                         |
+| `-ngl`              | `0`     | matmul N transformer layers on GPU (CUDA build); fused residency env: `GGUF_HIDDEN_RESIDENCY`, `GGUF_QKV_RESIDENCY`, `GGUF_ATTN_FFN_RESIDENCY` (set to `0` to disable, see [build.md](build.md)) |
+| `-b` / `--n-batch`  | `1`     | prefill chunk size; **Qwen3 dense only** for `>1` (MoE forces `1`; other arch serial). Not true batched GPU GEMM yet - loop over tokens/chunks                                                   |
+| `-dev`              | empty   | GPU ordinal(s) for offload: `1` or `0,1` (layer split)                                                                                                                                           |
+| `-tensor-split`     | empty   | layer proportions across `-dev` devices, e.g. `0.6,0.4`                                                                                                                                          |
 
 Without `[:quant]`, prefers `Q4_K_M`, then `Q8_0`, else the first model `.gguf`. Gated/private repos: set `HF_TOKEN`.
 Alternate Hub mirror: `MODEL_ENDPOINT`.
@@ -102,16 +102,16 @@ Or from Hugging Face:
 ./build/gogguf serve -hf Qwen/Qwen3-4B-GGUF:Q8_0 --host 127.0.0.1:8000
 ```
 
-| Flag                | Default          | Description                                          |
-|---------------------|------------------|------------------------------------------------------|
-| `-m`                | -                | path to `.gguf` file (mutually exclusive with `-hf`) |
-| `-hf` / `--hf-repo` | -                | Hugging Face `owner/repo[:quant]`                    |
-| `--host`            | `127.0.0.1:8000` | HTTP listen address                                  |
-| `-ngl`              | `0`              | matmul N transformer layers on GPU (CUDA build)      |
-| `-b` / `--n-batch`  | `1`              | prefill chunk size (Qwen3 CPU)                       |
-| `-dev`              | empty            | GPU ordinal(s) for offload: `1` or `0,1`             |
-| `-tensor-split`     | empty            | layer proportions across `-dev` devices              |
-| `--api-key`         | empty            | Bearer / X-API-Key auth                              |
-| `--rate-limit`      | `0`              | requests per minute per IP (`0` = off)               |
+| Flag                | Default          | Description                                                      |
+|---------------------|------------------|------------------------------------------------------------------|
+| `-m`                | -                | path to `.gguf` file (mutually exclusive with `-hf`)             |
+| `-hf` / `--hf-repo` | -                | Hugging Face `owner/repo[:quant]`                                |
+| `--host`            | `127.0.0.1:8000` | HTTP listen address                                              |
+| `-ngl`              | `0`              | GPU layers (CUDA); residency env vars - see [build.md](build.md) |
+| `-b` / `--n-batch`  | `1`              | prefill chunk (Qwen3 dense; MoE/other arch stay serial)          |
+| `-dev`              | empty            | GPU ordinal(s) for offload: `1` or `0,1`                         |
+| `-tensor-split`     | empty            | layer proportions across `-dev` devices                          |
+| `--api-key`         | empty            | Bearer / X-API-Key auth                                          |
+| `--rate-limit`      | `0`              | requests per minute per IP (`0` = off)                           |
 
 See [HTTP API](api.md) for endpoints.

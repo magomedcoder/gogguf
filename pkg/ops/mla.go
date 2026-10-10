@@ -3,7 +3,14 @@ package ops
 import (
 	"fmt"
 	"math"
+	"sync"
 )
+
+var mlaCtxPool = sync.Pool{
+	New: func() any {
+		return new([]float32)
+	},
+}
 
 // AttentionMLAAbsorbedInto - absorbed MLA (DeepSeek-V2/V3):
 //
@@ -42,7 +49,15 @@ func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHead
 	}
 
 	headScores := scores[:seqLen]
-	ctx := make([]float32, kvLora)
+	ctxPtr := mlaCtxPool.Get().(*[]float32)
+	if cap(*ctxPtr) < kvLora {
+		*ctxPtr = make([]float32, kvLora)
+	} else {
+		*ctxPtr = (*ctxPtr)[:kvLora]
+	}
+
+	ctx := *ctxPtr
+	defer mlaCtxPool.Put(ctxPtr)
 
 	for h := range nHeads {
 		qOff := h * qkDim

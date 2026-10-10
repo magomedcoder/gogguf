@@ -1,6 +1,6 @@
 # Тестирование
 
-Integration и golden-тесты используют модель меньше, чем в примерах, чтобы CI и локальный прогон меньше нагружали RAM/CPU.
+Integration и golden-тесты используют модель **меньше**, чем в примерах CLI/docs (там часто 4B), чтобы CI и локальный прогон меньше нагружали RAM/CPU.
 
 ## Тестовая модель
 
@@ -14,10 +14,10 @@ curl -L -o models/Qwen3-1.7B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-1.7B-GG
 
 Опциональные переменные:
 
-| Переменная    | Назначение                                         |
-|---------------|----------------------------------------------------|
-| `GGUF_MODEL`  | Путь к Qwen3 GGUF для большинства фикстур          |
-| `GGUF_GOLDEN` | Путь к своему `qwen3_golden.json`                  |
+| Переменная    | Назначение                                |
+|---------------|-------------------------------------------|
+| `GGUF_MODEL`  | Путь к Qwen3 GGUF для большинства фикстур |
+| `GGUF_GOLDEN` | Путь к своему `qwen3_golden.json`         |
 
 ## Запуск тестов
 
@@ -31,9 +31,17 @@ go test -tags=integration ./test/integration/...
 
 В CI тот же файл 1.7B скачивается в job `integration` (см. `.github/workflows/ci.yml`).
 
+CUDA unit-тесты (нужен драйвер + `-tags cuda`):
+
+```bash
+CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
+```
+
+Многие integration GPU-тесты делают skip без модели/GPU.
+
 ## Фикстуры других архитектур
 
-Часть тестов ищет опциональные модели и делает skip, если файла нет:
+Часть тестов ищет опциональные модели и делает **skip**, если файла нет:
 
 ```bash
 # Llama 3.2 1B Instruct
@@ -44,6 +52,8 @@ curl -L -o models/Mistral-7B-Instruct-v0.2-Q4_K_M.gguf https://huggingface.co/Th
 ```
 
 ## Перегенерация Qwen3-фикстур
+
+Используйте **ту же** 1.7B-модель, что в CI - иначе logits/RMS не совпадут с JSON.
 
 ```bash
 go run ./cmd/tools dumplogits -m models/Qwen3-1.7B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_logits
@@ -60,10 +70,12 @@ go run ./cmd/tools greedy -m models/Qwen3-1.7B-Q8_0.gguf --chat "Count from 1 to
 
 Дальше обновите JSON в `test/fixtures/`:
 
-- `qwen3_golden.json` - из dumplogits (`top`/`greedy`) + greedy (`tokens`), оставьте `encode_hello: [9707]`
+- `qwen3_golden.json` - из dumplogits (`top`/`greedy`) + greedy (`tokens`); оставьте `encode_hello: [9707]`
 - `qwen3_layers.json` - из dumplayers (`embed_rms` / `layer_rms` / `greedy`)
 - `qwen3_layer_logits.json` - оба `cases` из двух запусков `layerlogits` (`"model": "Qwen3-1.7B-Q8_0"`)
 
 ```bash
 go test -tags=integration -count=1 -run 'TestGoldenFixture|TestLayersFixture|TestLayerLogits' ./test/integration/
 ```
+
+Утилиты dump/compare подробнее: [tools.md](tools.md).

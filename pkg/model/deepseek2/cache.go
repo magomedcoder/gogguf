@@ -1,5 +1,7 @@
 package deepseek2
 
+import "fmt"
+
 // MLACache stores K and V of different widths (absorbed MLA: K=lora+rope, V=lora)
 type MLACache struct {
 	layers []mlaLayer
@@ -36,14 +38,21 @@ func (c *MLACache) Len() int {
 	return c.length
 }
 
-func (c *MLACache) Append(layer int, k, v []float32) {
+func (c *MLACache) Append(layer int, k, v []float32) error {
+	if layer < 0 || layer >= len(c.layers) {
+		return fmt.Errorf("deepseek2: invalid MLA cache layer %d", layer)
+	}
+
 	l := &c.layers[layer]
 	if l.n >= c.maxSeq {
-		return
+		return fmt.Errorf("deepseek2: MLA KV overflow layer=%d maxSeq=%d", layer, c.maxSeq)
 	}
+
 	copy(l.k[l.n*c.kDim:(l.n+1)*c.kDim], k)
 	copy(l.v[l.n*c.vDim:(l.n+1)*c.vDim], v)
 	l.n++
+
+	return nil
 }
 
 func (c *MLACache) Advance() {

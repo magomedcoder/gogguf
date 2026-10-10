@@ -29,7 +29,7 @@ func TestRMSNormIntoMatchesRMSNorm(t *testing.T) {
 func TestSwiGLUInPlace(t *testing.T) {
 	gate := []float32{0, 1, -1}
 	up := []float32{2, 3, 4}
-	want := SwiGLU(append([]float32(nil), gate...), up)
+	want := testSwiGLU(append([]float32(nil), gate...), up)
 
 	SwiGLUInPlace(gate, up)
 	for i := range gate {

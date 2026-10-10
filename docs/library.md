@@ -8,6 +8,8 @@ import "github.com/magomedcoder/gogguf"
 engine, err := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 0, // matmul N layers on GPU; <= block_count, CUDA build required
 })
+defer engine.Close() // free VRAM / backend when NGL > 0
+
 ctx, err := engine.NewContext()
 
 prompt, err := gogguf.FormatChatUser("Hello", gogguf.ChatOptions{
@@ -18,6 +20,19 @@ text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 	Sampler:   gogguf.Greedy,
 })
 ```
+
+### `LoadOptions` (important fields)
+
+| Field                      | Meaning                                                                    |
+|----------------------------|----------------------------------------------------------------------------|
+| `NGL`                      | layers on GPU (`-ngl`)                                                     |
+| `NBatch`                   | prefill chunk (`-b`); `>1` effective for Qwen3 dense only; MoE forced to 1 |
+| `GPUMaxSeq`                | max GPU KV length (`0` = auto, up to 4096)                                 |
+| `GPUDevice` / `GPUDevices` | ordinal(s) after `CUDA_VISIBLE_DEVICES`                                    |
+| `TensorSplit`              | layer proportions for multi-GPU                                            |
+| `GPU`                      | ready backend; otherwise CUDA opens when `NGL > 0`                         |
+
+On macOS, `NGL > 0` without Metal kernels returns an error (see [build.md](build.md)).
 
 ## Step-by-step decode
 
@@ -53,17 +68,35 @@ text, err := ctx.Generate(prompt, gogguf.GenerateParams{
 
 ## Load via mmap (zero-copy weights)
 
+Preferred for large files (same path as CLI `run`/`serve`):
+
 ```go
 engine, err := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
-	NGL: 0,
+	NGL:    0,
+	NBatch: 1,
 })
+defer engine.Close()
 ```
+
+On Windows, mmap currently falls back to a normal file read (real `CreateFileMapping` is tracked under platforms).
 
 ## GPU offload from code
 
 ```go
-engine, err := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
+engine, err := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{
 	NGL: 28, // requires build with -tags cuda
+})
+defer engine.Close()
+```
+
+Or with an explicit device split:
+
+```go
+devs, split, err := gogguf.ParseGPUDevices("0,1", "0.6,0.4")
+engine, err := gogguf.LoadMapped(path, gogguf.LoadOptions{
+	NGL:         28,
+	GPUDevices:  devs,
+	TensorSplit: split,
 })
 ```
 
@@ -85,9 +118,12 @@ import (
 	"github.com/magomedcoder/gogguf/server"
 )
 
-engine, _ := gogguf.Load("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{})
+engine, _ := gogguf.LoadMapped("./models/Qwen3-4B-Q8_0.gguf", gogguf.LoadOptions{})
+defer engine.Close()
 
 srv := server.New(engine, "./models/Qwen3-4B-Q8_0.gguf")
 
 srv.ListenAndServe("127.0.0.1:8000")
 ```
+
+Sessions and endpoints match CLI serve - see [api.md](api.md).

@@ -6,7 +6,8 @@ import (
 	"os"
 )
 
-// OpenFileMapped opens GGUF and loads content into memory (fallback without mmap)
+// OpenFileMapped loads the entire GGUF into RAM (no OS mmap on this platform).
+// RSS ≈ file size; not zero-copy. Prefer Unix builds for true mmap.
 func OpenFileMapped(path string) (*MappedReader, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

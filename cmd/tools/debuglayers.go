@@ -43,10 +43,11 @@ func runDebugLayers(args []string) error {
 		return err
 	}
 
-	engine, err := gogguf.Load(*modelPath, gogguf.LoadOptions{})
+	engine, err := gogguf.LoadMapped(*modelPath, gogguf.LoadOptions{})
 	if err != nil {
 		return err
 	}
+	defer engine.Close()
 
 	text := *prompt
 	if *chat {

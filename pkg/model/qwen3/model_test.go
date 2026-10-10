@@ -13,8 +13,8 @@ func TestKVCacheAdvance(t *testing.T) {
 
 	k := []float32{1, 2, 3, 4}
 	v := []float32{5, 6, 7, 8}
-	c.Append(0, k, v)
-	c.Append(1, k, v)
+	_ = c.Append(0, k, v)
+	_ = c.Append(1, k, v)
 	if c.Len() != 0 {
 		t.Fatalf("Len before advance = %d", c.Len())
 	}

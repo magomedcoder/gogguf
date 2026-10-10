@@ -10,6 +10,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/model/testutil"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
@@ -58,12 +59,8 @@ func loadModel(t *testing.T, ngl int) *Model {
 	return m
 }
 
-// skipOOM skips test on VRAM OOM (typical GTX 1050 Ti 4GB on full Q8_0)
 func skipOOM(t *testing.T, err error) {
-	t.Helper()
-	if gpu.IsOutOfMemory(err) {
-		t.Skip("insufficient VRAM:", err)
-	}
+	testutil.SkipOOM(t, err)
 }
 
 // §5: on full Q8_0 offload residency enables and hidden lives on device.

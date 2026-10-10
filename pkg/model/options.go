@@ -1,6 +1,11 @@
 package model
 
-import "github.com/magomedcoder/gogguf/pkg/gpu"
+import (
+	"fmt"
+	"runtime"
+
+	"github.com/magomedcoder/gogguf/pkg/gpu"
+)
 
 // Options sets model load parameters
 type Options struct {
@@ -39,6 +44,10 @@ func (o *Options) Normalize() error {
 
 	if o.GPU != nil {
 		return nil
+	}
+
+	if runtime.GOOS == "darwin" {
+		return fmt.Errorf("model: -ngl on macOS requires Metal kernels (not implemented); build/run without -ngl for CPU, see docs")
 	}
 
 	g, err := gpu.OpenCUDADevicesSplit(o.Devices(), o.TensorSplit)

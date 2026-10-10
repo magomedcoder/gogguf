@@ -17,7 +17,6 @@ type scratch struct {
 	moeAcc []float32
 	tmp    []float32
 	logits []float32
-	out    []float32
 }
 
 func newScratch(cfg Config, nBatch int) scratch {
@@ -31,7 +30,7 @@ func newScratch(cfg Config, nBatch int) scratch {
 	nExp := max(cfg.ExpertCount, 1)
 	embd := cfg.EmbeddingDim
 
-	need := nBatch*(4*embd+2*qDim+2*kvDim+2*ffn) + cfg.ContextLength + nExp + embd + 2*cfg.VocabSize
+	need := nBatch*(4*embd+2*qDim+2*kvDim+2*ffn) + cfg.ContextLength + nExp + embd + cfg.VocabSize
 	a := mempool.NewArena(need)
 
 	return scratch{
@@ -48,6 +47,5 @@ func newScratch(cfg Config, nBatch int) scratch {
 		moeAcc: a.Alloc(embd),
 		tmp:    a.Alloc(embd),
 		logits: a.Alloc(cfg.VocabSize),
-		out:    a.Alloc(cfg.VocabSize),
 	}
 }

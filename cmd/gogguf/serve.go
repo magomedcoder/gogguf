@@ -18,8 +18,8 @@ func runServe(args []string) error {
 	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], e.g. Qwen/Qwen3-4B-GGUF:Q8_0")
 	fs.StringVar(&hfRepo, "hf-repo", "", "alias for -hf")
 	host := fs.String("host", "127.0.0.1:8000", "HTTP server address")
-	ngl := fs.Int("ngl", 0, "number of transformer layers on GPU (CUDA, build: -tags cuda)")
-	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 speeds up prefill (Qwen3, works with -ngl)")
+	ngl := fs.Int("ngl", 0, "GPU layers (CUDA, -tags cuda); on macOS unsupported until Metal kernels; residency toggles: GGUF_HIDDEN/QKV/ATTN_FFN_RESIDENCY=0 (see docs/build.md)")
+	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 Qwen3 dense (MoE/other arch serial)")
 	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
 	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
@@ -40,7 +40,7 @@ func runServe(args []string) error {
 		return fmt.Errorf("%w\nusage: gogguf serve -m file.gguf|-hf owner/repo[:quant] [--host 127.0.0.1:8000]", err)
 	}
 
-	engine, err := gogguf.Load(path, gogguf.LoadOptions{
+	engine, err := gogguf.LoadMapped(path, gogguf.LoadOptions{
 		NGL:         *ngl,
 		NBatch:      *nBatch,
 		GPUDevices:  devices,
@@ -49,6 +49,7 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer engine.Close()
 
 	srv := server.New(engine, path, server.Options{
 		APIKey:             *apiKey,

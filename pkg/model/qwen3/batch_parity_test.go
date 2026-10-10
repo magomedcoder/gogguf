@@ -29,7 +29,7 @@ func testModelPath(t *testing.T) string {
 func TestNBatchPrefillLogitsParity(t *testing.T) {
 	path := testModelPath(t)
 
-	eng1, err := gogguf.Load(path, gogguf.LoadOptions{NBatch: 1})
+	eng1, err := gogguf.LoadMapped(path, gogguf.LoadOptions{NBatch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestNBatchPrefillLogitsParity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	eng32, err := gogguf.Load(path, gogguf.LoadOptions{NBatch: 32})
+	eng32, err := gogguf.LoadMapped(path, gogguf.LoadOptions{NBatch: 32})
 	if err != nil {
 		t.Fatal(err)
 	}

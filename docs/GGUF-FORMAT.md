@@ -14,6 +14,8 @@ New fields can be added without changing the binary structure of the file.
 
 Supported structure versions: **v2**, **v3**.
 
+This document describes the **file format**, not the GoGGUF runtime. How the engine opens files (`OpenFile` / `LoadMapped`), Windows mmap fallback, etc. - see [library.md](library.md) and [build.md](build.md).
+
 ---
 
 ## 1. File Layout
