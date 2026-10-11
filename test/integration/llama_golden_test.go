@@ -15,12 +15,6 @@ import (
 func llamaModelPath(t *testing.T) string {
 	t.Helper()
 
-	if p := os.Getenv("LLAMA_GGUF_MODEL"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-
 	for _, p := range []string{
 		"models/Llama-3.2-1B-Instruct-Q8_0.gguf",
 		"../models/Llama-3.2-1B-Instruct-Q8_0.gguf",
@@ -31,7 +25,7 @@ func llamaModelPath(t *testing.T) string {
 		}
 	}
 
-	t.Skip("Llama-3.2-1B-Instruct-Q8_0.gguf not found")
+	t.Skip("Llama-3.2-1B-Instruct-Q8_0.gguf not found under models/")
 
 	return ""
 }

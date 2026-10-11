@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
 	"github.com/magomedcoder/gogguf/pkg/model/testutil"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
@@ -40,9 +40,9 @@ func loadModel(t *testing.T, ngl int) *Model {
 		t.Fatal(err)
 	}
 
-	var g gpu.Backend
+	var g device.Backend
 	if ngl > 0 {
-		if g, err = gpu.OpenCUDA(); err != nil {
+		if g, err = device.OpenCUDA(); err != nil {
 			t.Skip("CUDA unavailable:", err)
 		}
 	}
@@ -132,7 +132,7 @@ func TestLlamaFullOffloadLogitsParity(t *testing.T) {
 	requireResid := dev.residency
 	if err != nil {
 		dev.Close()
-		if !gpu.IsOutOfMemory(err) {
+		if !device.IsOutOfMemory(err) {
 			t.Fatal(err)
 		}
 

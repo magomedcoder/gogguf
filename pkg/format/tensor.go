@@ -1,6 +1,10 @@
 package format
 
-import "io"
+import (
+	"io"
+
+	"github.com/magomedcoder/gogguf/pkg/dtype"
+)
 
 // TensorInfo represents tensor in GGUF file
 type TensorInfo struct {
@@ -8,7 +12,7 @@ type TensorInfo struct {
 
 	Name       string
 	Dimensions []uint64
-	Type       GGML
+	Type       dtype.DType
 	Offset     uint64
 }
 
@@ -44,7 +48,7 @@ func (t *TensorInfo) Reader() (io.Reader, error) {
 
 // Size returns tensor data size in bytes
 func (t *TensorInfo) Size() int64 {
-	return t.Type.dataSize(t.Dimensions)
+	return t.Type.DataSize(t.Dimensions)
 }
 
 // ValuesCount returns number of tensor elements

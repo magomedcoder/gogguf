@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 	"io"
 	"os"
 	"strings"
@@ -298,7 +299,7 @@ func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 		if err != nil {
 			return nil, err
 		}
-		r.Tensors[i].Type = GGML(typ)
+		r.Tensors[i].Type = dtype.DType(typ)
 
 		r.Tensors[i].Offset, err = read[uint64](readSeeker, r.ByteOrder)
 		if err != nil {

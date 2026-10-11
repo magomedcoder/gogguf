@@ -2,14 +2,12 @@
 
 Start the server with `gogguf serve` (see [CLI](cli.md)).
 
-OpenAI-compatible surface only: `/v1/models`, `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`.
-
 ## Auth and rate limit
 
-| Flag           | Default | Description                                              |
-|----------------|---------|----------------------------------------------------------|
-| `--api-key`    | empty   | require `Authorization: Bearer <key>` or `X-API-Key`     |
-| `--rate-limit` | `0`     | max requests per minute per IP (`0` = off)               |
+| Flag           | Default | Description                                          |
+|----------------|---------|------------------------------------------------------|
+| `--api-key`    | empty   | require `Authorization: Bearer <key>` or `X-API-Key` |
+| `--rate-limit` | `0`     | max requests per minute per IP (`0` = off)           |
 
 ```bash
 ./build/gogguf serve -m model.gguf --api-key secret --rate-limit 60

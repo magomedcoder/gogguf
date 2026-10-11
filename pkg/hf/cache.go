@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 // CacheDir returns the HF Hub cache directory.
-// Order: LLAMA_CACHE -> HF_HUB_CACHE -> HUGGINGFACE_HUB_CACHE -> HF_HOME/hub -> XDG_CACHE_HOME/huggingface/hub -> ~/.cache/huggingface/hub.
+// Order: LLAMA_CACHE -> HF_HUB_CACHE -> HUGGINGFACE_HUB_CACHE -> HF_HOME/hub -> XDG_CACHE_HOME/huggingface/hub -> (Windows) %LOCALAPPDATA%\huggingface\hub -> ~/.cache/huggingface/hub.
 func CacheDir() (string, error) {
 	type entry struct {
 		env  string
@@ -28,6 +29,12 @@ func CacheDir() (string, error) {
 				return v, nil
 			}
 			return filepath.Join(v, e.tail), nil
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		if la := os.Getenv("LOCALAPPDATA"); la != "" {
+			return filepath.Join(la, "huggingface", "hub"), nil
 		}
 	}
 
@@ -64,7 +71,7 @@ func writeAtomic(path, content string) error {
 		return err
 	}
 
-	if err := os.Rename(tmp, path); err != nil {
+	if err := replaceFile(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

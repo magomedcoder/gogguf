@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/magomedcoder/gogguf/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/runtime/sampler"
 )
 
 // GenerationSession is step-by-step generation after prefill.

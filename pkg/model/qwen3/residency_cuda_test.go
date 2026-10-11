@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
 	"github.com/magomedcoder/gogguf/pkg/model/testutil"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
@@ -39,7 +39,7 @@ func loadResidentModel(t *testing.T, gpuMaxSeq, nBatch int) *Model {
 		t.Fatal(err)
 	}
 
-	g, err := gpu.OpenCUDA()
+	g, err := device.OpenCUDA()
 	if err != nil {
 		t.Skip("CUDA unavailable:", err)
 	}

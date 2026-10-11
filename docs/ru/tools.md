@@ -1,21 +1,11 @@
 # Утилиты
 
-Сборка бинарника:
-
-```bash
-go build -o build/tools ./cmd/tools
-# с CUDA:
-CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
-```
-
-Либо `go run ./cmd/tools <subcommand> ...`.
-
 ## `debugtok`
 
 Проверяет encode промпта и logits после prefill: top-5 токенов и greedy-следующий.
 
 ```bash
-go run ./cmd/tools debugtok ./models/Qwen3-4B-Q8_0.gguf "Привет"
+go run ./cmd/tools debugtok ./models/Qwen3-4B-Q8_0.gguf "Hello"
 ```
 
 ## `vocab`
@@ -34,18 +24,18 @@ go run ./cmd/tools vocab ./models/Qwen3-4B-Q8_0.gguf
 # сборка GPU / ОС: platforms.md
 CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 
-./build/tools bench -m ./models/Qwen3-4B-Q8_0.gguf -p "Привет" -n 128 --chat
-./build/tools bench -m model.gguf -p "Привет" -n 64 -ngl 28 --runs 3 --json
-./build/tools bench -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -n 32 --compare -c 2048 --runs 2 --warmup 1
+./build/tools bench -m ./models/Qwen3-4B-Q8_0.gguf -p "Hello" -n 128 --chat
+./build/tools bench -m model.gguf -p "Hello" -n 64 -ngl 28 --runs 3 --json
+./build/tools bench -m ./models/Qwen3-4B-Q8_0.gguf --chat -p "Hello" -n 32 --compare -c 2048 --runs 2 --warmup 1
 ```
 
 | Флаг                              | По умолчанию | Описание                                                                    |
 |-----------------------------------|--------------|-----------------------------------------------------------------------------|
 | `-m`                              | -            | путь к `.gguf`                                                              |
-| `-p`                              | `Hello`      | промпт (в коде default - `Hello`)                                           |
+| `-p`                              | `Hello`      | промпт                                                                      |
 | `-n`                              | `128`        | число decode-токенов                                                        |
 | `-ngl` / `-dev` / `-tensor-split` | -            | GPU - см. [platforms.md](platforms.md); при `--compare` `-ngl 0` = все слои |
-| `-b` / `--n-batch`                | `1`          | chunk prefill (как у `run`; смысл - см. [cli.md](cli.md))                   |
+| `-b` / `--n-batch`                | `1`          | chunk prefill (те же лимиты, что у `run`; см. [cli.md](cli.md))             |
 | `-c`                              | `0`          | макс. длина GPU KV (`0` = авто, до 4096)                                    |
 | `--chat`                          | `false`      | chat template                                                               |
 | `--runs`                          | `1`          | прогонов для усреднения                                                     |
@@ -53,14 +43,14 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 | `--json`                          | `false`      | вывод в JSON                                                                |
 | `--compare`                       | `false`      | CPU (`ngl=0`) vs GPU (`-ngl`)                                               |
 
-`--compare` печатает таблицу prefill/decode tok/s. Устройство / VRAM: [platforms.md](platforms.md).
+`--compare` печатает prefill/decode tok/s. Устройство / VRAM: [platforms.md](platforms.md).
 
 ## `greedy`
 
 Greedy decode N токенов в JSON (token IDs) для сверки с golden.
 
 ```bash
-go run ./cmd/tools greedy -m models/Qwen3-4B-Q8_0.gguf --chat "Привет" -n 50
+go run ./cmd/tools greedy -m models/Qwen3-4B-Q8_0.gguf --chat "Hello" -n 50
 ```
 
 ## `debuglayers`
@@ -68,7 +58,7 @@ go run ./cmd/tools greedy -m models/Qwen3-4B-Q8_0.gguf --chat "Привет" -n 
 Послойный RMS после embed/каждого слоя + итоговые top logits.
 
 ```bash
-go run ./cmd/tools debuglayers -m ./models/Qwen3-4B-Q8_0.gguf -p "Привет"
+go run ./cmd/tools debuglayers -m ./models/Qwen3-4B-Q8_0.gguf -p "Hello"
 ```
 
 ## `layerlogits`
@@ -76,7 +66,7 @@ go run ./cmd/tools debuglayers -m ./models/Qwen3-4B-Q8_0.gguf -p "Привет"
 Greedy next и top-k logits по слоям (генератор JSON fixture).
 
 ```bash
-go run ./cmd/tools layerlogits -m models/Qwen3-4B-Q8_0.gguf --chat -p "Привет" -top 5
+go run ./cmd/tools layerlogits -m models/Qwen3-4B-Q8_0.gguf --chat -p "Hello" -top 5
 ```
 
 ## `dumplogits`
@@ -85,8 +75,6 @@ go run ./cmd/tools layerlogits -m models/Qwen3-4B-Q8_0.gguf --chat -p "Прив�
 
 ```bash
 go run ./cmd/tools dumplogits -m models/Qwen3-4B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_logits
-
-go run ./cmd/tools dumplogits -m models/Qwen3-4B-Q8_0.gguf --chat -p Hello -o test/fixtures/qwen3_chat_hello_logits
 ```
 
 ## `comparelogits`
@@ -118,5 +106,3 @@ go run ./cmd/tools comparelayers -a test/fixtures/qwen3_raw_hello_layers -b test
 
 CGO_ENABLED=1 go run -tags cuda ./cmd/tools comparelayers -m models/Qwen3-4B-Q8_0.gguf -p Hello -tol 0.01
 ```
-
-Для golden в CI используйте модель **1.7B**, не 4B из примеров - см. [testing.md](testing.md).

@@ -1,6 +1,6 @@
 # CLI
 
-## `gguf info`
+## `gogguf info`
 
 Short model summary: GGUF version, architecture, name, tensor count, weight size, context length.
 
@@ -12,7 +12,7 @@ Short model summary: GGUF version, architecture, name, tensor count, weight size
 |------|----------------------|
 | `-m` | path to `.gguf` file |
 
-## `gguf inspect`
+## `gogguf inspect`
 
 Full dump of metadata and tensor list (name, type, dimensions, size in bytes).
 
@@ -22,7 +22,7 @@ Full dump of metadata and tensor list (name, type, dimensions, size in bytes).
 
 Positional argument - file path, no flags.
 
-## `gguf run`
+## `gogguf run`
 
 Text generation: prompt prefill -> autoregressive decode -> stdout.
 
@@ -57,8 +57,7 @@ Download from Hugging Face (cached under `~/.cache/huggingface/hub`):
 | `-dev`              | empty   | GPU device(s) - see [platforms.md](platforms.md)                  |
 | `-tensor-split`     | empty   | multi-GPU layer split - see [platforms.md](platforms.md)          |
 
-Without `[:quant]`, prefers `Q4_K_M`, then `Q8_0`, else the first model `.gguf`. Gated/private repos: set `HF_TOKEN`.
-Alternate Hub mirror: `MODEL_ENDPOINT`.
+Without `[:quant]`, prefers `Q4_K_M`, then `Q8_0`, else the first model `.gguf`.
 
 For **Qwen3 Instruct** use `--chat`, otherwise the model will respond incorrectly.
 
@@ -82,7 +81,7 @@ Interactive mode (with `--chat`, history is kept across turns; `/clear` resets i
 ./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -i
 ```
 
-## `gguf serve`
+## `gogguf serve`
 
 HTTP server with an OpenAI-compatible API (see [api.md](api.md)).
 
@@ -109,3 +108,22 @@ Or from Hugging Face:
 | `--rate-limit`                    | `0`              | requests per minute per IP (`0` = off)                  |
 
 See [HTTP API](api.md) for endpoints.
+
+## Environment (Hugging Face)
+
+Used by `-hf` / `pkg/hf` only. Inference and residency are **not** controlled by env - use `LoadOptions` ([library.md](library.md)).
+
+| Variable                | Description                                               |
+|-------------------------|-----------------------------------------------------------|
+| `HF_TOKEN`              | Auth for gated/private Hub repos.                         |
+| `MODEL_ENDPOINT`        | Hub base URL override (default `https://huggingface.co`). |
+| `LLAMA_CACHE`           | Model cache directory (highest priority).                 |
+| `HF_HUB_CACHE`          | Hub cache directory.                                      |
+| `HUGGINGFACE_HUB_CACHE` | Alias of Hub cache.                                       |
+| `HF_HOME`               | Base dir; cache is `$HF_HOME/hub`.                        |
+| `XDG_CACHE_HOME`        | Cache is `$XDG_CACHE_HOME/huggingface/hub`.               |
+| `LOCALAPPDATA`          | Windows fallback: `%LOCALAPPDATA%\huggingface\hub`.       |
+
+Cache resolution order: `LLAMA_CACHE` -> `HF_HUB_CACHE` -> `HUGGINGFACE_HUB_CACHE` -> `HF_HOME/hub` -> `XDG_CACHE_HOME/huggingface/hub` -> (Windows) `LOCALAPPDATA` -> `~/.cache/huggingface/hub`.
+
+`CUDA_VISIBLE_DEVICES` is the standard CUDA driver filter (not GoGGUF-specific); it affects which GPUs the process sees when `-ngl > 0` - see [platforms.md](platforms.md).

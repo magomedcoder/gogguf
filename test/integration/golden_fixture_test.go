@@ -40,9 +40,6 @@ func loadGolden(t *testing.T) goldenFile {
 		"../fixtures/qwen3_golden.json",
 		"test/fixtures/qwen3_golden.json",
 	}
-	if p := os.Getenv("GGUF_GOLDEN"); p != "" {
-		paths = []string{p}
-	}
 
 	var data []byte
 	var err error

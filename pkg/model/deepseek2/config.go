@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 // Config - DeepSeek-V2/V3 (MLA + MoE) from deepseek2.* metadata
@@ -269,8 +269,8 @@ func (c Config) qkDim() int {
 	return c.KVLoraRank + c.RopeDim
 }
 
-func (c Config) ropeScale() ops.RoPEScale {
-	return ops.RoPEScale{
+func (c Config) ropeScale() compute.RoPEScale {
+	return compute.RoPEScale{
 		FreqScale:  c.RopeFreqScale,
 		AttnFactor: c.RopeAttnFactor,
 	}

@@ -3,8 +3,6 @@
 package integration
 
 import (
-	"os"
-	"strconv"
 	"testing"
 
 	"github.com/magomedcoder/gogguf"
@@ -12,19 +10,12 @@ import (
 )
 
 // TestFullLogitsCPUVsGPU compares full-vocab prefill CPU vs CUDA.
-// GPU softmax approx (ex2) -> tolerance above raw 1e-4; override: GGUF_GPU_LOGITS_TOL
+// GPU softmax approx (ex2) -> tolerance above raw 1e-4.
+const gpuLogitsTol = 1e-2
+
 func TestFullLogitsCPUVsGPU(t *testing.T) {
 	model := modelPath(t)
-
-	tol := 1e-2
-	if v := os.Getenv("GGUF_GPU_LOGITS_TOL"); v != "" {
-		f, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		tol = f
-	}
+	tol := gpuLogitsTol
 
 	cpu, err := forwardPrefill(t, model, "Hello", false, 0)
 	if err != nil {

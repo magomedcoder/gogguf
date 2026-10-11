@@ -1,6 +1,6 @@
 # Тестирование
 
-Integration и golden-тесты используют модель **меньше**, чем в примерах CLI/docs (там часто 4B), чтобы CI и локальный прогон меньше нагружали RAM/CPU.
+Integration и golden-тесты используют модель меньше, чем в примерах, чтобы CI и локальный прогон меньше нагружали RAM/CPU.
 
 ## Тестовая модель
 
@@ -12,12 +12,13 @@ mkdir -p models
 curl -L -o models/Qwen3-1.7B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q8_0.gguf
 ```
 
-Опциональные переменные:
+Модели кладите в `models/` с фиксированными именами (без тестовых env):
 
-| Переменная    | Назначение                                |
-|---------------|-------------------------------------------|
-| `GGUF_MODEL`  | Путь к Qwen3 GGUF для большинства фикстур |
-| `GGUF_GOLDEN` | Путь к своему `qwen3_golden.json`         |
+- `models/Qwen3-1.7B-Q8_0.gguf`
+- `models/Llama-3.2-1B-Instruct-Q8_0.gguf` (опционально)
+- `models/Mistral-7B-Instruct-v0.2-Q4_K_M.gguf` (опционально)
+
+Фикстуры: `test/fixtures/`.
 
 ## Запуск тестов
 
@@ -29,17 +30,26 @@ go test ./...
 go test -tags=integration ./test/integration/...
 ```
 
-В CI тот же файл 1.7B скачивается в job `integration` (см. `.github/workflows/ci.yml`).
+CI (`.github/workflows/ci.yml`):
 
-CUDA-тесты - только на Linux + NVIDIA (см. [platforms.md](platforms.md)):
+| Job                   | Что гоняет                                                                  | Модели / заметки                                        |
+|-----------------------|-----------------------------------------------------------------------------|---------------------------------------------------------|
+| `test`                | `go vet` + `go test ./...` + сборка CLI                                     | без GGUF; matrix: Linux / Windows / macOS               |
+| `cross-build`         | CPU cross-compile CLI                                                       | linux/darwin/windows * amd64/arm64                      |
+| `integration`         | `./pkg/model/qwen3/` + `-tags=integration ./test/integration/...`           | Qwen3-1.7B + Llama-3.2-1B; `.bin` фикстуры в репо       |
+| `integration-mistral` | `-tags=integration -run TestMistral`                                        | Mistral-7B (отдельный job: больший download / RAM)      |
+| `cuda`                | `-tags=cuda` пакеты device/model + CPU↔GPU integration                      | Qwen3-1.7B; **skip** без NVIDIA GPU                     |
+
+CUDA локально (Linux + NVIDIA) - см. [platforms.md](platforms.md):
 
 ```bash
-CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
+CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
+CGO_ENABLED=1 go test -tags='cuda,integration' ./test/integration/
 ```
 
 ## Фикстуры других архитектур
 
-Часть тестов ищет опциональные модели и делает **skip**, если файла нет:
+Часть тестов ищет опциональные модели и делает skip, если файла нет:
 
 ```bash
 # Llama 3.2 1B Instruct
@@ -50,8 +60,6 @@ curl -L -o models/Mistral-7B-Instruct-v0.2-Q4_K_M.gguf https://huggingface.co/Th
 ```
 
 ## Перегенерация Qwen3-фикстур
-
-Используйте **ту же** 1.7B-модель, что в CI - иначе logits/RMS не совпадут с JSON.
 
 ```bash
 go run ./cmd/tools dumplogits -m models/Qwen3-1.7B-Q8_0.gguf -p Hello -o test/fixtures/qwen3_raw_hello_logits
@@ -75,5 +83,3 @@ go run ./cmd/tools greedy -m models/Qwen3-1.7B-Q8_0.gguf --chat "Count from 1 to
 ```bash
 go test -tags=integration -count=1 -run 'TestGoldenFixture|TestLayersFixture|TestLayerLogits' ./test/integration/
 ```
-
-Утилиты dump/compare подробнее: [tools.md](tools.md).

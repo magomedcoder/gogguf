@@ -4,9 +4,9 @@ import (
 	"math"
 	"testing"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/model/gemma"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 func TestParseConfigGemma2B(t *testing.T) {
@@ -90,13 +90,13 @@ func TestParseConfigGemma2(t *testing.T) {
 func TestGeGLUAndSoftcap(t *testing.T) {
 	gate := []float32{1, -1}
 	up := []float32{2, 3}
-	ops.GeGLUInPlace(gate, up)
+	compute.GeGLUInPlace(gate, up)
 	if gate[0] <= 0 || gate[1] >= 0 {
 		t.Fatalf("GeGLU unexpected: %v", gate)
 	}
 
 	x := []float32{100, -100}
-	ops.SoftcapInPlace(x, 30)
+	compute.SoftcapInPlace(x, 30)
 	if math.Abs(float64(x[0]-30)) > 0.1 || math.Abs(float64(x[1]+30)) > 0.1 {
 		t.Fatalf("Softcap: %v", x)
 	}

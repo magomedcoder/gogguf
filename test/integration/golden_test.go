@@ -14,13 +14,6 @@ import (
 func modelPath(t *testing.T) string {
 	t.Helper()
 
-	if p := os.Getenv("GGUF_MODEL"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			abs, _ := filepath.Abs(p)
-			return abs
-		}
-	}
-
 	for _, p := range []string{
 		"models/Qwen3-1.7B-Q8_0.gguf",
 		"../models/Qwen3-1.7B-Q8_0.gguf",
@@ -32,7 +25,7 @@ func modelPath(t *testing.T) string {
 		}
 	}
 
-	t.Skip("model not found")
+	t.Skip("model not found: put Qwen3-1.7B-Q8_0.gguf under models/")
 
 	return ""
 }

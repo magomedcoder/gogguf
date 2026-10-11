@@ -4,18 +4,24 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
 )
 
-// Options sets model load parameters
+// Options sets model load parameters (library-oriented; CLI maps flags into these fields).
 type Options struct {
-	NGL         int         // number of transformer layers to offload to GPU (-ngl)
-	GPUMaxSeq   int         // max KV length on GPU (0 = min(context, 4096))
-	NBatch      int         // chunk prefill size (0/1 = per token; Qwen3 CPU)
-	GPUDevice   int         // CUDA device ordinal (-dev N); used when GPUDevices is empty
-	GPUDevices  []int       // devices for layer split (-dev 0,1); nil = single GPUDevice
-	TensorSplit []float64   // layer proportions per device (-tensor-split); nil = even split
-	GPU         gpu.Backend // backend; if nil and NGL > 0, CUDA will be opened
+	NGL         int            // transformer layers on GPU (0 = CPU)
+	GPUMaxSeq   int            // max KV length on GPU (0 = min(context, 4096))
+	NBatch      int            // prefill chunk size; effective for Qwen3 dense only (others ignore)
+	GPUDevice   int            // CUDA device ordinal when GPUDevices is empty
+	GPUDevices  []int          // devices for layer split; nil = single GPUDevice
+	TensorSplit []float64      // layer proportions per device; nil = even split
+	GPU         device.Backend // if nil and NGL > 0, CUDA is opened
+
+	// Residency toggles fused GPU paths. nil = enabled.
+	HiddenResidency  *bool
+	QKVResidency     *bool
+	AttnFFNResidency *bool
 }
 
 // Devices returns the device list for offload (always non-empty when NGL > 0)
@@ -27,14 +33,16 @@ func (o Options) Devices() []int {
 	return []int{o.GPUDevice}
 }
 
-// Normalize validates options and opens CUDA when needed
+// Normalize validates options, applies residency overrides, and opens CUDA when needed.
 func (o *Options) Normalize() error {
+	gpuresid.Configure(o.HiddenResidency, o.QKVResidency, o.AttnFFNResidency)
+
 	if o.NGL < 0 {
-		return gpu.ErrInvalidNGL
+		return device.ErrInvalidNGL
 	}
 
 	if o.GPUDevice < 0 {
-		return gpu.ErrInvalidDevice
+		return device.ErrInvalidDevice
 	}
 
 	if o.NGL == 0 {
@@ -47,10 +55,10 @@ func (o *Options) Normalize() error {
 	}
 
 	if runtime.GOOS == "darwin" {
-		return fmt.Errorf("model: -ngl on macOS requires Metal kernels (not implemented); build/run without -ngl for CPU, see docs")
+		return fmt.Errorf("model: GPU offload (NGL>0) on macOS requires Metal kernels (not implemented); use NGL=0 for CPU")
 	}
 
-	g, err := gpu.OpenCUDADevicesSplit(o.Devices(), o.TensorSplit)
+	g, err := device.OpenCUDADevicesSplit(o.Devices(), o.TensorSplit)
 	if err != nil {
 		return err
 	}

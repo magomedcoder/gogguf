@@ -11,6 +11,8 @@ type MappedReader struct {
 	*Reader
 	file *os.File
 	data []byte
+	// winAddr is the MapViewOfFile base on Windows (0 elsewhere).
+	winAddr uintptr
 }
 
 // Data returns mmap slice of entire file

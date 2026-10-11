@@ -3,6 +3,7 @@ package hf
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -135,6 +136,7 @@ func TestCacheDirEnv(t *testing.T) {
 	t.Setenv("HUGGINGFACE_HUB_CACHE", "")
 	t.Setenv("HF_HOME", "")
 	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("LOCALAPPDATA", "")
 
 	tmp := t.TempDir()
 	t.Setenv("HF_HUB_CACHE", tmp)
@@ -158,6 +160,56 @@ func TestCacheDirEnv(t *testing.T) {
 	want := filepath.Join(hfHome, "hub")
 	if dir != want {
 		t.Fatalf("HF_HOME: got %q want %q", dir, want)
+	}
+}
+
+func TestCacheDirLocalAppData(t *testing.T) {
+	t.Setenv("LLAMA_CACHE", "")
+	t.Setenv("HF_HUB_CACHE", "")
+	t.Setenv("HUGGINGFACE_HUB_CACHE", "")
+	t.Setenv("HF_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+
+	tmp := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmp)
+
+	dir, err := CacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// On Windows LOCALAPPDATA is the default fallback; elsewhere it is ignored unless we are simulating - CacheDir only reads it when GOOS=windows.
+	if runtime.GOOS == "windows" {
+		want := filepath.Join(tmp, "huggingface", "hub")
+		if dir != want {
+			t.Fatalf("LOCALAPPDATA: got %q want %q", dir, want)
+		}
+	}
+}
+
+func TestReplaceFileOverExisting(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "out.bin")
+	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := replaceFile(tmp, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != "new" {
+		t.Fatalf("got %q want new", got)
 	}
 }
 

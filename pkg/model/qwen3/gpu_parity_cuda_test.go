@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/magomedcoder/gogguf"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/device"
 )
 
 // maxAbsDiff - maximum difference between two logit vectors
@@ -31,7 +31,7 @@ func maxAbsDiff(t *testing.T, a, b []float32) float64 {
 
 func skipOOM(t *testing.T, err error) {
 	t.Helper()
-	if gpu.IsOutOfMemory(err) {
+	if device.IsOutOfMemory(err) {
 		t.Skip("insufficient VRAM:", err)
 	}
 }

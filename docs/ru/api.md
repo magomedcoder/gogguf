@@ -2,8 +2,6 @@
 
 Сервер запускается через `gogguf serve` (см. [CLI](cli.md)).
 
-Поверхность - OpenAI-совместимая: `/v1/models`, `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`. Других HTTP-путей нет.
-
 ## Auth и rate limit
 
 | Флаг           | По умолчанию | Описание                                                |
@@ -22,7 +20,7 @@ curl -s 127.0.0.1:8000/v1/models -H "X-API-Key: secret"
 
 ## Сессии и конкурентность
 
-У модели один общий KV-cache: параллельная генерация сериализуется mutex’ом inference. Чтобы сохранить multi-turn историю:
+У модели один общий KV-cache; параллельная генерация сериализуется. Для multi-turn истории:
 
 | Ключ сессии                             | Поведение                                       |
 |-----------------------------------------|-------------------------------------------------|
@@ -132,12 +130,10 @@ curl -N 127.0.0.1:8000/v1/chat/completions \
 
 Legacy Completions API: `prompt` (строка или массив строк) -> генерация. Поддерживаются `stream`, `max_tokens`, sampling, `stop`, `echo`. Для chat templates предпочтительно `/v1/chat/completions`.
 
-Сессии (`X-Session-Id` / `user`) работают так же, как в chat.
-
 ```bash
 curl -s 127.0.0.1:8000/v1/completions \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"Once upon a time","max_tokens":32}'
+  -d '{"prompt":"Переведи фразу Привет мир на английский:","max_tokens":32}'
 ```
 
 ## `POST /v1/embeddings`
@@ -149,5 +145,5 @@ Hidden state последнего токена после output norm (до lm_h
 ```bash
 curl 127.0.0.1:8000/v1/embeddings \
   -H 'Content-Type: application/json' \
-  -d '{"input":"Hello world"}'
+  -d '{"input":"Привет мир"}'
 ```

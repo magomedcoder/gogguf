@@ -4,19 +4,25 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
 	"github.com/magomedcoder/gogguf/pkg/model"
 	"github.com/magomedcoder/gogguf/pkg/tokenizer"
 )
 
 // Engine loads a GGUF model for inference.
+//
+// Concurrency: at most one Forward/Generate in flight per Engine (shared KV).
+// pkg/server serializes with a mutex; library callers must do the same if sharing an Engine.
+//
+// Advanced: Model is the architecture implementation (import pkg/model for the interface).
+// Prefer NewContext / Conversation / EmbedText for typical library use.
 type Engine struct {
 	Model  model.Model
 	tok    *tokenizer.Tokenizer
 	meta   format.Metadata
 	opts   Options
-	gpu    gpu.Backend
+	dev    device.Backend
 	source io.Closer // file and/or mmap; closed by Close
 }
 
@@ -28,7 +34,7 @@ func LoadMapped(path string, opts Options) (*Engine, error) {
 		return nil, err
 	}
 
-	eng, err := loadFromReader(mr.Reader, opts, mr)
+	eng, err := LoadReader(mr.Reader, opts, mr)
 	if err != nil {
 		_ = mr.Close()
 		return nil, err
@@ -45,7 +51,7 @@ func Load(path string, opts Options) (*Engine, error) {
 		return nil, err
 	}
 
-	eng, err := loadFromReader(r, opts, closer)
+	eng, err := LoadReader(r, opts, closer)
 	if err != nil {
 		_ = closer.Close()
 		return nil, err
@@ -54,7 +60,9 @@ func Load(path string, opts Options) (*Engine, error) {
 	return eng, nil
 }
 
-func loadFromReader(r *format.Reader, opts Options, source io.Closer) (*Engine, error) {
+// LoadReader builds an Engine from an already-open GGUF reader.
+// source is closed by Engine.Close (may be nil).
+func LoadReader(r *format.Reader, opts Options, source io.Closer) (*Engine, error) {
 	mopts := opts
 	if err := mopts.Normalize(); err != nil {
 		return nil, err
@@ -76,37 +84,37 @@ func loadFromReader(r *format.Reader, opts Options, source io.Closer) (*Engine, 
 		tok:    tok,
 		meta:   r.Metadata,
 		opts:   opts,
-		gpu:    mopts.GPU,
+		dev:    mopts.GPU,
 		source: source,
 	}, nil
 }
 
 // GPUBackend returns the open GPU backend (nil when -ngl 0 or CPU build).
-func (e *Engine) GPUBackend() gpu.Backend {
+func (e *Engine) GPUBackend() device.Backend {
 	if e == nil {
 		return nil
 	}
 
-	return e.gpu
+	return e.dev
 }
 
 // GPUDescription describes the offload device: GPU name or layer plan for multi-GPU.
 // Empty string means the model is treated as CPU-only.
 func (e *Engine) GPUDescription() string {
-	if e == nil || e.gpu == nil {
+	if e == nil || e.dev == nil {
 		return ""
 	}
 
-	return gpu.Describe(e.gpu)
+	return device.Describe(e.dev)
 }
 
 // VRAMInfo returns used/total VRAM of the backend (0, 0 without GPU).
 func (e *Engine) VRAMInfo() (used, total uint64, err error) {
-	if e == nil || e.gpu == nil {
+	if e == nil || e.dev == nil {
 		return 0, 0, nil
 	}
 
-	return e.gpu.VRAMInfo()
+	return e.dev.VRAMInfo()
 }
 
 func (e *Engine) LoadOptions() Options {
@@ -196,7 +204,7 @@ func (e *Engine) Close() error {
 		e.Model = nil
 	}
 
-	e.gpu = nil
+	e.dev = nil
 	if e.source != nil {
 		if e2 := e.source.Close(); err == nil {
 			err = e2

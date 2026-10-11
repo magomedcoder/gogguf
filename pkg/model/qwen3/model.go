@@ -2,13 +2,14 @@ package qwen3
 
 import (
 	"fmt"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
+	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/exec/dispatch"
+	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
+	"github.com/magomedcoder/gogguf/pkg/exec/moe"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
-	"github.com/magomedcoder/gogguf/pkg/model/dispatch"
-	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
-	"github.com/magomedcoder/gogguf/pkg/model/moe"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
@@ -17,7 +18,7 @@ type Model struct {
 	cfg          Config
 	weights      *weights.Store
 	cache        *KVCache
-	gpu          gpu.Backend
+	dev          device.Backend
 	ngl          int
 	gpuMaxSeq    int
 	nBatch       int // chunk prefill size (1 = per token); decode always 1
@@ -28,7 +29,7 @@ type Model struct {
 	outNorm      []float32
 	lmHeadName   string
 
-	layerQuant  []format.GGML // matmul weight type per layer for fused paths
+	layerQuant  []dtype.DType // matmul weight type per layer for fused paths
 	residency   bool          // layers can keep hidden state on device
 	residDevice bool          // hidden state is on device; host buffer x is stale
 	logitsOnGPU bool          // out_norm + lm_head computed on GPU
@@ -41,16 +42,16 @@ type Model struct {
 }
 
 // Load creates Qwen3 from weights
-func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
 	return loadWithConfig(w, g, ngl, gpuMaxSeq, nBatch, ParseConfig)
 }
 
 // LoadMoE creates Qwen3-MoE (qwen3moe.*, QK-norm + MoE)
-func LoadMoE(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
+func LoadMoE(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
 	return loadWithConfig(w, g, ngl, gpuMaxSeq, nBatch, ParseConfigMoE)
 }
 
-func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int, parse func(*format.Reader) (Config, error)) (*Model, error) {
+func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int, parse func(*format.Reader) (Config, error)) (*Model, error) {
 	cfg, err := parse(w.Reader())
 	if err != nil {
 		return nil, err
@@ -92,7 +93,7 @@ func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int,
 		cfg:          cfg,
 		weights:      w,
 		cache:        NewKVCache(cfg),
-		gpu:          g,
+		dev:          g,
 		ngl:          ngl,
 		gpuMaxSeq:    gpuMaxSeq,
 		nBatch:       nBatch,
@@ -116,11 +117,11 @@ func loadWithConfig(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq, nBatch int,
 
 // initFused sets up shared fused GPU path wiring (§5): Qwen3 - NeoX RoPE + QK-norm
 func (m *Model) initFused() {
-	if m.gpu == nil {
+	if m.dev == nil {
 		return
 	}
 
-	m.fused = gpuresid.New(m.weights, m.gpu, gpu.RoPENeoX)
+	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENeoX)
 	m.fusedDims = gpuresid.Dims{
 		Embd:     m.cfg.EmbeddingDim,
 		NHeads:   m.cfg.NumHeads,
@@ -159,9 +160,9 @@ func (m *Model) initFused() {
 	}
 }
 
-// resolveLayerQuants returns matmul weight type per layer; format.GgmlFloat32 means no unified quant type - that layer uses FP32/discrete path
-func resolveLayerQuants(w *weights.Store, lts []layerTensors) []format.GGML {
-	kinds := make([]format.GGML, len(lts))
+// resolveLayerQuants returns matmul weight type per layer; dtype.F32 means no unified quant type - that layer uses FP32/discrete path
+func resolveLayerQuants(w *weights.Store, lts []layerTensors) []dtype.DType {
+	kinds := make([]dtype.DType, len(lts))
 	for i, lt := range lts {
 		names := []string{lt.attnQ, lt.attnK, lt.attnV, lt.attnOut}
 		if !lt.moe {
@@ -177,7 +178,7 @@ func resolveLayerQuants(w *weights.Store, lts []layerTensors) []format.GGML {
 // initResidency enables device-resident hidden state (§1): all layers on GPU required,
 // fused QKV/residual paths and a single supported weight quant across all layers
 func (m *Model) initResidency() {
-	if m.gpu == nil || m.ngl < m.cfg.NumLayers || m.cfg.ExpertCount > 0 {
+	if m.dev == nil || m.ngl < m.cfg.NumLayers || m.cfg.ExpertCount > 0 {
 		return
 	}
 
@@ -185,12 +186,12 @@ func (m *Model) initResidency() {
 		return
 	}
 
-	if !m.gpu.HiddenResident() {
+	if !m.dev.HiddenResident() {
 		return
 	}
 
 	for _, t := range m.layerQuant {
-		if !gpu.FusedQuantSupported(t) {
+		if !device.FusedQuantSupported(t) {
 			return
 		}
 	}
@@ -200,13 +201,13 @@ func (m *Model) initResidency() {
 }
 
 func (m *Model) initGPUKVCache() error {
-	if m.gpu == nil || m.ngl <= 0 {
+	if m.dev == nil || m.ngl <= 0 {
 		return nil
 	}
 
 	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
-	maxSeq := gpu.CapMaxSeq(m.cfg.ContextLength, m.gpuMaxSeq)
-	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
+	maxSeq := device.CapMaxSeq(m.cfg.ContextLength, m.gpuMaxSeq)
+	return m.dev.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
 // Config returns the model configuration
@@ -219,18 +220,18 @@ func (m *Model) ResetCache() {
 	m.cache.Reset()
 	m.residDevice = false
 	m.gpuKVStale = false
-	if m.gpu != nil {
-		m.gpu.KVCacheReset()
+	if m.dev != nil {
+		m.dev.KVCacheReset()
 	}
 }
 
 // Close releases GPU resources held by the model
 func (m *Model) Close() error {
-	if m.gpu == nil {
+	if m.dev == nil {
 		return nil
 	}
-	err := m.gpu.Close()
-	m.gpu = nil
+	err := m.dev.Close()
+	m.dev = nil
 
 	return err
 }
@@ -304,7 +305,7 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 
 	x := m.scratch.x[:embd]
 	h := m.scratch.h[:embd]
-	if err := ops.RMSNormInto(h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return nil, err
 	}
 
@@ -326,7 +327,7 @@ func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 	// Debug hooks read host buffer x, so residency is disabled with them.
 	// gpuKVStale: fused QKV attends using GPU KV-cache, which is incomplete.
 	if m.residency && m.debug == nil && !m.gpuKVStale {
-		if err := m.gpu.HiddenUpload(m.scratch.x[:m.cfg.EmbeddingDim]); err != nil {
+		if err := m.dev.HiddenUpload(m.scratch.x[:m.cfg.EmbeddingDim]); err != nil {
 			m.residency = false
 		} else {
 			m.residDevice = true
@@ -397,7 +398,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	}
 
 	// fused QKV reads attention from GPU KV-cache: when gpuKVStale it is incomplete
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && qkvResidencyEnabled() && !m.gpuKVStale {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && qkvResidencyEnabled() && !m.gpuKVStale {
 		if err := m.qkvAttnGPU(layer, pos, ln, h, k, v, attn); err == nil {
 			if err := m.cache.Append(layer, k, v); err != nil {
 				return err
@@ -436,8 +437,8 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		}
 
 		// token missed GPU KV-cache - disable GPU attention until ResetCache, else fused QKV/AttentionScoresKV use incomplete cache
-		if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
-			if err := m.gpu.KVCacheAppend(layer, kvPos, k, v); err != nil {
+		if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
+			if err := m.dev.KVCacheAppend(layer, kvPos, k, v); err != nil {
 				m.gpuKVStale = true
 			}
 		}
@@ -448,9 +449,9 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 			return err
 		}
 	}
-	// WO+RMSNorm+FFN residency (disable: GGUF_ATTN_FFN_RESIDENCY=0).
+	// WO+RMSNorm+FFN residency (LoadOptions.AttnFFNResidency).
 	// MoE layers skip this: the fused path assumes dense FFN, replaced by experts
-	if !lt.moe && m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && attnFFNResidencyEnabled() {
+	if !lt.moe && m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && attnFFNResidencyEnabled() {
 		if err := m.attnFFNGPU(layer, ln, x, attn); err == nil {
 			return nil
 		}
@@ -459,7 +460,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	if err := m.matmulInto(lt.attnOut, embd, qDim, attn, h, layer); err != nil {
 		return err
 	}
-	ops.AddInPlace(x, h)
+	compute.AddInPlace(x, h)
 
 	if err := m.rmsNormInto(h, x, ln.ffnNorm, layer); err != nil {
 		return err
@@ -470,13 +471,13 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 			return err
 		}
 
-		ops.AddInPlace(x, m.scratch.moeAcc)
+		compute.AddInPlace(x, m.scratch.moeAcc)
 		return nil
 	}
 
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.ffnGPU(layer, h, h); err == nil {
-			ops.AddInPlace(x, h)
+			compute.AddInPlace(x, h)
 			return nil
 		}
 	}
@@ -494,7 +495,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	ops.AddInPlace(x, h)
+	compute.AddInPlace(x, h)
 	return nil
 }
 
@@ -518,11 +519,11 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	m.residDevice = false
 	m.residency = false
 
-	if !m.gpu.HiddenActive() {
+	if !m.dev.HiddenActive() {
 		return fmt.Errorf("qwen3: layer %d on GPU: %w (hidden state lost)", layer, cause)
 	}
 
-	if err := m.gpu.HiddenDownload(m.scratch.x[:m.cfg.EmbeddingDim]); err != nil {
+	if err := m.dev.HiddenDownload(m.scratch.x[:m.cfg.EmbeddingDim]); err != nil {
 		return fmt.Errorf("qwen3: layer %d on GPU: %w (fallback to host: %v)", layer, cause, err)
 	}
 
@@ -537,7 +538,7 @@ func (m *Model) syncHiddenFromDevice() error {
 
 	m.residDevice = false
 
-	return m.gpu.HiddenDownload(m.scratch.x[:m.cfg.EmbeddingDim])
+	return m.dev.HiddenDownload(m.scratch.x[:m.cfg.EmbeddingDim])
 }
 
 func (m *Model) ffnMoE(lt layerTensors, layer int) error {
@@ -555,7 +556,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	clear(m.scratch.moeAcc)
 
 	// §6: selected experts on GPU; expert weights cached on device as raw tensor slice, no full expert matrix dequant on host
-	if m.moeGPU && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	if m.moeGPU && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.moeExpertsGPU(lt, idxs, weights, h, ffn); err == nil {
 			return nil
 		}
@@ -575,7 +576,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		if err := dispatch.MatMulExpertInto(m.weights, lt.upExps, ei, ffn, embd, h, upBuf); err != nil {
 			return err
 		}
-		ops.SwiGLUInPlace(gateBuf, upBuf)
+		compute.SwiGLUInPlace(gateBuf, upBuf)
 		if err := dispatch.MatMulExpertInto(m.weights, lt.downExps, ei, embd, ffn, gateBuf, m.scratch.tmp); err != nil {
 			return err
 		}
@@ -610,7 +611,7 @@ func attnFFNResidencyEnabled() bool {
 	return gpuresid.AttnFFNResidencyEnabled()
 }
 
-// hiddenResidencyEnabled - device-resident hidden state (disable: GGUF_HIDDEN_RESIDENCY=0)
+// hiddenResidencyEnabled - device-resident hidden state (LoadOptions.HiddenResidency)
 func hiddenResidencyEnabled() bool {
 	return gpuresid.HiddenResidencyEnabled()
 }
@@ -638,7 +639,7 @@ func (m *Model) ffnGPU(layer int, x, out []float32) error {
 }
 
 func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, layer int) error {
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		return m.matmulGPUInto(name, rows, cols, vec, out)
 	}
 
@@ -646,7 +647,7 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 }
 
 func (m *Model) matmul(name string, rows, cols int, vec []float32, layer int) ([]float32, error) {
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		return m.matmulGPU(name, rows, cols, vec)
 	}
 
@@ -661,35 +662,35 @@ func (m *Model) matmul(name string, rows, cols int, vec []float32, layer int) ([
 	}
 
 	switch info.Type {
-	case format.GgmlQ8_0:
-		return ops.MatMulVecQ8_0(raw, rows, cols, vec)
-	case format.GgmlQ4_0:
-		return ops.MatMulVecQ4_0(raw, rows, cols, vec)
-	case format.GgmlQ4_1:
-		return ops.MatMulVecQ4_1(raw, rows, cols, vec)
-	case format.GgmlQ5_0:
-		return ops.MatMulVecQ5_0(raw, rows, cols, vec)
-	case format.GgmlQ5_1:
-		return ops.MatMulVecQ5_1(raw, rows, cols, vec)
-	case format.GgmlQ4_K:
-		return ops.MatMulVecQ4_K(raw, rows, cols, vec)
-	case format.GgmlQ5_K:
-		return ops.MatMulVecQ5_K(raw, rows, cols, vec)
-	case format.GgmlQ6_K:
-		return ops.MatMulVecQ6_K(raw, rows, cols, vec)
-	case format.GgmlQ2_K:
-		return ops.MatMulVecQ2_K(raw, rows, cols, vec)
-	case format.GgmlQ3_K:
-		return ops.MatMulVecQ3_K(raw, rows, cols, vec)
-	case format.GgmlQ8_K:
-		return ops.MatMulVecQ8_K(raw, rows, cols, vec)
+	case dtype.Q8_0:
+		return compute.MatMulVecQ8_0(raw, rows, cols, vec)
+	case dtype.Q4_0:
+		return compute.MatMulVecQ4_0(raw, rows, cols, vec)
+	case dtype.Q4_1:
+		return compute.MatMulVecQ4_1(raw, rows, cols, vec)
+	case dtype.Q5_0:
+		return compute.MatMulVecQ5_0(raw, rows, cols, vec)
+	case dtype.Q5_1:
+		return compute.MatMulVecQ5_1(raw, rows, cols, vec)
+	case dtype.Q4_K:
+		return compute.MatMulVecQ4_K(raw, rows, cols, vec)
+	case dtype.Q5_K:
+		return compute.MatMulVecQ5_K(raw, rows, cols, vec)
+	case dtype.Q6_K:
+		return compute.MatMulVecQ6_K(raw, rows, cols, vec)
+	case dtype.Q2_K:
+		return compute.MatMulVecQ2_K(raw, rows, cols, vec)
+	case dtype.Q3_K:
+		return compute.MatMulVecQ3_K(raw, rows, cols, vec)
+	case dtype.Q8_K:
+		return compute.MatMulVecQ8_K(raw, rows, cols, vec)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
 			return nil, err
 		}
 
-		return ops.MatMulVec(f32, rows, cols, vec)
+		return compute.MatMulVec(f32, rows, cols, vec)
 	}
 }
 
@@ -700,18 +701,18 @@ func (m *Model) matmulGPUInto(name string, rows, cols int, vec, out []float32) e
 	}
 
 	switch info.Type {
-	case format.GgmlQ8_0, format.GgmlQ4_0, format.GgmlQ4_K, format.GgmlQ5_K, format.GgmlQ6_K:
+	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K:
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return err
 		}
-		return gpu.MatMulVecQuantCachedInto(m.gpu, info.Type, name, raw, rows, cols, vec, out)
+		return device.MatMulVecQuantCachedInto(m.dev, info.Type, name, raw, rows, cols, vec, out)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
 			return err
 		}
-		return gpu.MatMulVecCachedInto(m.gpu, name, f32, rows, cols, vec, out)
+		return device.MatMulVecCachedInto(m.dev, name, f32, rows, cols, vec, out)
 	}
 }
 
@@ -722,49 +723,49 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		return nil, err
 	}
 
-	if info.Type == format.GgmlQ8_0 {
+	if info.Type == dtype.Q8_0 {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
 
-		return m.gpu.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
 	}
 
-	if info.Type == format.GgmlQ4_0 {
+	if info.Type == dtype.Q4_0 {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
 
-		return m.gpu.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
 	}
 
-	if info.Type == format.GgmlQ4_K {
+	if info.Type == dtype.Q4_K {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
 
-		return m.gpu.MatMulVecQ4_KCached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ4_KCached(name, raw, rows, cols, vec)
 	}
 
-	if info.Type == format.GgmlQ5_K {
+	if info.Type == dtype.Q5_K {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
 
-		return m.gpu.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
 	}
 
-	if info.Type == format.GgmlQ6_K {
+	if info.Type == dtype.Q6_K {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
 
-		return m.gpu.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
 	}
 
 	f32, err := m.weights.Floats(name)
@@ -772,7 +773,7 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		return nil, err
 	}
 
-	return m.gpu.MatMulVecCached(name, f32, rows, cols, vec)
+	return m.dev.MatMulVecCached(name, f32, rows, cols, vec)
 }
 
 func (m *Model) logits() error {
@@ -800,7 +801,7 @@ func (m *Model) logitsDevice() error {
 
 func (m *Model) logitsFromHidden(x []float32) error {
 	h := m.scratch.h[:len(x)]
-	if err := ops.RMSNormInto(h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -816,35 +817,35 @@ func (m *Model) logitsFromHidden(x []float32) error {
 	}
 
 	switch info.Type {
-	case format.GgmlQ8_0:
-		err = ops.MatMulVecQ8_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ4_0:
-		err = ops.MatMulVecQ4_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ4_1:
-		err = ops.MatMulVecQ4_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ5_0:
-		err = ops.MatMulVecQ5_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ5_1:
-		err = ops.MatMulVecQ5_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ4_K:
-		err = ops.MatMulVecQ4_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ5_K:
-		err = ops.MatMulVecQ5_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ6_K:
-		err = ops.MatMulVecQ6_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ2_K:
-		err = ops.MatMulVecQ2_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ3_K:
-		err = ops.MatMulVecQ3_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
-	case format.GgmlQ8_K:
-		err = ops.MatMulVecQ8_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q8_0:
+		err = compute.MatMulVecQ8_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q4_0:
+		err = compute.MatMulVecQ4_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q4_1:
+		err = compute.MatMulVecQ4_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q5_0:
+		err = compute.MatMulVecQ5_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q5_1:
+		err = compute.MatMulVecQ5_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q4_K:
+		err = compute.MatMulVecQ4_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q5_K:
+		err = compute.MatMulVecQ5_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q6_K:
+		err = compute.MatMulVecQ6_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q2_K:
+		err = compute.MatMulVecQ2_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q3_K:
+		err = compute.MatMulVecQ3_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+	case dtype.Q8_K:
+		err = compute.MatMulVecQ8_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
 	default:
 		f32, ferr := m.weights.Floats(name)
 		if ferr != nil {
 			return ferr
 		}
 
-		err = ops.MatMulVecInto(f32, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
+		err = compute.MatMulVecInto(f32, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits)
 	}
 
 	return err
@@ -868,40 +869,40 @@ func (m *Model) logitsFinish() error {
 func (m *Model) rmsNormInto(dst, x, weight []float32, layer int) error {
 	// RMSNorm on GPU is not worthwhile over PCIe (small buffer): CPU only.
 	_ = layer
-	return ops.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps)
+	return compute.RMSNormInto(dst, x, weight, m.cfg.RMSNormEps)
 }
 
 func (m *Model) applyRoPEHeads(v []float32, nHeads, pos, layer int) {
 	// RoPE on GPU: HtoD/DtoH cost exceeds decode benefit; CPU is faster for the residency path.
 	_ = layer
-	ops.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+	compute.ApplyRoPEHeads(v, nHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
 }
 
 func (m *Model) swigluInPlace(gate, up []float32, layer int) {
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		if err := m.gpu.SwiGLUInPlace(gate, up); err == nil {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.dev.SwiGLUInPlace(gate, up); err == nil {
 			return
 		}
 	}
 
-	ops.SwiGLUInPlace(gate, up)
+	compute.SwiGLUInPlace(gate, up)
 }
 
 func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, layer int) error {
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		// gpuKVStale: some tokens missed GPU KV-cache - attention uses CPU cache only
 		if !m.gpuKVStale {
-			if err := m.gpu.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
+			if err := m.dev.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 				return nil
 			}
 		}
 
-		if err := m.gpu.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
+		if err := m.dev.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil
 		}
 	}
 
-	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim)
+	return compute.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim)
 }
 
 func (m *Model) normHeadsInto(v []float32, weight []float32, nHeads, layer int) error {

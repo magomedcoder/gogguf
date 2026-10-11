@@ -10,8 +10,8 @@ import (
 
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/chat"
+	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 type layersFile struct {
@@ -94,10 +94,10 @@ func TestLayersFixture(t *testing.T) {
 
 			setter.SetDebugHooks(&qwen3.DebugHooks{
 				OnEmbed: func(x []float32) {
-					embedRMS = ops.VectorRMS(x)
+					embedRMS = compute.VectorRMS(x)
 				},
 				OnLayer: func(layer int, x []float32) {
-					layerRMS = append(layerRMS, ops.VectorRMS(x))
+					layerRMS = append(layerRMS, compute.VectorRMS(x))
 				},
 			})
 

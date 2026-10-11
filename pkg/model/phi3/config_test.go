@@ -3,9 +3,9 @@ package phi3_test
 import (
 	"testing"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/model/phi3"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 func TestParseConfigPhi3Mini(t *testing.T) {
@@ -99,7 +99,7 @@ func TestApplyRoPEPartialLeavesTail(t *testing.T) {
 	}
 	tail := head[6]
 
-	ops.ApplyRoPEPartial(head, 1, 10000, 4)
+	compute.ApplyRoPEPartial(head, 1, 10000, 4)
 	if head[6] != tail || head[7] != 8 {
 		t.Fatalf("head tail changed: %v", head)
 	}

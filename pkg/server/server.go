@@ -12,10 +12,11 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/runtime"
 )
 
-// Options configures the HTTP server (auth, rate limit).
+// Options configures the HTTP server (auth, rate limit, model id)
 type Options struct {
 	APIKey             string // empty = no auth
 	RateLimitPerMinute int    // 0 = unlimited; token bucket per IP
+	ModelID            string // OpenAI model id; empty = metadata name or path basename
 }
 
 // SessionIDHeader selects a multi-turn conversation when set (OpenAI `user` is a fallback key).
@@ -24,6 +25,7 @@ const SessionIDHeader = "X-Session-Id"
 type Server struct {
 	engine    *runtime.Engine
 	modelPath string
+	forcedID  string
 	apiKey    string
 	limiter   *rateLimiter
 	created   int64
@@ -35,7 +37,7 @@ type Server struct {
 	kvConv  *runtime.Conversation // conversation whose token history matches model KV; nil if stale/empty
 }
 
-// New creates a server. opts may be omitted.
+// New creates a server. modelPath is optional (used only when Options.ModelID and metadata name are empty).
 func New(engine *runtime.Engine, modelPath string, opts ...Options) *Server {
 	var o Options
 	if len(opts) > 0 {
@@ -44,6 +46,7 @@ func New(engine *runtime.Engine, modelPath string, opts ...Options) *Server {
 	return &Server{
 		engine:    engine,
 		modelPath: modelPath,
+		forcedID:  o.ModelID,
 		apiKey:    o.APIKey,
 		limiter:   newRateLimiter(o.RateLimitPerMinute),
 		created:   time.Now().Unix(),
@@ -110,7 +113,11 @@ type modelRef struct {
 	OwnedBy string `json:"owned_by"`
 }
 
-func (s *Server) modelID() string {
+func (s *Server) resolveModelID() string {
+	if id := strings.TrimSpace(s.forcedID); id != "" {
+		return id
+	}
+
 	if meta := s.engine.Metadata(); meta != nil {
 		if name, err := meta.String("general.name"); err == nil && name != "" {
 			return name
@@ -122,12 +129,12 @@ func (s *Server) modelID() string {
 		return strings.TrimSuffix(base, filepath.Ext(base))
 	}
 
-	return "gguf"
+	return "model"
 }
 
 func (s *Server) modelRef() modelRef {
 	return modelRef{
-		ID:      s.modelID(),
+		ID:      s.resolveModelID(),
 		Object:  "model",
 		Created: s.created,
 		OwnedBy: "gogguf",

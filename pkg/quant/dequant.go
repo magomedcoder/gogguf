@@ -5,39 +5,39 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/magomedcoder/gogguf/pkg/format"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 )
 
 // ToFloat32 dequantizes raw GGML tensor bytes to float32
-func ToFloat32(typ format.GGML, data []byte, n int) ([]float32, error) {
+func ToFloat32(typ dtype.DType, data []byte, n int) ([]float32, error) {
 	switch typ {
-	case format.GgmlFloat32:
+	case dtype.F32:
 		return dequantF32(data, n)
-	case format.GgmlFloat16:
+	case dtype.F16:
 		return dequantF16(data, n)
-	case format.GgmlQ8_0:
+	case dtype.Q8_0:
 		return DequantQ8_0(data, n)
-	case format.GgmlQ4_0:
+	case dtype.Q4_0:
 		return DequantQ4_0(data, n)
-	case format.GgmlQ4_1:
+	case dtype.Q4_1:
 		return DequantQ4_1(data, n)
-	case format.GgmlQ5_0:
+	case dtype.Q5_0:
 		return DequantQ5_0(data, n)
-	case format.GgmlQ5_1:
+	case dtype.Q5_1:
 		return DequantQ5_1(data, n)
-	case format.GgmlQ2_K:
+	case dtype.Q2_K:
 		return DequantQ2_K(data, n)
-	case format.GgmlQ3_K:
+	case dtype.Q3_K:
 		return DequantQ3_K(data, n)
-	case format.GgmlQ4_K:
+	case dtype.Q4_K:
 		return DequantQ4_K(data, n)
-	case format.GgmlQ5_K:
+	case dtype.Q5_K:
 		return DequantQ5_K(data, n)
-	case format.GgmlQ6_K:
+	case dtype.Q6_K:
 		return DequantQ6_K(data, n)
-	case format.GgmlQ8_K:
+	case dtype.Q8_K:
 		return DequantQ8_K(data, n)
-	case format.GgmlInt32:
+	case dtype.Int32:
 		return dequantI32(data, n)
 	default:
 		return nil, fmt.Errorf("quant: type %s not yet supported", typ)

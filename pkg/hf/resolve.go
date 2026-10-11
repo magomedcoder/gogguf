@@ -23,7 +23,7 @@ func Resolve(repoWithTag string) (string, error) {
 			return "", fmt.Errorf("hf: failed to list files for %s: %w", spec.Repo, err)
 		}
 
-		fmt.Fprintf(os.Stderr, "hf: network unavailable, using cache (%v)\n", err)
+		fmt.Fprintf(progressOut(), "hf: network unavailable, using cache (%v)\n", err)
 		files = cached
 	}
 
@@ -46,14 +46,14 @@ func Resolve(repoWithTag string) (string, error) {
 	if primary.URL == "" {
 		if primary.FinalPath != "" {
 			if _, err := os.Stat(primary.FinalPath); err == nil {
-				fmt.Fprintf(os.Stderr, "hf: %s -> %s\n", spec.Repo, primary.FinalPath)
+				fmt.Fprintf(progressOut(), "hf: %s -> %s\n", spec.Repo, primary.FinalPath)
 				return primary.FinalPath, nil
 			}
 		}
 
 		if primary.LocalPath != "" {
 			if _, err := os.Stat(primary.LocalPath); err == nil {
-				fmt.Fprintf(os.Stderr, "hf: %s -> %s\n", spec.Repo, primary.LocalPath)
+				fmt.Fprintf(progressOut(), "hf: %s -> %s\n", spec.Repo, primary.LocalPath)
 				return primary.LocalPath, nil
 			}
 		}
@@ -66,7 +66,7 @@ func Resolve(repoWithTag string) (string, error) {
 		return "", err
 	}
 
-	fmt.Fprintf(os.Stderr, "hf: %s -> %s\n", primary.Path, path)
+	fmt.Fprintf(progressOut(), "hf: %s -> %s\n", primary.Path, path)
 	return path, nil
 }
 

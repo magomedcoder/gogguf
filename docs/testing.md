@@ -12,12 +12,13 @@ mkdir -p models
 curl -L -o models/Qwen3-1.7B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q8_0.gguf
 ```
 
-Optional overrides:
+Place models under `models/` with fixed names (no test env overrides):
 
-| Variable      | Purpose                                      |
-|---------------|----------------------------------------------|
-| `GGUF_MODEL`  | Path to the Qwen3 GGUF used by most fixtures |
-| `GGUF_GOLDEN` | Path to a custom `qwen3_golden.json`         |
+- `models/Qwen3-1.7B-Q8_0.gguf`
+- `models/Llama-3.2-1B-Instruct-Q8_0.gguf` (optional)
+- `models/Mistral-7B-Instruct-v0.2-Q4_K_M.gguf` (optional)
+
+Fixtures: `test/fixtures/`.
 
 ## Run tests
 
@@ -29,17 +30,26 @@ go test ./...
 go test -tags=integration ./test/integration/...
 ```
 
-CI downloads the same 1.7B file in the `integration` job (see `.github/workflows/ci.yml`).
+CI (`.github/workflows/ci.yml`):
 
-CUDA tests need Linux + NVIDIA - see [platforms.md](platforms.md):
+| Job                   | What runs                                                                 | Models / notes                                      |
+|-----------------------|---------------------------------------------------------------------------|-----------------------------------------------------|
+| `test`                | `go vet` + `go test ./...` + CLI build                                    | no GGUF; matrix: Linux / Windows / macOS            |
+| `cross-build`         | CPU cross-compile CLI                                                     | linux/darwin/windows * amd64/arm64                  |
+| `integration`         | `./pkg/model/qwen3/` + `-tags=integration ./test/integration/...`         | Qwen3-1.7B + Llama-3.2-1B; `.bin` fixtures in repo  |
+| `integration-mistral` | `-tags=integration -run TestMistral`                                      | Mistral-7B (separate job: larger download / RAM)    |
+| `cuda`                | `-tags=cuda` device/model packages + CPU↔GPU integration                  | Qwen3-1.7B; **skips** without NVIDIA GPU            |
+
+CUDA locally (Linux + NVIDIA) - see [platforms.md](platforms.md):
 
 ```bash
-CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
+CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
+CGO_ENABLED=1 go test -tags='cuda,integration' ./test/integration/
 ```
 
 ## Other architecture fixtures
 
-Some tests look for optional models and skip if missing:
+Locally (same URLs as CI):
 
 ```bash
 # Llama 3.2 1B Instruct

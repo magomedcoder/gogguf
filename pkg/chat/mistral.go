@@ -9,8 +9,8 @@ import (
 // formatMistralInstruct formats a dialog in Mistral Instruct style ([INST] ... [/INST]).
 func formatMistralInstruct(messages []Message, opts Options) string {
 	meta := opts.Metadata
-	bos := tokenFromVocab(meta, meta.IntOptional("tokenizer.ggml.bos_token_id", 1))
-	eos := tokenFromVocab(meta, meta.IntOptional("tokenizer.ggml.eos_token_id", 2))
+	bos := tokenFromVocab(meta, meta.IntOptional(format.MetaTokBOS, 1))
+	eos := tokenFromVocab(meta, meta.IntOptional(format.MetaTokEOS, 2))
 
 	var b strings.Builder
 	b.WriteString(bos)

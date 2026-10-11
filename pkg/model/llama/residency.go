@@ -3,17 +3,17 @@ package llama
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gogguf/pkg/gpu"
-	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
+	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
 )
 
 // initFused sets up fused GPU layer paths (§5). Llama: RoPE NORM and no QK-norm
 func (m *Model) initFused() {
-	if m.gpu == nil {
+	if m.dev == nil {
 		return
 	}
 
-	m.fused = gpuresid.New(m.weights, m.gpu, gpu.RoPENorm)
+	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENorm)
 	m.fusedDims = gpuresid.Dims{
 		Embd:     m.cfg.EmbeddingDim,
 		NHeads:   m.cfg.NumHeads,
@@ -41,13 +41,13 @@ func (m *Model) initFused() {
 		}
 
 		t := gpuresid.LayerQuant(m.weights, lt.attnQ, lt.attnK, lt.attnV, lt.attnOut, lt.ffnGate, lt.ffnUp, lt.ffnDown)
-		m.layerQuant[i] = gpu.FusedQuantSupported(t)
+		m.layerQuant[i] = device.FusedQuantSupported(t)
 	}
 }
 
 // initResidency enables device-resident hidden state (§1, §5): all layers on GPU, fused paths, and one supported weight quant in every layer
 func (m *Model) initResidency() {
-	if m.gpu == nil || m.ngl < m.cfg.NumLayers || m.fused == nil {
+	if m.dev == nil || m.ngl < m.cfg.NumLayers || m.fused == nil {
 		return
 	}
 
@@ -55,7 +55,7 @@ func (m *Model) initResidency() {
 		return
 	}
 
-	if !m.gpu.HiddenResident() {
+	if !m.dev.HiddenResident() {
 		return
 	}
 
@@ -76,7 +76,7 @@ func (m *Model) uploadHidden() {
 		return
 	}
 
-	if err := m.gpu.HiddenUpload(m.scratch.x); err != nil {
+	if err := m.dev.HiddenUpload(m.scratch.x); err != nil {
 		m.residency = false
 		return
 	}
@@ -117,11 +117,11 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	m.residDevice = false
 	m.residency = false
 
-	if !m.gpu.HiddenActive() {
+	if !m.dev.HiddenActive() {
 		return fmt.Errorf("llama: layer %d on GPU: %w (hidden state lost)", layer, cause)
 	}
 
-	if err := m.gpu.HiddenDownload(m.scratch.x); err != nil {
+	if err := m.dev.HiddenDownload(m.scratch.x); err != nil {
 		return fmt.Errorf("llama: layer %d on GPU: %w (fallback to host: %v)", layer, cause, err)
 	}
 
@@ -136,7 +136,7 @@ func (m *Model) syncHiddenFromDevice() error {
 
 	m.residDevice = false
 
-	return m.gpu.HiddenDownload(m.scratch.x)
+	return m.dev.HiddenDownload(m.scratch.x)
 }
 
 // logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH hidden (§2)

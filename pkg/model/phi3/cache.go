@@ -1,6 +1,6 @@
 package phi3
 
-import "github.com/magomedcoder/gogguf/pkg/mempool"
+import "github.com/magomedcoder/gogguf/pkg/model/mempool"
 
 // KVCache stores K/V for autoregressive decode (fixed buffers, no append)
 type KVCache struct {

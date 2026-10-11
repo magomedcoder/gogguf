@@ -3,17 +3,17 @@ package mistral
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gogguf/pkg/gpu"
-	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
+	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
 )
 
 // initFused sets up fused GPU layer paths (§5). Mistral / Qwen2: NeoX RoPE, no QK-norm
 func (m *Model) initFused() {
-	if m.gpu == nil {
+	if m.dev == nil {
 		return
 	}
 
-	m.fused = gpuresid.New(m.weights, m.gpu, gpu.RoPENeoX)
+	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENeoX)
 	m.fusedDims = gpuresid.Dims{
 		Embd:     m.cfg.EmbeddingDim,
 		NHeads:   m.cfg.NumHeads,
@@ -46,7 +46,7 @@ func (m *Model) initFused() {
 			names = append(names, lt.ffnGate, lt.ffnUp, lt.ffnDown)
 		}
 
-		m.layerQuant[i] = gpu.FusedQuantSupported(gpuresid.LayerQuant(m.weights, names...))
+		m.layerQuant[i] = device.FusedQuantSupported(gpuresid.LayerQuant(m.weights, names...))
 
 		// §6: experts on GPU only with natively supported quant
 		if lt.moe && !m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps) {
@@ -58,7 +58,7 @@ func (m *Model) initFused() {
 // initResidency enables device-resident hidden state (§1, §5).
 // MoE layers run on host (experts), so residency is only for dense models
 func (m *Model) initResidency() {
-	if m.gpu == nil || m.ngl < m.cfg.NumLayers || m.fused == nil || m.cfg.isMoE() {
+	if m.dev == nil || m.ngl < m.cfg.NumLayers || m.fused == nil || m.cfg.isMoE() {
 		return
 	}
 
@@ -71,7 +71,7 @@ func (m *Model) initResidency() {
 		return
 	}
 
-	if !m.gpu.HiddenResident() {
+	if !m.dev.HiddenResident() {
 		return
 	}
 
@@ -98,7 +98,7 @@ func (m *Model) uploadHidden() {
 		return
 	}
 
-	if err := m.gpu.HiddenUpload(m.scratch.x); err != nil {
+	if err := m.dev.HiddenUpload(m.scratch.x); err != nil {
 		m.residency = false
 		return
 	}
@@ -137,11 +137,11 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 	m.residDevice = false
 	m.residency = false
 
-	if !m.gpu.HiddenActive() {
+	if !m.dev.HiddenActive() {
 		return fmt.Errorf("mistral: layer %d on GPU: %w (hidden state lost)", layer, cause)
 	}
 
-	if err := m.gpu.HiddenDownload(m.scratch.x); err != nil {
+	if err := m.dev.HiddenDownload(m.scratch.x); err != nil {
 		return fmt.Errorf("mistral: layer %d on GPU: %w (fallback to host: %v)", layer, cause, err)
 	}
 
@@ -156,7 +156,7 @@ func (m *Model) syncHiddenFromDevice() error {
 
 	m.residDevice = false
 
-	return m.gpu.HiddenDownload(m.scratch.x)
+	return m.dev.HiddenDownload(m.scratch.x)
 }
 
 // logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH hidden (§2)

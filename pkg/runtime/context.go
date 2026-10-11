@@ -5,7 +5,7 @@ import (
 	"io"
 
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/runtime/sampler"
 	"github.com/magomedcoder/gogguf/pkg/tokenizer"
 )
 
@@ -79,7 +79,7 @@ func needsBOSPrefix(meta format.Metadata, ids []int) bool {
 		return false
 	}
 
-	bos := meta.IntOptional("tokenizer.ggml.bos_token_id", -1)
+	bos := meta.IntOptional(format.MetaTokBOS, -1)
 	if bos < 0 {
 		return false
 	}

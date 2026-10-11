@@ -1,6 +1,6 @@
 package phi2
 
-import "github.com/magomedcoder/gogguf/pkg/mempool"
+import "github.com/magomedcoder/gogguf/pkg/model/mempool"
 
 // scratch - reusable forward pass buffers
 type scratch struct {

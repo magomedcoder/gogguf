@@ -9,7 +9,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/runtime"
-	"github.com/magomedcoder/gogguf/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/runtime/sampler"
 )
 
 // OpenAI Chat Completions request (unsupported extras are accepted as stubs / ignored).
@@ -256,7 +256,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	modelName := s.modelID()
+	modelName := s.resolveModelID()
 	if req.Model != "" {
 		modelName = req.Model
 	}

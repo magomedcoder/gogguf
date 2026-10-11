@@ -4,21 +4,23 @@ import (
 	"io"
 
 	"github.com/magomedcoder/gogguf/pkg/chat"
+	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
 	"github.com/magomedcoder/gogguf/pkg/runtime"
-	"github.com/magomedcoder/gogguf/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/runtime/sampler"
+	"github.com/magomedcoder/gogguf/pkg/tokenizer"
 )
 
-// GGUF parsing (pkg/format)
+// GGUF parsing (pkg/format) and tensor dtype (pkg/dtype)
 
 type (
 	Reader       = format.Reader
 	MappedReader = format.MappedReader
 	Metadata     = format.Metadata
 	TensorInfo   = format.TensorInfo
-	Type         = format.Type
-	GGML         = format.GGML
+	Type         = format.Type // metadata value type (not tensor dtype)
+	DType        = dtype.DType
 	Filetype     = format.Filetype
 )
 
@@ -37,7 +39,7 @@ func Open(readSeeker io.ReadSeeker) (*Reader, error) {
 	return format.Open(readSeeker)
 }
 
-// Inference (pkg/runtime, pkg/sampler)
+// Inference (pkg/runtime, pkg/runtime/sampler)
 
 type (
 	Engine            = runtime.Engine
@@ -48,6 +50,8 @@ type (
 	LoadOptions       = runtime.Options
 	SamplerFunc       = sampler.Func
 	SamplerConfig     = sampler.Config
+	Tokenizer         = tokenizer.Tokenizer
+	Backend           = device.Backend
 )
 
 // Load loads the model with copy-on-read weights (no mmap). Prefer LoadMapped.
@@ -62,9 +66,15 @@ func LoadMapped(path string, opts LoadOptions) (*Engine, error) {
 	return runtime.LoadMapped(path, opts)
 }
 
-// ParseGPUDevices parses -dev ("1" / "0,1") and -tensor-split ("0.6,0.4") into device list and layer splits for LoadOptions.
+// LoadReader builds an Engine from an open GGUF reader (tests, custom I/O).
+// source is closed by Engine.Close (may be nil).
+func LoadReader(r *Reader, opts LoadOptions, source io.Closer) (*Engine, error) {
+	return runtime.LoadReader(r, opts, source)
+}
+
+// ParseGPUDevices parses device list ("1" / "0,1") and tensor-split ("0.6,0.4") into typed fields for LoadOptions.GPUDevices / TensorSplit (CLI helper).
 func ParseGPUDevices(devices, tensorSplit string) ([]int, []float64, error) {
-	return gpu.ParseDevices(devices, tensorSplit)
+	return device.ParseDevices(devices, tensorSplit)
 }
 
 // NewSampler returns a next-token selection function (greedy, temperature, top-k, top-p).
@@ -72,19 +82,30 @@ func NewSampler(cfg SamplerConfig) SamplerFunc {
 	return sampler.New(cfg)
 }
 
-// Chat (pkg/chat)
+// Greedy selects the token with the maximum logit.
+var Greedy = sampler.Greedy
 
-type ChatOptions = chat.Options
+// Chat (pkg/chat) - templates and tools; no HTTP dependency.
 
-// FormatChatUser wraps the prompt in a chat template (Jinja from metadata or fallback).
+type (
+	ChatOptions  = chat.Options
+	ChatMessage  = chat.Message
+	Tool         = chat.Tool
+	ToolFunction = chat.ToolFunction
+	ToolCall     = chat.ToolCall
+)
+
+// FormatChatUser wraps a single user turn in a chat template.
 func FormatChatUser(user string, opts ChatOptions) (string, error) {
 	return chat.FormatUser(user, opts)
+}
+
+// FormatChatMessages renders a multi-turn message list (library multi-turn path).
+func FormatChatMessages(messages []ChatMessage, opts ChatOptions) (string, error) {
+	return chat.FormatMessages(messages, opts)
 }
 
 // HasChatTemplate reports whether tokenizer.chat_template is present in GGUF.
 func HasChatTemplate(r *Reader) bool {
 	return chat.HasTemplate(r)
 }
-
-// Greedy selects the token with the maximum logit.
-var Greedy = sampler.Greedy

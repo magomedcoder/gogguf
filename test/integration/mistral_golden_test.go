@@ -14,12 +14,6 @@ import (
 func mistralModelPath(t *testing.T) string {
 	t.Helper()
 
-	if p := os.Getenv("MISTRAL_GGUF_MODEL"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-
 	for _, p := range []string{
 		"models/Mistral-7B-Instruct-v0.2-Q4_K_M.gguf",
 		"../models/Mistral-7B-Instruct-v0.2-Q4_K_M.gguf",
@@ -30,7 +24,7 @@ func mistralModelPath(t *testing.T) string {
 		}
 	}
 
-	t.Skip("Mistral-7B-Instruct-v0.2-Q4_K_M.gguf not found")
+	t.Skip("Mistral-7B-Instruct-v0.2-Q4_K_M.gguf not found under models/")
 
 	return ""
 }

@@ -9,10 +9,10 @@ import (
 
 func TestFormatMistralInstruct(t *testing.T) {
 	meta := format.Metadata{
-		"general.architecture":        "mistral",
-		"tokenizer.ggml.bos_token_id": int32(1),
-		"tokenizer.ggml.eos_token_id": int32(2),
-		"tokenizer.ggml.tokens": []string{
+		"general.architecture": "mistral",
+		format.MetaTokBOS:      int32(1),
+		format.MetaTokEOS:      int32(2),
+		format.MetaTokTokens: []string{
 			"<unk>", "<s>", "</s>",
 		},
 	}

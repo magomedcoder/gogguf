@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
 )
 
@@ -27,7 +28,7 @@ func runVocab(args []string) error {
 
 	fmt.Printf("config: head_dim=%d heads=%d kv=%d\n", cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads)
 
-	tokens, err := r.Metadata.StringArray("tokenizer.ggml.tokens")
+	tokens, err := r.Metadata.StringArray(format.MetaTokTokens)
 	if err != nil {
 		return err
 	}

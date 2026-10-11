@@ -31,7 +31,7 @@ type Tokenizer struct {
 
 // FromGGUF creates tokenizer from GGUF file metadata
 func FromGGUF(r *format.Reader) (*Tokenizer, error) {
-	model, err := r.Metadata.String("tokenizer.ggml.model")
+	model, err := r.Metadata.String(MetaModel)
 	if err != nil {
 		return nil, fmt.Errorf("tokenizer: %w", err)
 	}
@@ -45,7 +45,7 @@ func FromGGUF(r *format.Reader) (*Tokenizer, error) {
 }
 
 func loadBPE(r *format.Reader) (*Tokenizer, error) {
-	tokens, err := r.Metadata.StringArray("tokenizer.ggml.tokens")
+	tokens, err := r.Metadata.StringArray(MetaTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func loadBPE(r *format.Reader) (*Tokenizer, error) {
 	}
 
 	merges := make(map[mergePair]int)
-	if raw, err := r.Metadata.StringArray("tokenizer.ggml.merges"); err == nil {
+	if raw, err := r.Metadata.StringArray(MetaMerges); err == nil {
 		for rank, m := range raw {
 			parts := strings.SplitN(m, " ", 2)
 			if len(parts) != 2 {
@@ -66,7 +66,7 @@ func loadBPE(r *format.Reader) (*Tokenizer, error) {
 		}
 	}
 
-	preType, _ := r.Metadata.String("tokenizer.ggml.pre")
+	preType, _ := r.Metadata.String(MetaPre)
 	pt := pretokenizeGPT2
 	switch preType {
 	case "qwen2", "qwen35":
@@ -84,8 +84,8 @@ func loadBPE(r *format.Reader) (*Tokenizer, error) {
 		tokens:      tokens,
 		id:          id,
 		merges:      merges,
-		bosID:       r.Metadata.IntOptional("tokenizer.ggml.bos_token_id", -1),
-		eosID:       r.Metadata.IntOptional("tokenizer.ggml.eos_token_id", -1),
+		bosID:       r.Metadata.IntOptional(MetaBOS, -1),
+		eosID:       r.Metadata.IntOptional(MetaEOS, -1),
 		byteEncode:  byteEnc,
 		pretokenize: pt,
 	}, nil

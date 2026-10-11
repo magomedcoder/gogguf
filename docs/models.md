@@ -5,33 +5,32 @@ generation) is implemented only for specific architectures - selected by `genera
 
 ## Supported today (end-to-end inference)
 
-| Architecture  | `general.architecture` | Status    | Notes                                                       |
-|---------------|------------------------|-----------|-------------------------------------------------------------|
-| **Qwen3**     | `qwen3`                | supported | Primary reference                                           |
-| **Qwen3-MoE** | `qwen3moe`             | partial   | QK-norm + MoE; 30B-A3B, 235B-A22B                           |
-| **Qwen2**     | `qwen2`                | partial   | Distill-Qwen etc.; NeoX via mistral path                    |
-| **Qwen2-MoE** | `qwen2moe`             | partial   | MoE + gated shared expert (A2.7B, 57B-A14B)                 |
-| **Llama 3**   | `llama`                | supported | Forward + chat; golden Llama-3.2-1B; CUDA RoPE NORM         |
-| **Mistral**   | `mistral` / `llama`*   | supported | NeoX RoPE, GQA; golden Mistral-7B-v0.2; auto-detect by name |
-| **Mixtral**   | `llama`**              | partial   | MoE 8x7B; `llama.expert_count`; NeoX via mistral            |
-| **DeepSeek**  | `deepseek`             | partial   | Dense lead + MoE; not `deepseek2` (MLA)                     |
-| **DeepSeek2** | `deepseek2`            | partial   | Absorbed MLA + YaRN + MoE (V2/V3 Lite+); MLA on CPU         |
+| Architecture       | `general.architecture` | Status    | Notes                                                       |
+|--------------------|------------------------|-----------|-------------------------------------------------------------|
+| **Qwen3**          | `qwen3`                | supported | Primary reference; full residency; `-b` batch prefill       |
+| **Qwen3-MoE**      | `qwen3moe`             | partial   | QK-norm + MoE; 30B-A3B, 235B-A22B; `n_batch` forced to 1    |
+| **Qwen2**          | `qwen2`                | partial   | Distill-Qwen etc.; NeoX via mistral path                    |
+| **Qwen2-MoE**      | `qwen2moe`             | partial   | MoE + gated shared expert (A2.7B, 57B-A14B)                 |
+| **Llama 3**        | `llama`                | supported | Forward + chat; golden Llama-3.2-1B; CUDA RoPE NORM         |
+| **Mistral**        | `mistral` / `llama`*   | supported | NeoX RoPE, GQA; golden Mistral-7B-v0.2; auto-detect by name |
+| **Mixtral**        | `llama`**              | partial   | MoE 8x7B; `llama.expert_count`; NeoX via mistral            |
+| **DeepSeek**       | `deepseek`             | partial   | Dense lead + MoE; not `deepseek2` (MLA)                     |
+| **DeepSeek2**      | `deepseek2`            | partial   | Absorbed MLA + YaRN + MoE (V2/V3 Lite+); MLA on CPU         |
+| **Phi-2**          | `phi2`                 | partial   | LayerNorm, parallel residual, GELU                          |
+| **Phi-3**          | `phi3`                 | partial   | Fused QKV/FFN, partial RoPE, LongRoPE                       |
+| **Gemma / Gemma2** | `gemma` / `gemma2`     | partial   | GeGLU; gemma2 softcap/SWA; no full residency                |
 
 \* TheBloke and convert.py often set `general.architecture: llama` - gogguf detects Mistral via `general.name` / sliding window.
 
 \** Mixtral MoE GGUF: `general.architecture: llama` + `llama.expert_count` > 0.
 
-### Llama 3 - verified
+### Verified models
 
-| Model                 | Quantization | Status                                                           | Links                                                                       |
-|-----------------------|--------------|------------------------------------------------------------------|-----------------------------------------------------------------------------|
-| Llama-3.2-1B-Instruct | Q8_0         | verified (golden, layer logits, CLI; CUDA `-ngl` with RoPE NORM) | [Hugging Face](https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF) |
-
-### Qwen3 - verified
-
-| Model      | Quantization | Status                                           | Links                                                       |
-|------------|--------------|--------------------------------------------------|-------------------------------------------------------------|
-| Qwen3-1.7B | Q8_0         | verified (golden tests, CLI, serve, CUDA `-ngl`) | [Hugging Face](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF) |
+| Model                      | Quantization | Status                                                           | Links                                                                               |
+|----------------------------|--------------|------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| Qwen3-1.7B                 | Q8_0         | verified (golden, layers, logits, CLI, serve, CUDA `-ngl`)       | [Hugging Face](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF)                         |
+| Llama-3.2-1B-Instruct      | Q8_0         | verified (golden, layer logits, CLI; CUDA `-ngl` with RoPE NORM) | [Hugging Face](https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF)         |
+| Mistral-7B-Instruct-v0.2   | Q4_K_M       | verified (golden fixture)                                        | [Hugging Face](https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF)       |
 
 Other Qwen3 sizes (0.6B, 4B, 8B, ...) with `general.architecture: qwen3` **should work** if weights use a supported
 quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/examples often use **4B** for illustration.
@@ -49,11 +48,13 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 
 ### Supported weight quantizations
 
-- **Legacy:** Q4_0, Q4_1, Q5_0, Q5_1, Q8_0
-- **K-quants:** Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K
-- **Unquantized (dequant path):** F16, F32
+| Type                               | CPU     | Native GPU + residency          |
+|------------------------------------|---------|---------------------------------|
+| F16, F32                           | dequant | FP32 path                       |
+| Q8_0, Q4_0, Q4_K, Q5_K, Q6_K       | yes     | fused                           |
+| Q4_1, Q5_0, Q5_1, Q2_K, Q3_K, Q8_K | yes     | via FP32 dequant (no residency) |
 
-Native GPU kernels + residency: **FP32, Q8_0, Q4_0, Q4_K, Q5_K, Q6_K** (see [platforms.md](platforms.md) / [build.md](build.md)).
+Also listed as Legacy / K-quants / unquantized in tooling: Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K…Q8_K, F16, F32.
 
 ### Planned weight quantizations
 
@@ -73,30 +74,26 @@ If `general.architecture` is not supported, inference `Load` returns an error li
 
 ## Planned
 
-Priority:
+| Area                                               | Status  |
+|----------------------------------------------------|---------|
+| Vision (multimodal)                                | planned |
+| Dedicated embedding models                         | planned |
+| True batched GPU GEMM; `forwardBatch` on all dense | planned |
+| Metal kernels; Windows CUDA                        | planned |
 
-| Priority | Architecture / area | Expected `general.architecture` | Status    |
-|----------|---------------------|---------------------------------|-----------|
-| 1        | Mistral             | `mistral`                       | supported |
-| 2        | Llama 2             | `llama`                         | partial   |
-| 3        | Phi-3               | `phi3`                          | partial   |
-| 3b       | Phi-2               | `phi2`                          | partial   |
-| 4        | Gemma / Gemma2      | `gemma` / `gemma2`              | partial   |
-| -        | Vision (multimodal) | -                               | planned   |
-| -        | Embeddings          | -                               | planned   |
-
-“Embeddings” in the table means dedicated embedding models. HTTP `/v1/embeddings` already returns last-token hidden for generative GGUF (see [api.md](api.md)).
+“Embeddings” means dedicated embedding models. HTTP `/v1/embeddings` already returns last-token hidden for generative GGUF (see [api.md](api.md)).
 
 ### Cross-cutting (not tied to one model)
 
 OS / GPU support and launch: **[platforms.md](platforms.md)**.
 
-| Task                                        | Status                                        |
-|---------------------------------------------|-----------------------------------------------|
-| CUDA Graphs (matmul / layer)                | done                                          |
-| Architecture registry (`pkg/model/<arch>/`) | partial (`qwen3`, `llama`, `mistral`, ...)    |
-| `forwardBatch` on non-Qwen3                 | not done                                      |
-| True batched GPU GEMM                       | not done                                      |
+| Task                                        | Status                                     |
+|---------------------------------------------|--------------------------------------------|
+| CUDA Graphs (matmul / layer)                | done                                       |
+| Architecture registry (`pkg/model/<arch>/`) | partial (`qwen3`, `llama`, `mistral`, ...) |
+| Multi-GPU pipeline split                    | partial (`-dev` / `-tensor-split`)         |
+| `forwardBatch` on non-Qwen3                 | not done                                   |
+| True batched GPU GEMM                       | not done                                   |
 
 ## Adding a new architecture
 

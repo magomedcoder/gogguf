@@ -8,8 +8,6 @@
 go build -o build/gogguf ./cmd/gogguf
 ```
 
-Без CGO - кросс-компиляция на любую платформу.
-
 **Поддержка ОС / GPU и запуск с `-ngl`:** см. **[platforms.md](platforms.md)**.
 
 ## Сборка CUDA (опционально)
@@ -18,8 +16,7 @@ go build -o build/gogguf ./cmd/gogguf
 
 ```bash
 CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
-
-CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
+CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
 ```
 
 ### Что реально считается на GPU
@@ -51,7 +48,6 @@ mkdir -p models
 curl -L -o models/Qwen3-4B-Q8_0.gguf https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q8_0.gguf
 
 docker build -t gogguf .
-
 docker run --rm -p 8000:8000 -v "$(pwd)/models:/models:ro" gogguf serve -m /models/Qwen3-4B-Q8_0.gguf --host 0.0.0.0:8000
 ```
 

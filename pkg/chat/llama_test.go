@@ -36,11 +36,11 @@ func TestFormatLlama3User(t *testing.T) {
 
 func TestFormatLlama2User(t *testing.T) {
 	meta := format.Metadata{
-		"general.architecture":        "llama",
-		"llama.rope.freq_base":        float32(10000),
-		"tokenizer.ggml.bos_token_id": int32(1),
-		"tokenizer.ggml.eos_token_id": int32(2),
-		"tokenizer.ggml.tokens":       []string{"<unk>", "<s>", "</s>", "▁Hello"},
+		"general.architecture": "llama",
+		"llama.rope.freq_base": float32(10000),
+		format.MetaTokBOS:      int32(1),
+		format.MetaTokEOS:      int32(2),
+		format.MetaTokTokens:   []string{"<unk>", "<s>", "</s>", "▁Hello"},
 	}
 
 	got, err := FormatUser("Hi", Options{Metadata: meta, System: "Be nice"})
@@ -67,11 +67,11 @@ func TestFormatLlama2User(t *testing.T) {
 
 func llama3TestMeta() format.Metadata {
 	return format.Metadata{
-		"general.architecture":        "llama",
-		"tokenizer.ggml.bos_token_id": int32(128000),
-		"tokenizer.ggml.eos_token_id": int32(128009),
-		"tokenizer.ggml.pre":          "llama-bpe",
-		"tokenizer.ggml.tokens":       llama3TestTokens(),
+		"general.architecture": "llama",
+		format.MetaTokBOS:      int32(128000),
+		format.MetaTokEOS:      int32(128009),
+		format.MetaTokPre:      "llama-bpe",
+		format.MetaTokTokens:   llama3TestTokens(),
 	}
 }
 

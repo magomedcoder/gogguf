@@ -1,6 +1,6 @@
 package deepseek
 
-import "github.com/magomedcoder/gogguf/pkg/mempool"
+import "github.com/magomedcoder/gogguf/pkg/model/mempool"
 
 // KVCache stores K/V for autoregressive decode
 type KVCache struct {

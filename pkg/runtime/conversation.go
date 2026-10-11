@@ -5,12 +5,11 @@ import (
 	"io"
 )
 
-// Conversation keeps KV-cache across multi-turn requests with incremental prefill.
+// Conversation keeps KV-cache across multi-turn turns with incremental prefill.
 //
-// Limitations: the model has a single KV-cache; HTTP serve serializes inference
-// and reloads KV per Conversation when switching sessions. Chat prefix reuse
-// only works when the new prompt tokenizes to an exact prefix of the cached
-// tokens; otherwise Reset() runs.
+// The model has a single KV-cache: share one Conversation per dialog, or call LoadKVCache when switching dialogs on the same Engine.
+// Only one inference at a time per Engine.
+// Prefix reuse requires the new prompt to tokenize to an exact prefix of cached tokens; otherwise Reset() runs.
 type Conversation struct {
 	ctx        *Context
 	tokens     []int
@@ -29,7 +28,7 @@ func (conv *Conversation) Reset() {
 	conv.ctx.engine.Model.ResetCache()
 }
 
-// LoadKVCache resets model KV and replays conv.tokens (shared-model multi-session serve).
+// LoadKVCache resets model KV and replays conv.tokens (multi-dialog on one Engine).
 func (conv *Conversation) LoadKVCache() error {
 	conv.ctx.engine.Model.ResetCache()
 	conv.lastLogits = nil

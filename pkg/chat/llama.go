@@ -26,8 +26,8 @@ func formatLlama3(messages []Message, opts Options) string {
 	meta := opts.Metadata
 	startHeader := tokenFromVocab(meta, llamaStartHeaderID)
 	endHeader := tokenFromVocab(meta, llamaEndHeaderID)
-	eot := tokenFromVocab(meta, meta.IntOptional("tokenizer.ggml.eos_token_id", -1))
-	bos := tokenFromVocab(meta, meta.IntOptional("tokenizer.ggml.bos_token_id", -1))
+	eot := tokenFromVocab(meta, meta.IntOptional(format.MetaTokEOS, -1))
+	bos := tokenFromVocab(meta, meta.IntOptional(format.MetaTokBOS, -1))
 
 	var b strings.Builder
 	b.WriteString(bos)
@@ -86,8 +86,8 @@ func formatLlama3(messages []Message, opts Options) string {
 // formatLlama2Instruct - Meta Llama 2 chat: [INST] <<SYS>> ... <</SYS>> ... [/INST]
 func formatLlama2Instruct(messages []Message, opts Options) string {
 	meta := opts.Metadata
-	bos := tokenFromVocab(meta, meta.IntOptional("tokenizer.ggml.bos_token_id", 1))
-	eos := tokenFromVocab(meta, meta.IntOptional("tokenizer.ggml.eos_token_id", 2))
+	bos := tokenFromVocab(meta, meta.IntOptional(format.MetaTokBOS, 1))
+	eos := tokenFromVocab(meta, meta.IntOptional(format.MetaTokEOS, 2))
 	if bos == "" {
 		bos = "<s>"
 	}
@@ -167,7 +167,7 @@ func tokenFromVocab(meta format.Metadata, id int) string {
 		return ""
 	}
 
-	tokens, err := meta.StringArray("tokenizer.ggml.tokens")
+	tokens, err := meta.StringArray(format.MetaTokTokens)
 	if err != nil || id >= len(tokens) {
 		return ""
 	}
@@ -195,7 +195,7 @@ func isLlama3Family(meta format.Metadata) bool {
 		return true
 	}
 
-	if pre, err := meta.String("tokenizer.ggml.pre"); err == nil {
+	if pre, err := meta.String(format.MetaTokPre); err == nil {
 		switch pre {
 		case "llama-bpe", "llama3":
 			return true
@@ -206,7 +206,7 @@ func isLlama3Family(meta format.Metadata) bool {
 		return true
 	}
 
-	if tokens, err := meta.StringArray("tokenizer.ggml.tokens"); err == nil && len(tokens) >= 100000 {
+	if tokens, err := meta.StringArray(format.MetaTokTokens); err == nil && len(tokens) >= 100000 {
 		return true
 	}
 

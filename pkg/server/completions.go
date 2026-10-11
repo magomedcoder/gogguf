@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/magomedcoder/gogguf/pkg/runtime"
-	"github.com/magomedcoder/gogguf/pkg/sampler"
+	"github.com/magomedcoder/gogguf/pkg/runtime/sampler"
 )
 
 // Legacy OpenAI Completions API (prefer /v1/chat/completions)
@@ -135,7 +135,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	// Stubs: presence_penalty, seed, user, logit_bias, logprobs, suffix are accepted and ignored.
 
 	stops := parseStop(req.Stop)
-	modelName := s.modelID()
+	modelName := s.resolveModelID()
 	if req.Model != "" {
 		modelName = req.Model
 	}

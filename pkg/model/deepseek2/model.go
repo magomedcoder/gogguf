@@ -2,13 +2,13 @@ package deepseek2
 
 import (
 	"fmt"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 
-	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
-	"github.com/magomedcoder/gogguf/pkg/model/dispatch"
-	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
-	"github.com/magomedcoder/gogguf/pkg/model/moe"
-	"github.com/magomedcoder/gogguf/pkg/ops"
+	"github.com/magomedcoder/gogguf/pkg/compute"
+	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/exec/dispatch"
+	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
+	"github.com/magomedcoder/gogguf/pkg/exec/moe"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
@@ -16,7 +16,7 @@ import (
 type Model struct {
 	cfg          Config
 	weights      *weights.Store
-	gpu          gpu.Backend
+	dev          device.Backend
 	ngl          int
 	fused        *gpuresid.Runner
 	moeGPU       []bool
@@ -30,7 +30,7 @@ type Model struct {
 
 // Load creates DeepSeek2 from weights. GPU runs MLA projections, FFN, and experts (§7),
 // MLA attention itself stays on CPU: its cache layout differs from GPU KV-cache
-func Load(w *weights.Store, g gpu.Backend, ngl, _ int) (*Model, error) {
+func Load(w *weights.Store, g device.Backend, ngl, _ int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl, _ int) (*Model, error) {
 	m := &Model{
 		cfg:          cfg,
 		weights:      w,
-		gpu:          g,
+		dev:          g,
 		ngl:          ngl,
 		cache:        NewMLACache(cfg),
 		scratch:      newScratch(cfg),
@@ -75,11 +75,11 @@ func Load(w *weights.Store, g gpu.Backend, ngl, _ int) (*Model, error) {
 
 // initFused sets up GPU layer paths (§7). MLA attention stays on CPU: absorbed wk_b/wv_b are column-major, MLA cache is K=kv_lora+rope, V=kv_lora, which GPU KV-cache (n_kv_heads * head_dim) does not represent
 func (m *Model) initFused() {
-	if m.gpu == nil || m.ngl <= 0 {
+	if m.dev == nil || m.ngl <= 0 {
 		return
 	}
 
-	m.fused = gpuresid.New(m.weights, m.gpu, gpu.RoPENeoX)
+	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENeoX)
 	m.moeGPU = make([]bool, m.cfg.NumLayers)
 	for i, lt := range m.layerTensors {
 		if !lt.moe {
@@ -92,7 +92,7 @@ func (m *Model) initFused() {
 
 // layerOnGPU reports whether the layer runs on GPU
 func (m *Model) layerOnGPU(layer int) bool {
-	return m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
+	return m.fused != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 }
 
 func (m *Model) Config() Config {
@@ -104,12 +104,12 @@ func (m *Model) ResetCache() {
 }
 
 func (m *Model) Close() error {
-	if m.gpu == nil {
+	if m.dev == nil {
 		return nil
 	}
 
-	err := m.gpu.Close()
-	m.gpu = nil
+	err := m.dev.Close()
+	m.dev = nil
 	m.fused = nil
 
 	return err
@@ -150,7 +150,7 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 		}
 	}
 
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return nil, err
 	}
 
@@ -188,28 +188,28 @@ func (m *Model) embedToken(tokenID int) error {
 	}
 
 	switch info.Type {
-	case format.GgmlQ8_0:
-		return ops.EmbeddingQ8_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ4_0:
-		return ops.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ4_1:
-		return ops.EmbeddingQ4_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ5_0:
-		return ops.EmbeddingQ5_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ5_1:
-		return ops.EmbeddingQ5_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ4_K:
-		return ops.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ5_K:
-		return ops.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ6_K:
-		return ops.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ2_K:
-		return ops.EmbeddingQ2_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ3_K:
-		return ops.EmbeddingQ3_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ8_K:
-		return ops.EmbeddingQ8_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q8_0:
+		return compute.EmbeddingQ8_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q4_0:
+		return compute.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q4_1:
+		return compute.EmbeddingQ4_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q5_0:
+		return compute.EmbeddingQ5_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q5_1:
+		return compute.EmbeddingQ5_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q4_K:
+		return compute.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q5_K:
+		return compute.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q6_K:
+		return compute.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q2_K:
+		return compute.EmbeddingQ2_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q3_K:
+		return compute.EmbeddingQ3_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q8_K:
+		return compute.EmbeddingQ8_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	default:
 		f32, err := m.weights.Floats("token_embd.weight")
 		if err != nil {
@@ -226,7 +226,7 @@ func (m *Model) forwardBlock(layer, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
 
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -234,9 +234,9 @@ func (m *Model) forwardBlock(layer, pos int) error {
 		return err
 	}
 
-	ops.AddInPlace(m.scratch.x, m.scratch.tmp) // attn output is in tmp after wo
+	compute.AddInPlace(m.scratch.x, m.scratch.tmp) // attn output is in tmp after wo
 
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -245,7 +245,7 @@ func (m *Model) forwardBlock(layer, pos int) error {
 			return err
 		}
 
-		ops.AddInPlace(m.scratch.x, m.scratch.moeAcc)
+		compute.AddInPlace(m.scratch.x, m.scratch.moeAcc)
 		return nil
 	}
 
@@ -253,7 +253,7 @@ func (m *Model) forwardBlock(layer, pos int) error {
 		return err
 	}
 
-	ops.AddInPlace(m.scratch.x, m.scratch.tmp)
+	compute.AddInPlace(m.scratch.x, m.scratch.tmp)
 	return nil
 }
 
@@ -273,7 +273,7 @@ func (m *Model) ffnDense(lt layerTensors, layer int) error {
 		return err
 	}
 
-	ops.SwiGLUInPlace(m.scratch.gate[:m.cfg.FFNHidden], m.scratch.up[:m.cfg.FFNHidden])
+	compute.SwiGLUInPlace(m.scratch.gate[:m.cfg.FFNHidden], m.scratch.up[:m.cfg.FFNHidden])
 
 	return m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate[:m.cfg.FFNHidden], m.scratch.tmp, layer)
 }
@@ -294,7 +294,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 
 		// qLora -> tmp[:qLora] -> qLora (not in-place)
 		tmpQ := m.scratch.tmp[:cfg.QLoraRank]
-		if err := ops.RMSNormInto(tmpQ, m.scratch.qLora[:cfg.QLoraRank], ln.qANorm, cfg.RMSNormEps); err != nil {
+		if err := compute.RMSNormInto(tmpQ, m.scratch.qLora[:cfg.QLoraRank], ln.qANorm, cfg.RMSNormEps); err != nil {
 			return err
 		}
 
@@ -312,8 +312,8 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 	copy(m.scratch.vCache, m.scratch.kvPe[:cfg.KVLoraRank])
 
 	kPe := m.scratch.kvPe[cfg.KVLoraRank : cfg.KVLoraRank+cfg.RopeDim]
-	ops.ApplyRoPEPartialScaled(kPe, pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
-	if err := ops.RMSNormInto(m.scratch.vCache, m.scratch.vCache, ln.kvANorm, cfg.RMSNormEps); err != nil {
+	compute.ApplyRoPEPartialScaled(kPe, pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+	if err := compute.RMSNormInto(m.scratch.vCache, m.scratch.vCache, ln.kvANorm, cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -338,12 +338,12 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		qNope := src[:cfg.QKNopeDim]
 		qPe := m.scratch.qPe[:cfg.RopeDim]
 		copy(qPe, src[cfg.QKNopeDim:])
-		ops.ApplyRoPEPartialScaled(qPe, pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+		compute.ApplyRoPEPartialScaled(qPe, pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
 
 		// wk_b head: {qk_nope, kv_lora}
 		wOff := h * cfg.QKNopeDim * cfg.KVLoraRank
 		dstAbs := m.scratch.qAbs[h*qk : h*qk+cfg.KVLoraRank]
-		if err := ops.MatMulColMajorInto(kBW[wOff:wOff+cfg.QKNopeDim*cfg.KVLoraRank], cfg.QKNopeDim, cfg.KVLoraRank, qNope, dstAbs); err != nil {
+		if err := compute.MatMulColMajorInto(kBW[wOff:wOff+cfg.QKNopeDim*cfg.KVLoraRank], cfg.QKNopeDim, cfg.KVLoraRank, qNope, dstAbs); err != nil {
 			return err
 		}
 
@@ -357,7 +357,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		return err
 	}
 	seqLen := m.cache.Len() + 1
-	if err := ops.AttentionMLAAbsorbedInto(
+	if err := compute.AttentionMLAAbsorbedInto(
 		m.scratch.attn,
 		m.scratch.qAbs,
 		m.cache.KLayer(layer),
@@ -394,7 +394,7 @@ func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
 		wOff := h * cfg.KVLoraRank * perHead
 		// ggml mul_mat: out[perHead] from W[kv_lora, perHead]
 		out := make([]float32, perHead)
-		if err := ops.MatMulColMajorInto(kvBW[wOff:wOff+cfg.KVLoraRank*perHead], cfg.KVLoraRank, perHead, m.scratch.vCache, out); err != nil {
+		if err := compute.MatMulColMajorInto(kvBW[wOff:wOff+cfg.KVLoraRank*perHead], cfg.KVLoraRank, perHead, m.scratch.vCache, out); err != nil {
 			return err
 		}
 
@@ -405,7 +405,7 @@ func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
 	}
 
 	for h := 0; h < cfg.NumHeads; h++ {
-		ops.ApplyRoPEPartialScaled(m.scratch.qFull[h*headK+cfg.QKNopeDim:h*headK+headK], pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+		compute.ApplyRoPEPartialScaled(m.scratch.qFull[h*headK+cfg.QKNopeDim:h*headK+headK], pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
 	}
 
 	// Legacy path without absorbed MLA is not implemented (needs separate MHA cache).
@@ -429,7 +429,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		if err != nil {
 			return err
 		}
-		ops.AddBiasInPlace(m.scratch.router[:nExp], bias)
+		compute.AddBiasInPlace(m.scratch.router[:nExp], bias)
 	}
 
 	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, m.cfg.ExpertWeightsNorm, m.cfg.ExpertWeightScale)
@@ -449,7 +449,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		if err := dispatch.MatMulExpertInto(m.weights, lt.upExps, ei, ffn, embd, m.scratch.h, upBuf); err != nil {
 			return err
 		}
-		ops.SwiGLUInPlace(gateBuf, upBuf)
+		compute.SwiGLUInPlace(gateBuf, upBuf)
 		if err := dispatch.MatMulExpertInto(m.weights, lt.downExps, ei, embd, ffn, gateBuf, m.scratch.tmp); err != nil {
 			return err
 		}
@@ -498,7 +498,7 @@ func (m *Model) sharedExpert(lt layerTensors, layer int) error {
 	shared := m.cfg.sharedFFN()
 	if m.layerOnGPU(layer) {
 		if err := m.fused.FFNNamed(lt.gateShexp, lt.upShexp, lt.downShexp, m.scratch.h, m.scratch.tmp, embd, shared); err == nil {
-			ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+			compute.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
 			return nil
 		}
 	}
@@ -513,12 +513,12 @@ func (m *Model) sharedExpert(lt layerTensors, layer int) error {
 		return err
 	}
 
-	ops.SwiGLUInPlace(sg, su)
+	compute.SwiGLUInPlace(sg, su)
 	if err := m.matmulInto(lt.downShexp, embd, shared, sg, m.scratch.tmp, layer); err != nil {
 		return err
 	}
 
-	ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+	compute.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
 
 	return nil
 }
@@ -534,7 +534,7 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 }
 
 func (m *Model) logitsFromHidden(x []float32) error {
-	if err := ops.RMSNormInto(m.scratch.h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(m.scratch.h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 

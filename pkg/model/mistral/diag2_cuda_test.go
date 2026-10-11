@@ -7,9 +7,9 @@ import (
 	"math"
 	"testing"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
+	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/quant"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
@@ -22,7 +22,7 @@ func TestDiagQ4KBlocks(t *testing.T) {
 	}
 
 	w := weights.New(r)
-	g, err := gpu.OpenCUDA()
+	g, err := device.OpenCUDA()
 	if err != nil {
 		t.Skip(err)
 	}
@@ -49,7 +49,7 @@ func TestDiagQ4KBlocks(t *testing.T) {
 		}
 
 		want := make([]float32, rows)
-		if err := ops.MatMulVecQ4_KInto(sub, rows, cols, vec, want); err != nil {
+		if err := compute.MatMulVecQ4_KInto(sub, rows, cols, vec, want); err != nil {
 			t.Fatal(err)
 		}
 
@@ -65,6 +65,6 @@ func TestDiagQ4KBlocks(t *testing.T) {
 			}
 		}
 
-		t.Logf("blocks=%d cols=%d: max|diff|=%v cpu=%v gpu=%v", blocks, cols, worst, want, got)
+		t.Logf("blocks=%d cols=%d: max|diff|=%v cpu=%v dev = %v", blocks, cols, worst, want, got)
 	}
 }

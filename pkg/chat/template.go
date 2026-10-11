@@ -89,16 +89,6 @@ func FormatUser(user string, opts Options) (string, error) {
 	return formatUserFallback(user, opts), nil
 }
 
-// FormatUserMust is like FormatUser but panics on render error (for CLI).
-func FormatUserMust(user string, opts Options) string {
-	s, err := FormatUser(user, opts)
-	if err != nil {
-		return formatUserFallback(user, opts)
-	}
-
-	return s
-}
-
 func formatUserFallback(user string, opts Options) string {
 	var b strings.Builder
 

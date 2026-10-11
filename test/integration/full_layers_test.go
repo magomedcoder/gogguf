@@ -21,10 +21,6 @@ func fullLayersFixture(t *testing.T, name string) string {
 		filepath.Join("fixtures", name),
 	}
 
-	if p := os.Getenv("GGUF_FULL_LAYERS"); p != "" {
-		paths = []string{filepath.Join(p, name)}
-	}
-
 	for _, p := range paths {
 		if _, err := os.Stat(p + ".bin"); err == nil {
 			return p

@@ -7,8 +7,8 @@ import (
 	"os"
 
 	"github.com/magomedcoder/gogguf"
+	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 type layerReport struct {
@@ -80,12 +80,12 @@ func runDebugLayers(args []string) error {
 
 	setter.SetDebugHooks(&qwen3.DebugHooks{
 		OnEmbed: func(x []float32) {
-			report.EmbedRMS = ops.VectorRMS(x)
+			report.EmbedRMS = compute.VectorRMS(x)
 		},
 		OnLayer: func(layer int, x []float32) {
 			report.Layers = append(report.Layers, layerMetric{
 				Layer: layer,
-				RMS:   ops.VectorRMS(x),
+				RMS:   compute.VectorRMS(x),
 			})
 		},
 	})

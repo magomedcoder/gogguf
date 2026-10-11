@@ -1,6 +1,6 @@
 package deepseek2
 
-import "github.com/magomedcoder/gogguf/pkg/mempool"
+import "github.com/magomedcoder/gogguf/pkg/model/mempool"
 
 type scratch struct {
 	x      []float32

@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !unix && !windows
 
 package format
 
@@ -7,7 +7,7 @@ import (
 )
 
 // OpenFileMapped loads the entire GGUF into RAM (no OS mmap on this platform).
-// RSS ≈ file size; not zero-copy. Prefer Unix builds for true mmap.
+// RSS ≈ file size; not zero-copy. Windows and Unix use real mmap.
 func OpenFileMapped(path string) (*MappedReader, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

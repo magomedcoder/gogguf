@@ -15,7 +15,7 @@ func ThinkingTags(meta format.Metadata) (open, close string) {
 		return open, close
 	}
 
-	tokens, err := meta.StringArray("tokenizer.ggml.tokens")
+	tokens, err := meta.StringArray(format.MetaTokTokens)
 	if err != nil || len(tokens) <= qwenThinkingCloseID {
 		return open, close
 	}
@@ -23,6 +23,7 @@ func ThinkingTags(meta format.Metadata) (open, close string) {
 	if s := tokens[qwenThinkingOpenID]; s != "" {
 		open = s
 	}
+
 	if s := tokens[qwenThinkingCloseID]; s != "" {
 		close = s
 	}

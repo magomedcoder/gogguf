@@ -3,12 +3,13 @@
 package mistral
 
 import (
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 	"math"
 	"testing"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
+	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
@@ -20,7 +21,7 @@ func TestDiagLayer0Matmuls(t *testing.T) {
 	}
 
 	w := weights.New(r)
-	g, err := gpu.OpenCUDA()
+	g, err := device.OpenCUDA()
 	if err != nil {
 		t.Skip(err)
 	}
@@ -54,12 +55,12 @@ func TestDiagLayer0Matmuls(t *testing.T) {
 
 		want := make([]float32, rows)
 		switch info.Type {
-		case format.GgmlQ4_K:
-			err = ops.MatMulVecQ4_KInto(raw, rows, cols, vec, want)
-		case format.GgmlQ5_K:
-			err = ops.MatMulVecQ5_KInto(raw, rows, cols, vec, want)
-		case format.GgmlQ6_K:
-			err = ops.MatMulVecQ6_KInto(raw, rows, cols, vec, want)
+		case dtype.Q4_K:
+			err = compute.MatMulVecQ4_KInto(raw, rows, cols, vec, want)
+		case dtype.Q5_K:
+			err = compute.MatMulVecQ5_KInto(raw, rows, cols, vec, want)
+		case dtype.Q6_K:
+			err = compute.MatMulVecQ6_KInto(raw, rows, cols, vec, want)
 		default:
 			t.Logf("%s: type %s skipped", name, info.Type)
 			continue
@@ -71,11 +72,11 @@ func TestDiagLayer0Matmuls(t *testing.T) {
 
 		var got []float32
 		switch info.Type {
-		case format.GgmlQ4_K:
+		case dtype.Q4_K:
 			got, err = g.MatMulVecQ4_KCached(name, raw, rows, cols, vec)
-		case format.GgmlQ5_K:
+		case dtype.Q5_K:
 			got, err = g.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
-		case format.GgmlQ6_K:
+		case dtype.Q6_K:
 			got, err = g.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
 		}
 

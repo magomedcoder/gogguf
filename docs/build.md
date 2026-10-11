@@ -8,8 +8,6 @@ Requires **Go 1.26+**.
 go build -o build/gogguf ./cmd/gogguf
 ```
 
-No CGO required - cross-compile to any platform.
-
 **GPU / OS support and how to run with `-ngl`:** see **[platforms.md](platforms.md)**.
 
 ## CUDA build (optional)
@@ -18,7 +16,7 @@ On **Linux + NVIDIA** only (details: [platforms.md](platforms.md)):
 
 ```bash
 CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
-CGO_ENABLED=1 go test -tags=cuda ./pkg/gpu/cuda/...
+CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
 ```
 
 ### What actually runs on GPU

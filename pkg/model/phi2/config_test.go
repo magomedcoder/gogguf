@@ -4,9 +4,9 @@ import (
 	"math"
 	"testing"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/model/phi2"
-	"github.com/magomedcoder/gogguf/pkg/ops"
 )
 
 func TestParseConfigPhi2(t *testing.T) {
@@ -57,7 +57,7 @@ func TestLayerNormInto(t *testing.T) {
 	b := []float32{0, 0, 0, 0}
 	dst := make([]float32, 4)
 
-	if err := ops.LayerNormInto(dst, x, w, b, 1e-5); err != nil {
+	if err := compute.LayerNormInto(dst, x, w, b, 1e-5); err != nil {
 		t.Fatal(err)
 	}
 
@@ -73,7 +73,7 @@ func TestLayerNormInto(t *testing.T) {
 
 func TestGELUInPlace(t *testing.T) {
 	x := []float32{0, 1, -1}
-	ops.GELUInPlace(x)
+	compute.GELUInPlace(x)
 	if math.Abs(float64(x[0])) > 1e-6 {
 		t.Fatalf("GELU(0)=%v", x[0])
 	}

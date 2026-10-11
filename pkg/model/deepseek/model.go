@@ -2,13 +2,13 @@ package deepseek
 
 import (
 	"fmt"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 
-	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
-	"github.com/magomedcoder/gogguf/pkg/model/dispatch"
-	"github.com/magomedcoder/gogguf/pkg/model/gpuresid"
-	"github.com/magomedcoder/gogguf/pkg/model/moe"
-	"github.com/magomedcoder/gogguf/pkg/ops"
+	"github.com/magomedcoder/gogguf/pkg/compute"
+	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/exec/dispatch"
+	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
+	"github.com/magomedcoder/gogguf/pkg/exec/moe"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
@@ -17,7 +17,7 @@ type Model struct {
 	cfg          Config
 	weights      *weights.Store
 	cache        *KVCache
-	gpu          gpu.Backend
+	dev          device.Backend
 	ngl          int
 	gpuMaxSeq    int
 	fused        *gpuresid.Runner // fused GPU paths: FFN, MoE experts (§6)
@@ -30,7 +30,7 @@ type Model struct {
 }
 
 // Load creates DeepSeek from weights
-func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 		cfg:          cfg,
 		weights:      w,
 		cache:        NewKVCache(cfg),
-		gpu:          g,
+		dev:          g,
 		ngl:          ngl,
 		gpuMaxSeq:    gpuMaxSeq,
 		scratch:      newScratch(cfg),
@@ -80,11 +80,11 @@ func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*Model, error) {
 
 // initFused sets up GPU layer paths (§6). DeepSeek v1: RoPE NORM, experts via ExpertFFN
 func (m *Model) initFused() {
-	if m.gpu == nil || m.ngl <= 0 {
+	if m.dev == nil || m.ngl <= 0 {
 		return
 	}
 
-	m.fused = gpuresid.New(m.weights, m.gpu, gpu.RoPENorm)
+	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENorm)
 	m.moeGPU = make([]bool, m.cfg.NumLayers)
 	for i, lt := range m.layerTensors {
 		if !lt.moe {
@@ -96,18 +96,18 @@ func (m *Model) initFused() {
 }
 
 func (m *Model) layerOnGPU(layer int) bool {
-	return m.fused != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
+	return m.fused != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 }
 
 func (m *Model) initGPUKVCache() error {
-	if m.gpu == nil || m.ngl <= 0 {
+	if m.dev == nil || m.ngl <= 0 {
 		return nil
 	}
 
 	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
-	maxSeq := gpu.CapMaxSeq(m.cfg.ContextLength, m.gpuMaxSeq)
+	maxSeq := device.CapMaxSeq(m.cfg.ContextLength, m.gpuMaxSeq)
 
-	return m.gpu.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
+	return m.dev.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
 
 // Config returns the model configuration
@@ -118,18 +118,18 @@ func (m *Model) Config() Config {
 // ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
-	if m.gpu != nil {
-		m.gpu.KVCacheReset()
+	if m.dev != nil {
+		m.dev.KVCacheReset()
 	}
 }
 
 // Close releases GPU resources held by the model
 func (m *Model) Close() error {
-	if m.gpu == nil {
+	if m.dev == nil {
 		return nil
 	}
-	err := m.gpu.Close()
-	m.gpu = nil
+	err := m.dev.Close()
+	m.dev = nil
 	m.fused = nil
 	return err
 }
@@ -174,7 +174,7 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 		}
 	}
 
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return nil, err
 	}
 
@@ -209,28 +209,28 @@ func (m *Model) embedToken(tokenID int) error {
 	}
 
 	switch info.Type {
-	case format.GgmlQ8_0:
-		return ops.EmbeddingQ8_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ4_0:
-		return ops.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ4_1:
-		return ops.EmbeddingQ4_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ5_0:
-		return ops.EmbeddingQ5_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ5_1:
-		return ops.EmbeddingQ5_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ4_K:
-		return ops.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ5_K:
-		return ops.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ6_K:
-		return ops.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ2_K:
-		return ops.EmbeddingQ2_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ3_K:
-		return ops.EmbeddingQ3_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case format.GgmlQ8_K:
-		return ops.EmbeddingQ8_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q8_0:
+		return compute.EmbeddingQ8_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q4_0:
+		return compute.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q4_1:
+		return compute.EmbeddingQ4_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q5_0:
+		return compute.EmbeddingQ5_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q5_1:
+		return compute.EmbeddingQ5_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q4_K:
+		return compute.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q5_K:
+		return compute.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q6_K:
+		return compute.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q2_K:
+		return compute.EmbeddingQ2_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q3_K:
+		return compute.EmbeddingQ3_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
+	case dtype.Q8_K:
+		return compute.EmbeddingQ8_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
 	default:
 		f32, err := m.weights.Floats("token_embd.weight")
 		if err != nil {
@@ -246,7 +246,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
 
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -262,16 +262,16 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	ops.ApplyRoPEHeadsNorm(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
-	ops.ApplyRoPEHeadsNorm(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+	compute.ApplyRoPEHeadsNorm(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+	compute.ApplyRoPEHeadsNorm(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
 
 	kvPos := m.cache.Len()
 	if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
 		return err
 	}
 
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		_ = m.gpu.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		_ = m.dev.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
 	}
 
 	seqLen := m.cache.Len() + 1
@@ -282,9 +282,9 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	if err := m.matmulInto(lt.attnOut, m.cfg.EmbeddingDim, m.cfg.NumHeads*m.cfg.HeadDim, m.scratch.attn, m.scratch.h, layer); err != nil {
 		return err
 	}
-	ops.AddInPlace(m.scratch.x, m.scratch.h)
+	compute.AddInPlace(m.scratch.x, m.scratch.h)
 
-	if err := ops.RMSNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -292,20 +292,20 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		if err := m.ffnMoE(lt, layer); err != nil {
 			return err
 		}
-		ops.AddInPlace(m.scratch.x, m.scratch.moeAcc)
+		compute.AddInPlace(m.scratch.x, m.scratch.moeAcc)
 		return nil
 	}
 
 	if m.layerOnGPU(layer) {
 		if err := m.fused.FFNNamed(lt.ffnGate, lt.ffnUp, lt.ffnDown, m.scratch.h, m.scratch.h, m.cfg.EmbeddingDim, m.cfg.FFNHidden); err == nil {
-			ops.AddInPlace(m.scratch.x, m.scratch.h)
+			compute.AddInPlace(m.scratch.x, m.scratch.h)
 			return nil
 		}
 	}
 
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.ffnGPU(lt, m.scratch.h, m.scratch.h); err == nil {
-			ops.AddInPlace(m.scratch.x, m.scratch.h)
+			compute.AddInPlace(m.scratch.x, m.scratch.h)
 			return nil
 		}
 	}
@@ -318,11 +318,11 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		return err
 	}
 
-	ops.SwiGLUInPlace(m.scratch.gate[:m.cfg.FFNHidden], m.scratch.up[:m.cfg.FFNHidden])
+	compute.SwiGLUInPlace(m.scratch.gate[:m.cfg.FFNHidden], m.scratch.up[:m.cfg.FFNHidden])
 	if err := m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, m.cfg.FFNHidden, m.scratch.gate[:m.cfg.FFNHidden], m.scratch.h, layer); err != nil {
 		return err
 	}
-	ops.AddInPlace(m.scratch.x, m.scratch.h)
+	compute.AddInPlace(m.scratch.x, m.scratch.h)
 
 	return nil
 }
@@ -356,7 +356,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		if err := dispatch.MatMulExpertInto(m.weights, lt.upExps, ei, ffn, embd, m.scratch.h, upBuf); err != nil {
 			return err
 		}
-		ops.SwiGLUInPlace(gateBuf, upBuf)
+		compute.SwiGLUInPlace(gateBuf, upBuf)
 		if err := dispatch.MatMulExpertInto(m.weights, lt.downExps, ei, embd, ffn, gateBuf, m.scratch.tmp); err != nil {
 			return err
 		}
@@ -404,7 +404,7 @@ func (m *Model) sharedExpert(lt layerTensors, layer int) error {
 	shared := m.cfg.sharedFFN()
 	if m.layerOnGPU(layer) {
 		if err := m.fused.FFNNamed(lt.gateShexp, lt.upShexp, lt.downShexp, m.scratch.h, m.scratch.tmp, embd, shared); err == nil {
-			ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+			compute.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
 			return nil
 		}
 	}
@@ -419,12 +419,12 @@ func (m *Model) sharedExpert(lt layerTensors, layer int) error {
 		return err
 	}
 
-	ops.SwiGLUInPlace(sg, su)
+	compute.SwiGLUInPlace(sg, su)
 	if err := m.matmulInto(lt.downShexp, embd, shared, sg, m.scratch.tmp, layer); err != nil {
 		return err
 	}
 
-	ops.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
+	compute.AddInPlace(m.scratch.moeAcc, m.scratch.tmp)
 
 	return nil
 }
@@ -436,7 +436,7 @@ func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {
 	}
 
 	embd, ffn := m.cfg.EmbeddingDim, m.cfg.FFNHidden
-	if info.Type == format.GgmlQ8_0 {
+	if info.Type == dtype.Q8_0 {
 		gateRaw, err := m.weights.Raw(lt.ffnGate)
 		if err != nil {
 			return err
@@ -452,7 +452,7 @@ func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {
 			return err
 		}
 
-		return m.gpu.FFNSwiGLUQ8_0Cached(lt.ffnGate, lt.ffnUp, lt.ffnDown, gateRaw, upRaw, downRaw, x, out, embd, ffn)
+		return m.dev.FFNSwiGLUQ8_0Cached(lt.ffnGate, lt.ffnUp, lt.ffnDown, gateRaw, upRaw, downRaw, x, out, embd, ffn)
 	}
 
 	gateW, err := m.weights.Floats(lt.ffnGate)
@@ -470,7 +470,7 @@ func (m *Model) ffnGPU(lt layerTensors, x, out []float32) error {
 		return err
 	}
 
-	return m.gpu.FFNSwiGLUCached(lt.ffnGate, lt.ffnUp, lt.ffnDown, gateW, upW, downW, x, out, embd, ffn)
+	return m.dev.FFNSwiGLUCached(lt.ffnGate, lt.ffnUp, lt.ffnDown, gateW, upW, downW, x, out, embd, ffn)
 }
 
 func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, layer int) error {
@@ -480,8 +480,8 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 		}
 	}
 
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		return dispatch.MatMulGPUInto(m.gpu, m.weights, name, rows, cols, vec, out)
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		return dispatch.MatMulGPUInto(m.dev, m.weights, name, rows, cols, vec, out)
 	}
 
 	return dispatch.MatMulRawInto(m.weights, name, rows, cols, vec, out)
@@ -493,44 +493,44 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		return nil, err
 	}
 
-	if info.Type == format.GgmlQ8_0 {
+	if info.Type == dtype.Q8_0 {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
-		return m.gpu.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
 	}
 
-	if info.Type == format.GgmlQ4_0 {
+	if info.Type == dtype.Q4_0 {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
-		return m.gpu.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
 	}
 
-	if info.Type == format.GgmlQ4_K {
+	if info.Type == dtype.Q4_K {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
-		return m.gpu.MatMulVecQ4_KCached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ4_KCached(name, raw, rows, cols, vec)
 	}
 
-	if info.Type == format.GgmlQ5_K {
+	if info.Type == dtype.Q5_K {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
-		return m.gpu.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
 	}
 
-	if info.Type == format.GgmlQ6_K {
+	if info.Type == dtype.Q6_K {
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return nil, err
 		}
-		return m.gpu.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
+		return m.dev.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
 	}
 
 	f32, err := m.weights.Floats(name)
@@ -538,11 +538,11 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		return nil, err
 	}
 
-	return m.gpu.MatMulVecCached(name, f32, rows, cols, vec)
+	return m.dev.MatMulVecCached(name, f32, rows, cols, vec)
 }
 
 func (m *Model) logitsFromHidden(x []float32) error {
-	if err := ops.RMSNormInto(m.scratch.h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
+	if err := compute.RMSNormInto(m.scratch.h, x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
@@ -558,48 +558,48 @@ func (m *Model) logitsFromHidden(x []float32) error {
 	}
 
 	switch info.Type {
-	case format.GgmlQ8_0:
-		return ops.MatMulVecQ8_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ4_0:
-		return ops.MatMulVecQ4_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ4_1:
-		return ops.MatMulVecQ4_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ5_0:
-		return ops.MatMulVecQ5_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ5_1:
-		return ops.MatMulVecQ5_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ4_K:
-		return ops.MatMulVecQ4_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ5_K:
-		return ops.MatMulVecQ5_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ6_K:
-		return ops.MatMulVecQ6_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ2_K:
-		return ops.MatMulVecQ2_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ3_K:
-		return ops.MatMulVecQ3_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case format.GgmlQ8_K:
-		return ops.MatMulVecQ8_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q8_0:
+		return compute.MatMulVecQ8_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q4_0:
+		return compute.MatMulVecQ4_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q4_1:
+		return compute.MatMulVecQ4_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q5_0:
+		return compute.MatMulVecQ5_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q5_1:
+		return compute.MatMulVecQ5_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q4_K:
+		return compute.MatMulVecQ4_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q5_K:
+		return compute.MatMulVecQ5_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q6_K:
+		return compute.MatMulVecQ6_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q2_K:
+		return compute.MatMulVecQ2_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q3_K:
+		return compute.MatMulVecQ3_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+	case dtype.Q8_K:
+		return compute.MatMulVecQ8_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {
 			return err
 		}
 
-		return ops.MatMulVecInto(f32, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
+		return compute.MatMulVecInto(f32, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
 	}
 }
 
 func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, layer int) error {
-	if m.gpu != nil && gpu.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		if err := m.gpu.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		if err := m.dev.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil
 		}
 
-		if err := m.gpu.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
+		if err := m.dev.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil
 		}
 	}
 
-	return ops.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim)
+	return compute.AttentionScoresInto(dst, q, k, v, scores, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim)
 }

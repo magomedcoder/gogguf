@@ -3,17 +3,17 @@
 package qwen2
 
 import (
-	"github.com/magomedcoder/gogguf/pkg/gpu"
+	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/model/mistral"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
 // Load loads a qwen2 GGUF model.
-func Load(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*mistral.Model, error) {
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*mistral.Model, error) {
 	return mistral.LoadQwen2(w, g, ngl, gpuMaxSeq)
 }
 
 // LoadMoE loads a qwen2moe GGUF model.
-func LoadMoE(w *weights.Store, g gpu.Backend, ngl, gpuMaxSeq int) (*mistral.Model, error) {
+func LoadMoE(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*mistral.Model, error) {
 	return mistral.LoadQwen2MoE(w, g, ngl, gpuMaxSeq)
 }

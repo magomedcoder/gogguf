@@ -1,0 +1,38 @@
+package gpuresid
+
+import (
+	"fmt"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
+
+	"github.com/magomedcoder/gogguf/pkg/quant"
+)
+
+// QuantBytes returns raw byte size of a rows*cols matrix for a quantized type.
+// Used to slice MoE expert tensor without dequantization (§6)
+func QuantBytes(t dtype.DType, rows, cols int) (int, error) {
+	if rows <= 0 || cols <= 0 {
+		return 0, fmt.Errorf("rows=%d cols=%d", rows, cols)
+	}
+
+	var blk, size int
+	switch t {
+	case dtype.Q8_0:
+		blk, size = quant.QK8_0, quant.BlockQ8_0Size
+	case dtype.Q4_0:
+		blk, size = quant.QK4_0, quant.BlockQ4_0Size
+	case dtype.Q4_K:
+		blk, size = quant.QK_K, quant.BlockQ4_KSize
+	case dtype.Q5_K:
+		blk, size = quant.QK_K, quant.BlockQ5_KSize
+	case dtype.Q6_K:
+		blk, size = quant.QK_K, quant.BlockQ6_KSize
+	default:
+		return 0, fmt.Errorf("type %s not supported", t)
+	}
+
+	if cols%blk != 0 {
+		return 0, fmt.Errorf("cols=%d not divisible by %d", cols, blk)
+	}
+
+	return rows * (cols / blk) * size, nil
+}

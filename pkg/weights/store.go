@@ -5,7 +5,6 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/format"
 	"github.com/magomedcoder/gogguf/pkg/quant"
-	"github.com/magomedcoder/gogguf/pkg/tensor"
 )
 
 // Store holds model tensors loaded lazily by name.
@@ -40,7 +39,7 @@ func (s *Store) Raw(name string) ([]byte, error) {
 		return nil, err
 	}
 
-	b, err := tensor.LoadRawView(info)
+	b, err := LoadRawView(info)
 	if err != nil {
 		return nil, fmt.Errorf("weights %q: %w", name, err)
 	}

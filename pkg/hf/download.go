@@ -28,7 +28,7 @@ func downloadFile(url, localPath, token string, expectedSize int64) error {
 	}
 
 	if expectedSize > 0 && offset >= expectedSize {
-		return os.Rename(tmp, localPath)
+		return replaceFile(tmp, localPath)
 	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -105,7 +105,7 @@ func downloadFile(url, localPath, token string, expectedSize int64) error {
 		return err
 	}
 
-	return os.Rename(tmp, localPath)
+	return replaceFile(tmp, localPath)
 }
 
 type progressWriter struct {
@@ -131,19 +131,19 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 func (p *progressWriter) print() {
 	if p.total > 0 {
 		pct := 100 * p.downloaded / p.total
-		fmt.Fprintf(os.Stderr, "\rDownloading %s %3d%%", p.name, pct)
+		fmt.Fprintf(progressOut(), "\rDownloading %s %3d%%", p.name, pct)
 	} else {
-		fmt.Fprintf(os.Stderr, "\rDownloading %s %d MB", p.name, p.downloaded/1e6)
+		fmt.Fprintf(progressOut(), "\rDownloading %s %d MB", p.name, p.downloaded/1e6)
 	}
 }
 
 func (p *progressWriter) finish(ok bool) {
 	if ok && p.total > 0 {
-		fmt.Fprintf(os.Stderr, "\rDownloading %s 100%%\n", p.name)
+		fmt.Fprintf(progressOut(), "\rDownloading %s 100%%\n", p.name)
 	} else if ok {
-		fmt.Fprintf(os.Stderr, "\rDownloading %s done\n", p.name)
+		fmt.Fprintf(progressOut(), "\rDownloading %s done\n", p.name)
 	} else {
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(progressOut())
 	}
 }
 
@@ -180,7 +180,7 @@ func finalizeFile(f FileInfo) (string, error) {
 		symlinkMu.Lock()
 		if !symlinksDisabled {
 			symlinksDisabled = true
-			fmt.Fprintln(os.Stderr, "hf: symlink unavailable, copying into snapshots")
+			fmt.Fprintln(progressOut(), "hf: symlink unavailable, copying into snapshots")
 		}
 
 		symlinkMu.Unlock()
@@ -226,7 +226,7 @@ func ensureDownloaded(f FileInfo, token string) (string, error) {
 		f.LocalPath = f.FinalPath
 	}
 
-	fmt.Fprintf(os.Stderr, "hf: downloading %s\n", f.Path)
+	fmt.Fprintf(progressOut(), "hf: downloading %s\n", f.Path)
 
 	if err := downloadFile(f.URL, f.LocalPath, token, f.Size); err != nil {
 		return "", err

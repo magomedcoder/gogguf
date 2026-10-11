@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/format"
-	"github.com/magomedcoder/gogguf/pkg/gpu"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
@@ -39,9 +39,9 @@ func loadModel(t *testing.T, ngl int) *Model {
 		t.Fatal(err)
 	}
 
-	var g gpu.Backend
+	var g device.Backend
 	if ngl > 0 {
-		if g, err = gpu.OpenCUDA(); err != nil {
+		if g, err = device.OpenCUDA(); err != nil {
 			t.Skip("CUDA unavailable:", err)
 		}
 	}
@@ -74,7 +74,7 @@ func TestMistralPartialOffloadLogitsParity(t *testing.T) {
 	got, err := dev.Forward(tokens, 0)
 	if err != nil {
 		dev.Close()
-		if gpu.IsOutOfMemory(err) {
+		if device.IsOutOfMemory(err) {
 			t.Skip("insufficient VRAM:", err)
 		}
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestMistralPartialOffloadLogitsParity(t *testing.T) {
 		}
 	}
 
-	t.Logf("max|diff|=%v max|logit|=%v argmax cpu=%d gpu=%d", worst, scale, bestCPU, bestGPU)
+	t.Logf("max|diff|=%v max|logit|=%v argmax cpu=%d dev = %d", worst, scale, bestCPU, bestGPU)
 
 	if worst > 0.5 {
 		t.Fatalf("CPU vs GPU logits diverge: max|diff|=%v", worst)

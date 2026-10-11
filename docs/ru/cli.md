@@ -1,6 +1,6 @@
 # CLI
 
-## `gguf info`
+## `gogguf info`
 
 Краткая сводка о модели: версия GGUF, архитектура, имя, число тензоров, размер весов, длина контекста.
 
@@ -12,7 +12,7 @@
 |------|----------------------|
 | `-m` | путь к файлу `.gguf` |
 
-## `gguf inspect`
+## `gogguf inspect`
 
 Полный дамп метаданных и списка тензоров (имя, тип, размерности, размер в байтах).
 
@@ -20,9 +20,9 @@
 ./build/gogguf inspect ./models/Qwen3-4B-Q8_0.gguf
 ```
 
-Аргумент - путь к файлу, без флагов.
+Позиционный аргумент - путь к файлу, без флагов.
 
-## `gguf run`
+## `gogguf run`
 
 Генерация текста: prefill промпта -> autoregressive decode -> stdout.
 
@@ -50,14 +50,14 @@
 | `--repeat-last-n`   | `64`         | окно истории для repeat penalty                                     |
 | `--seed`            | `0`          | seed PRNG                                                           |
 | `--chat`            | `false`      | обернуть промпт в ChatML/Qwen template                              |
-| `--thinking`        | `false`      | режим размышления Qwen3 (только с `--chat`)                         |
+| `--thinking`        | `false`      | режим размышления Qwen3 (с `--chat`)                                |
 | `-i`                | `false`      | интерактивный REPL (stdin)                                          |
 | `-ngl`              | `0`          | слои на GPU - ОС/карты и env: [platforms.md](platforms.md)          |
 | `-b` / `--n-batch`  | `1`          | chunk prefill; **`>1` только Qwen3 dense** (MoE/другие arch serial) |
 | `-dev`              | пусто        | устройство(а) GPU - см. [platforms.md](platforms.md)                |
 | `-tensor-split`     | пусто        | multi-GPU split - см. [platforms.md](platforms.md)                  |
 
-Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`. Gated/private: `HF_TOKEN`. Зеркало Hub: `MODEL_ENDPOINT`.
+Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`.
 
 Для **Qwen3 Instruct** нужен `--chat`, иначе ответ будет некорректным.
 
@@ -81,7 +81,7 @@ GPU (`-ngl`, `-dev`, Docker): [platforms.md](platforms.md).
 ./build/gogguf run -m ./models/Qwen3-4B-Q8_0.gguf --chat -i
 ```
 
-## `gguf serve`
+## `gogguf serve`
 
 HTTP-сервер с OpenAI-совместимым API (см. [api.md](api.md)).
 
@@ -107,4 +107,23 @@ Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 | `--api-key`                       | пусто            | auth Bearer / X-API-Key                                      |
 | `--rate-limit`                    | `0`              | запросов в минуту на IP (`0` = без лимита)                   |
 
-Эндпоинты и сессии (`X-Session-Id`): [HTTP API](api.md).
+Эндпоинты: [HTTP API](api.md).
+
+## Переменные окружения (Hugging Face)
+
+Только для `-hf` / `pkg/hf`. Inference и residency **не** управляются через env - только `LoadOptions` ([library.md](library.md)).
+
+| Переменная              | Описание                                                 |
+|-------------------------|----------------------------------------------------------|
+| `HF_TOKEN`              | Auth для gated/private репозиториев Hub.                 |
+| `MODEL_ENDPOINT`        | Базовый URL Hub (по умолчанию `https://huggingface.co`). |
+| `LLAMA_CACHE`           | Каталог кэша моделей (высший приоритет).                 |
+| `HF_HUB_CACHE`          | Каталог кэша Hub.                                        |
+| `HUGGINGFACE_HUB_CACHE` | Алиас кэша Hub.                                          |
+| `HF_HOME`               | База; кэш = `$HF_HOME/hub`.                              |
+| `XDG_CACHE_HOME`        | Кэш = `$XDG_CACHE_HOME/huggingface/hub`.                 |
+| `LOCALAPPDATA`          | Windows fallback: `%LOCALAPPDATA%\huggingface\hub`.      |
+
+Порядок выбора кэша: `LLAMA_CACHE` -> `HF_HUB_CACHE` -> `HUGGINGFACE_HUB_CACHE` -> `HF_HOME/hub` -> `XDG_CACHE_HOME/huggingface/hub` -> (Windows) `LOCALAPPDATA` -> `~/.cache/huggingface/hub`.
+
+`CUDA_VISIBLE_DEVICES` - стандартный фильтр драйвера CUDA (не специфика GoGGUF); влияет на GPU при `-ngl > 0` - см. [platforms.md](platforms.md).

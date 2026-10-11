@@ -3,8 +3,6 @@
 package integration
 
 import (
-	"os"
-	"strconv"
 	"testing"
 
 	"github.com/magomedcoder/gogguf"
@@ -12,19 +10,12 @@ import (
 )
 
 // TestFullLayersCPUVsGPU compares embed + hidden by layer CPU vs CUDA.
-// GPU approx (softmax ex2, residency) accumulates drift toward the last layer (~0.3 abs);
-// override: GGUF_GPU_LAYERS_TOL (default 0.35).
+// GPU approx (softmax ex2, residency) accumulates drift toward the last layer (~0.3 abs).
+const gpuLayersTol = 0.35
+
 func TestFullLayersCPUVsGPU(t *testing.T) {
 	model := modelPath(t)
-
-	tol := 0.35
-	if v := os.Getenv("GGUF_GPU_LAYERS_TOL"); v != "" {
-		f, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			t.Fatal(err)
-		}
-		tol = f
-	}
+	tol := gpuLayersTol
 
 	cpuEng, err := gogguf.LoadMapped(model, gogguf.LoadOptions{
 		NGL: 0,

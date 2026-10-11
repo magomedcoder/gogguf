@@ -8,7 +8,7 @@
 | **GPU (`-ngl`)** | **только Linux + NVIDIA** | Metal на macOS, CUDA на Windows |
 | **Другие GPU**   | -                         | AMD / Intel                     |
 
-Тестировалось на **GTX 1050 Ti (4 GB)**, **RTX 5060 Ti*, **Quadro RTX 6000 (24 GB)***.
+Тестировалось на **GTX 1050 Ti (4 GB)**, **RTX 5060 Ti (16 GB)**, **Quadro RTX 6000 (24 GB)**.
 
 ## Linux + NVIDIA (GPU)
 
@@ -17,27 +17,28 @@
 ```bash
 CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
 
-./build/gogguf run -m model.gguf --chat -ngl 999 -p "Привет"
+./build/gogguf run -m model.gguf --chat -ngl 999 -p "Hi"
 ./build/gogguf serve -m model.gguf --host 127.0.0.1:8000 -ngl 999
 ```
 
 Без `-tags cuda` при `-ngl > 0` будет ошибка `gpu: CUDA unavailable`.
 
-| Флаг / env                                                                       | Смысл                                          |
-|----------------------------------------------------------------------------------|------------------------------------------------|
-| `-ngl N`                                                                         | первые N слоёв на GPU (`999` = сколько влезет) |
-| `-dev 1` или `-dev 0,1`                                                          | номер GPU **после** `CUDA_VISIBLE_DEVICES`     |
-| `-tensor-split 0.6,0.4`                                                          | доля слоёв по устройствам из `-dev`            |
-| `CUDA_VISIBLE_DEVICES=1`                                                         | какие GPU видит процесс                        |
-| `GGUF_HIDDEN_RESIDENCY=0` / `GGUF_QKV_RESIDENCY=0` / `GGUF_ATTN_FFN_RESIDENCY=0` | выкл. fused residency                          |
+| Флаг / env                       | Смысл                                          |
+|----------------------------------|------------------------------------------------|
+| `-ngl N`                         | первые N слоёв на GPU (`999` = сколько влезет) |
+| `-dev 1` или `-dev 0,1`          | номер GPU **после** `CUDA_VISIBLE_DEVICES`     |
+| `-tensor-split 0.6,0.4`          | доля слоёв по устройствам из `-dev`            |
+| `CUDA_VISIBLE_DEVICES=1`         | какие GPU видит процесс                        |
+
+Residency: по умолчанию вкл.; выкл. только через `LoadOptions` в library ([library.md](library.md)) - без env `GGUF_*_RESIDENCY`.
 
 Если модель не влезает в VRAM - меньший квант, меньше `-ngl` или меньшая модель. Между загрузками в коде: `Engine.Close()`.
 
 ```bash
 # вторая карта / split
-./build/gogguf run -m model.gguf -ngl 28 -dev 1 -p "Привет"
+./build/gogguf run -m model.gguf -ngl 28 -dev 1 -p "Hi"
 ./build/gogguf serve -m model.gguf -ngl 28 -dev 0,1 -tensor-split 0.75,0.25
-CUDA_VISIBLE_DEVICES=1 ./build/gogguf run -m model.gguf -ngl 28 -p "Привет"
+CUDA_VISIBLE_DEVICES=1 ./build/gogguf run -m model.gguf -ngl 28 -p "Hi"
 ```
 
 Multi-GPU (`-dev 0,1`) - **частично**: слои делятся, hidden между GPU через host, параллельного compute между картами пока нет.
@@ -63,20 +64,60 @@ Docker только CPU: [build.md](build.md).
 Всегда CPU: tokenizer, sampling, HTTP.  
 Подробнее: [build.md](build.md) (раздел CUDA) и [models.md](models.md).
 
+## CPU (все платформы)
+
+CPU без CGO. Примеры кросс-сборки:
+
+```bash
+# Windows
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o build/gogguf.exe ./cmd/gogguf
+CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -o build/gogguf-arm64.exe ./cmd/gogguf
+
+# macOS
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o build/gogguf ./cmd/gogguf
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o build/gogguf-amd64 ./cmd/gogguf
+```
+
+| Цель            | Статус        |
+|-----------------|---------------|
+| `linux/amd64`   | ok            |
+| `linux/arm64`   | ok            |
+| `darwin/amd64`  | ok            |
+| `darwin/arm64`  | ok (NEON asm) |
+| `windows/amd64` | ok            |
+| `windows/arm64` | ok (NEON asm) |
+
+HF cache: `~/.cache/huggingface/hub` (Unix) или `%LOCALAPPDATA%\huggingface\hub` (Windows). Hub env: [cli.md](cli.md#переменные-окружения-hugging-face).
+
 ## macOS
 
-- **CPU:** да  
-- **GPU (`-ngl`):** нет - Metal только заглушка (`-tags metal`). `-ngl` отклоняется.
+- **CPU:** да (`amd64` / `arm64`)  
+- **GPU (`-ngl`):** нет - Metal только заглушка (`-tags metal`); compute не реализован. `-ngl` отклоняется.  
+- **mmap:** да (`mmap`)
+
+```bash
+go build -o build/gogguf ./cmd/gogguf
+./build/gogguf run -m model.gguf --chat -p "Hi"
+./build/gogguf serve -m model.gguf --host 127.0.0.1:8000
+```
 
 В планах: Metal kernels для `-ngl` на Apple Silicon / Intel Mac.
 
 ## Windows
 
-- **CPU:** да  
-- **GPU (`-ngl`):** нет - загрузчик CUDA рассчитан на Linux `libcuda.so`.  
-- **mmap:** большие GGUF читаются обычным файлом (настоящий `CreateFileMapping` - в планах).
+- **CPU:** да (`amd64` / `arm64`)  
+- **GPU (`-ngl`):** нет - загрузчик CUDA рассчитан на Linux `libcuda.so`; путь Windows-драйвера не подключён.  
+- **mmap:** да (`CreateFileMapping` / `MapViewOfFile`)
 
-В планах: CUDA на Windows.
+PowerShell:
+
+```powershell
+go build -o build/gogguf.exe ./cmd/gogguf
+.\build\gogguf.exe run -m model.gguf --chat -p "Hi"
+.\build\gogguf.exe serve -m model.gguf --host 127.0.0.1:8000
+```
+
+Ctrl+C останавливает `serve`. В планах: CUDA на Windows.
 
 ## Планируется (GPU)
 

@@ -31,7 +31,7 @@ func runRun(args []string) error {
 	chat := fs.Bool("chat", false, "wrap prompt in Qwen chat template")
 	thinking := fs.Bool("thinking", false, "Qwen3: enable thinking mode (with --chat)")
 	interactive := fs.Bool("i", false, "interactive mode (REPL)")
-	ngl := fs.Int("ngl", 0, "GPU layers (CUDA, -tags cuda); on macOS unsupported until Metal kernels; residency toggles: GGUF_HIDDEN/QKV/ATTN_FFN_RESIDENCY=0 (see docs/build.md)")
+	ngl := fs.Int("ngl", 0, "GPU layers (CUDA, -tags cuda); on macOS unsupported until Metal kernels (see docs/platforms.md)")
 	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 speeds up prefill (Qwen3 dense; MoE/other arch serial)")
 	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
