@@ -9,15 +9,14 @@ import (
 )
 
 // forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
-// With -ngl matmul uses loop-B MatMulVec*Cached (weights resident on GPU), attention -
-// loop AttentionScoresKV over GPU KV; otherwise CPU GEMM + CPU causal attn (§4).
+// With -ngl matmul uses MatMulMat*Cached (quant GEMM / batched device launches); attention - loop AttentionScoresKV over GPU KV; otherwise CPU GEMM + CPU causal attn.
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
 	b := len(tokenIDs)
 	if b == 0 {
 		return fmt.Errorf("qwen3: empty batch")
 	}
 
-	// batch-path host buffers: resident hidden from device is no longer needed
+	// Prefill chunk uses host scratch; pull any resident decode hidden first.
 	if err := m.syncHiddenFromDevice(); err != nil {
 		return err
 	}
@@ -45,22 +44,38 @@ func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) erro
 	}
 
 	last := m.scratch.x[(b-1)*embd : b*embd]
-	if err := m.logitsFromHidden(last); err != nil {
-		return err
-	}
-
-	m.emitLogitsDebug()
-
-	// Batch prefill uses host x; restore device-resident hidden for decode when enabled.
-	if m.residency && m.dev != nil {
-		last := m.scratch.x[(b-1)*embd : b*embd]
+	// Prefer GPU logits after re-upload when residency is on.
+	if m.residency && m.dev != nil && m.logitsOnGPU {
 		if err := m.dev.HiddenUpload(last); err != nil {
 			m.residency = false
+			m.residDevice = false
+			if err := m.logitsFromHidden(last); err != nil {
+				return err
+			}
 		} else {
 			m.residDevice = true
+			if err := m.logitsDevice(); err != nil {
+				m.logitsOnGPU = false
+				if err := m.logitsFromHidden(last); err != nil {
+					return err
+				}
+			}
+		}
+	} else {
+		if err := m.logitsFromHidden(last); err != nil {
+			return err
+		}
+
+		if m.residency && m.dev != nil {
+			if err := m.dev.HiddenUpload(last); err != nil {
+				m.residency = false
+			} else {
+				m.residDevice = true
+			}
 		}
 	}
 
+	m.emitLogitsDebug()
 	return nil
 }
 
@@ -97,6 +112,7 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 		return err
 	}
 
+	onGPU := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 	for i := range batch {
 		offQ := i * qDim
 		offK := i * kvDim
@@ -109,8 +125,18 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 		}
 
 		pos := startPos + i
-		compute.ApplyRoPEHeads(q[offQ:offQ+qDim], m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
-		compute.ApplyRoPEHeads(k[offK:offK+kvDim], m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+		if onGPU {
+			if err := m.dev.ApplyRoPEHeads(q[offQ:offQ+qDim], m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase); err != nil {
+				compute.ApplyRoPEHeads(q[offQ:offQ+qDim], m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+			}
+
+			if err := m.dev.ApplyRoPEHeads(k[offK:offK+kvDim], m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase); err != nil {
+				compute.ApplyRoPEHeads(k[offK:offK+kvDim], m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+			}
+		} else {
+			compute.ApplyRoPEHeads(q[offQ:offQ+qDim], m.cfg.NumHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+			compute.ApplyRoPEHeads(k[offK:offK+kvDim], m.cfg.NumKVHeads, m.cfg.HeadDim, pos, m.cfg.RopeFreqBase)
+		}
 	}
 
 	pastLen := m.cache.Len()
@@ -122,6 +148,7 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
 		if err := m.dev.KVCacheAppendN(layer, pastLen, k, v, batch); err != nil {
 			m.gpuKVStale = true
+			_ = m.tryRecoverGPUKV()
 		}
 	}
 
@@ -138,7 +165,17 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 		compute.AddInPlace(x[off:off+embd], h[off:off+embd])
 	}
 
-	if err := compute.RMSNormBatchInto(h, x, ln.ffnNorm, m.cfg.RMSNormEps, batch, embd); err != nil {
+	if onGPU {
+		for i := range batch {
+			off := i * embd
+			if err := m.dev.RMSNormInto(h[off:off+embd], x[off:off+embd], ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
+				if err := compute.RMSNormBatchInto(h, x, ln.ffnNorm, m.cfg.RMSNormEps, batch, embd); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	} else if err := compute.RMSNormBatchInto(h, x, ln.ffnNorm, m.cfg.RMSNormEps, batch, embd); err != nil {
 		return err
 	}
 
@@ -152,7 +189,13 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 
 	for i := range batch {
 		off := i * ffn
-		compute.SwiGLUInPlace(gate[off:off+ffn], up[off:off+ffn])
+		if onGPU {
+			if err := m.dev.SwiGLUInPlace(gate[off:off+ffn], up[off:off+ffn]); err != nil {
+				compute.SwiGLUInPlace(gate[off:off+ffn], up[off:off+ffn])
+			}
+		} else {
+			compute.SwiGLUInPlace(gate[off:off+ffn], up[off:off+ffn])
+		}
 	}
 
 	if err := m.matmulBatchInto(lt.ffnDown, embd, ffn, gate, h, batch, layer); err != nil {
@@ -191,8 +234,7 @@ func (m *Model) attentionBatchCausalInto(attn, q []float32, layer, pastLen, batc
 	return compute.AttentionScoresBatchCausalInto(attn, q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, pastLen, batch, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim)
 }
 
-// matmulBatchInto: W * X[batch].
-// With -ngl - loop MatMulVec*Cached (weights already on GPU).
+// matmulBatchInto: W * X[batch] via MatMulMat*Cached on GPU or CPU MatMulMat*.
 func (m *Model) matmulBatchInto(name string, rows, cols int, x, out []float32, batch, layer int) error {
 	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.matmulBatchGPU(name, rows, cols, x, out, batch); err == nil {
@@ -204,14 +246,26 @@ func (m *Model) matmulBatchInto(name string, rows, cols int, x, out []float32, b
 }
 
 func (m *Model) matmulBatchGPU(name string, rows, cols int, x, out []float32, batch int) error {
-	for b := range batch {
-		dst := out[b*rows : (b+1)*rows]
-		if err := m.matmulGPUInto(name, rows, cols, x[b*cols:(b+1)*cols], dst); err != nil {
-			return err
-		}
+	raw, err := m.weights.Raw(name)
+	if err != nil {
+		return err
 	}
 
-	return nil
+	info, err := m.weights.Info(name)
+	if err != nil {
+		return err
+	}
+
+	switch info.Type {
+	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K:
+		return device.MatMulMatQuantCachedInto(m.dev, info.Type, name, raw, rows, cols, x, batch, out)
+	default:
+		f32, err := m.weights.Floats(name)
+		if err != nil {
+			return err
+		}
+		return device.MatMulMatCachedIntoFP32(m.dev, name, f32, rows, cols, x, batch, out)
+	}
 }
 
 func (m *Model) matmulBatchCPU(name string, rows, cols int, x, out []float32, batch int) error {

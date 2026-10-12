@@ -21,14 +21,16 @@ CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
 ./build/gogguf serve -m model.gguf --host 127.0.0.1:8000 -ngl 999
 ```
 
+**`-tags cuda` alone does not put the model on the GPU.** It only builds CUDA support into the binary. Offload starts when you pass **`-ngl N`** with `N > 0` (e.g. `-ngl 999` = as many layers as fit). Default is `-ngl 0` (CPU). On a successful GPU load, stderr shows `GPU offload: ... layers on CUDA:...`.
+
 Without `-tags cuda`, `-ngl > 0` fails with `gpu: CUDA unavailable`.
 
-| Flag / env                       | Meaning                                         |
-|----------------------------------|-------------------------------------------------|
-| `-ngl N`                         | offload first N layers (`999` = all that fit)   |
-| `-dev 1` or `-dev 0,1`           | GPU ordinal(s) **after** `CUDA_VISIBLE_DEVICES` |
-| `-tensor-split 0.6,0.4`          | layer share across devices from `-dev`          |
-| `CUDA_VISIBLE_DEVICES=1`         | hide / reorder GPUs for the process             |
+| Flag / env               | Meaning                                                  |
+|--------------------------|----------------------------------------------------------|
+| `-ngl N`                 | offload first N layers (`0` = CPU; `999` = all that fit) |
+| `-dev 1` or `-dev 0,1`   | GPU ordinal(s) **after** `CUDA_VISIBLE_DEVICES`          |
+| `-tensor-split 0.6,0.4`  | layer share across devices from `-dev`                   |
+| `CUDA_VISIBLE_DEVICES=1` | hide / reorder GPUs for the process                      |
 
 Residency paths: on by default; toggle only via `LoadOptions` in the library ([library.md](library.md)) - no `GGUF_*_RESIDENCY` env.
 
@@ -60,8 +62,9 @@ CPU-only Docker: [build.md](build.md).
 
 Best case: **Qwen3 dense**, `-ngl` = all layers, weights Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K - most of the transformer + logits on GPU.
 
-Partially / weaker: other arches, MoE, DeepSeek2 MLA, `-b > 1` prefill (not true batched GEMM yet).  
+Partially / weaker: MoE / DeepSeek2 MLA stay `n_batch=1`; F32 batch GEMM is still loop-B (quant GEMM is real).  
 Always CPU: tokenizer, sampling, HTTP.  
+Default CLI `-b` is **32** for dense prefill (GEMM / batch path).  
 Details and residency notes: [build.md](build.md) (CUDA section) and [models.md](models.md).
 
 ## CPU (all platforms)
@@ -122,7 +125,7 @@ Ctrl+C stops `serve`. Planned: Windows CUDA.
 ## Planned (GPU roadmap)
 
 - macOS Metal, Windows CUDA  
-- Faster path (true batched GEMM, flash-attn, full residency on all arches)  
+- Faster path (F32 GEMM/cuBLAS, flash-attn, full residency on all arches, batched MoE)  
 - Stronger multi-GPU  
 
 CLI flags: [cli.md](cli.md). Library: [library.md](library.md).

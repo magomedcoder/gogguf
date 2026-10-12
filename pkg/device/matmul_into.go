@@ -16,6 +16,16 @@ type MatMulIntoBackend interface {
 	MatMulVecQ6_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
 }
 
+// MatMulMatBackend is optionally implemented for W * X[batch] -> out[batch*rows] (GEMM / batched GEMV).
+type MatMulMatBackend interface {
+	MatMulMatCachedInto(name string, matrix []float32, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ8_0CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ4_0CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ4_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ5_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ6_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+}
+
 // MatMulVecCachedInto writes FP32 Cached matmul into dst.
 func MatMulVecCachedInto(b Backend, name string, matrix []float32, rows, cols int, vec, dst []float32) error {
 	if len(dst) < rows {
@@ -78,6 +88,64 @@ func MatMulVecQuantCachedInto(b Backend, t dtype.DType, name string, raw []byte,
 	}
 
 	copy(dst, got)
+
+	return nil
+}
+
+// MatMulMatQuantCachedInto dispatches W * X[batch] for supported quants.
+// Fallback: loop MatMulVecQuantCachedInto when backend lacks MatMulMatBackend.
+func MatMulMatQuantCachedInto(b Backend, t dtype.DType, name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	if batch < 1 {
+		return fmt.Errorf("device: batch=%d", batch)
+	}
+
+	if len(x) < batch*cols || len(out) < batch*rows {
+		return fmt.Errorf("device: MatMulMat buffers too short for batch=%d", batch)
+	}
+
+	if mb, ok := b.(MatMulMatBackend); ok {
+		switch t {
+		case dtype.Q8_0:
+			return mb.MatMulMatQ8_0CachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q4_0:
+			return mb.MatMulMatQ4_0CachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q4_K:
+			return mb.MatMulMatQ4_KCachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q5_K:
+			return mb.MatMulMatQ5_KCachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q6_K:
+			return mb.MatMulMatQ6_KCachedInto(name, raw, rows, cols, x, batch, out)
+		}
+	}
+
+	for i := range batch {
+		if err := MatMulVecQuantCachedInto(b, t, name, raw, rows, cols, x[i*cols:(i+1)*cols], out[i*rows:(i+1)*rows]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// MatMulMatCachedIntoFP32 runs FP32 W * X[batch] (loop-B if no MatMulMatBackend).
+func MatMulMatCachedIntoFP32(b Backend, name string, matrix []float32, rows, cols int, x []float32, batch int, out []float32) error {
+	if batch < 1 {
+		return fmt.Errorf("device: batch=%d", batch)
+	}
+
+	if len(x) < batch*cols || len(out) < batch*rows {
+		return fmt.Errorf("device: MatMulMat buffers too short for batch=%d", batch)
+	}
+
+	if mb, ok := b.(MatMulMatBackend); ok {
+		return mb.MatMulMatCachedInto(name, matrix, rows, cols, x, batch, out)
+	}
+
+	for i := range batch {
+		if err := MatMulVecCachedInto(b, name, matrix, rows, cols, x[i*cols:(i+1)*cols], out[i*rows:(i+1)*rows]); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

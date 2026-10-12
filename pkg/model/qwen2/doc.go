@@ -9,11 +9,11 @@ import (
 )
 
 // Load loads a qwen2 GGUF model.
-func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*mistral.Model, error) {
-	return mistral.LoadQwen2(w, g, ngl, gpuMaxSeq)
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*mistral.Model, error) {
+	return mistral.LoadQwen2(w, g, ngl, gpuMaxSeq, nBatch)
 }
 
 // LoadMoE loads a qwen2moe GGUF model.
-func LoadMoE(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*mistral.Model, error) {
-	return mistral.LoadQwen2MoE(w, g, ngl, gpuMaxSeq)
+func LoadMoE(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*mistral.Model, error) {
+	return mistral.LoadQwen2MoE(w, g, ngl, gpuMaxSeq, nBatch)
 }

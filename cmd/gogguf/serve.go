@@ -18,8 +18,8 @@ func runServe(args []string) error {
 	fs.StringVar(&hfRepo, "hf-repo", "", "alias for -hf")
 	host := fs.String("host", "127.0.0.1:8000", "HTTP server address")
 	ngl := fs.Int("ngl", 0, "GPU layers (CUDA, -tags cuda); on macOS unsupported until Metal kernels (see docs/platforms.md)")
-	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 Qwen3 dense (MoE/other arch serial)")
-	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
+	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense batch/GEMM; MoE/MLA/SWA serial")
+	fs.IntVar(nBatch, "n-batch", 32, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
 	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
 	apiKey := fs.String("api-key", "", "API key (Bearer / X-API-Key); empty = no auth")
@@ -64,7 +64,11 @@ func runServe(args []string) error {
 	}
 
 	if *nBatch > 1 {
-		fmt.Fprintf(os.Stderr, " n_batch=%d", *nBatch)
+		if eff := engine.PrefillBatchSize(); eff < *nBatch {
+			fmt.Fprintf(os.Stderr, " n_batch=%d(requested %d; MoE/MLA/SWA serial)", eff, *nBatch)
+		} else {
+			fmt.Fprintf(os.Stderr, " n_batch=%d", eff)
+		}
 	}
 
 	if *apiKey != "" {

@@ -33,7 +33,7 @@ For **Qwen3 dense** with `-ngl` = all layers (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K w
 | `output_norm` + `lm_head`                                  | GPU                      | `LogitsFromDevice`, one DtoH of `vocab` floats |
 | sampling, KV mirror, HTTP                                  | CPU                      | `attn`/`k`/`v` of a layer still go DtoH        |
 
-Partly on GPU: `-b > 1` prefill (loop-B GPU matmul, not true batched GEMM), other architectures (no full residency), MoE / DeepSeek2 MLA limits.  
+Partly on GPU: F32 batch still device-offset vec launches; MoE / DeepSeek2 MLA / SWA force `n_batch=1`; other arches may lack full residency. Quant prefill uses `MatMulMat*` (Q8_0 single-launch PTX).  
 **`gpuKVStale`:** if GPU KV append fails, fused GPU attention is skipped until `ResetCache()` / a new session.  
 Quants without native kernels (Q4_1, Q5_0/1, Q2_K, Q3_K, Q8_K) fall back to FP32 and disable residency.
 

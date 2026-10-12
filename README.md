@@ -57,7 +57,7 @@ yarn install # or npm install
 yarn dev # http://localhost:5173 - proxies /api to :8000
 ```
 
-API details: [docs/api.md](docs/api.md). UI details: [web-ui/README.md](web-ui/README.md).
+API details: [docs/api.md](docs/api.md). UI details: [docs/web-ui.md](docs/web-ui.md).
 
 ## Documentation
 
@@ -65,7 +65,7 @@ API details: [docs/api.md](docs/api.md). UI details: [web-ui/README.md](web-ui/R
 * [Build: CPU / Docker](docs/build.md)
 * [CLI: `info`, `inspect`, `run`, `serve`](docs/cli.md)
 * [HTTP server API](docs/api.md)
-* [Simple web UI](web-ui/README.md)
+* [Simple web UI](docs/web-ui.md)
 * [Inference from Go](docs/library.md)
 * [`debugtok`, `vocab`, `bench`](docs/tools.md)
 * [GGUF format spec](docs/GGUF-FORMAT.md)

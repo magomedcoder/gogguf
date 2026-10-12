@@ -32,13 +32,13 @@ go test -tags=integration ./test/integration/...
 
 CI (`.github/workflows/ci.yml`):
 
-| Job                   | Что гоняет                                                                  | Модели / заметки                                        |
-|-----------------------|-----------------------------------------------------------------------------|---------------------------------------------------------|
-| `test`                | `go vet` + `go test ./...` + сборка CLI                                     | без GGUF; matrix: Linux / Windows / macOS               |
-| `cross-build`         | CPU cross-compile CLI                                                       | linux/darwin/windows * amd64/arm64                      |
-| `integration`         | `./pkg/model/qwen3/` + `-tags=integration ./test/integration/...`           | Qwen3-1.7B + Llama-3.2-1B; `.bin` фикстуры в репо       |
-| `integration-mistral` | `-tags=integration -run TestMistral`                                        | Mistral-7B (отдельный job: больший download / RAM)      |
-| `cuda`                | `-tags=cuda` пакеты device/model + CPU↔GPU integration                      | Qwen3-1.7B; **skip** без NVIDIA GPU                     |
+| Job                   | Что гоняет                                                        | Модели / заметки                                   |
+|-----------------------|-------------------------------------------------------------------|----------------------------------------------------|
+| `test`                | `go vet` + `go test ./...` + сборка CLI                           | без GGUF; matrix: Linux / Windows / macOS          |
+| `cross-build`         | CPU cross-compile CLI                                             | linux/darwin/windows * amd64/arm64                 |
+| `integration`         | `./pkg/model/qwen3/` + `-tags=integration ./test/integration/...` | Qwen3-1.7B + Llama-3.2-1B; `.bin` фикстуры в репо  |
+| `integration-mistral` | `-tags=integration -run TestMistral`                              | Mistral-7B (отдельный job: больший download / RAM) |
+| `cuda`                | `-tags=cuda` пакеты device/model + CPU<->GPU integration          | Qwen3-1.7B; **skip** без NVIDIA GPU                |
 
 CUDA локально (Linux + NVIDIA) - см. [platforms.md](platforms.md):
 

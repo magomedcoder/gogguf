@@ -36,26 +36,26 @@
 ./build/gogguf run -hf Qwen/Qwen3-4B-GGUF:Q8_0 --chat -p "Привет" -n 64
 ```
 
-| Флаг                | По умолчанию | Описание                                                            |
-|---------------------|--------------|---------------------------------------------------------------------|
-| `-m`                | -            | путь к `.gguf` (взаимоисключающе с `-hf`)                           |
-| `-hf` / `--hf-repo` | -            | Hugging Face `owner/repo[:quant]` (скачать + кэш)                   |
-| `-p`                | -            | текст промпта                                                       |
-| `-n`                | `128`        | максимум новых токенов                                              |
-| `--temp`            | `0`          | температура sampling (`0` = greedy)                                 |
-| `--top-k`           | `0`          | top-k (`0` = выкл.)                                                 |
-| `--top-p`           | `1`          | nucleus (`1` = выкл.)                                               |
-| `--min-p`           | `0`          | min-p (`0` = выкл.)                                                 |
-| `--repeat-penalty`  | `1`          | штраф за повтор (`1` = выкл.)                                       |
-| `--repeat-last-n`   | `64`         | окно истории для repeat penalty                                     |
-| `--seed`            | `0`          | seed PRNG                                                           |
-| `--chat`            | `false`      | обернуть промпт в ChatML/Qwen template                              |
-| `--thinking`        | `false`      | режим размышления Qwen3 (с `--chat`)                                |
-| `-i`                | `false`      | интерактивный REPL (stdin)                                          |
-| `-ngl`              | `0`          | слои на GPU - ОС/карты и env: [platforms.md](platforms.md)          |
-| `-b` / `--n-batch`  | `1`          | chunk prefill; **`>1` только Qwen3 dense** (MoE/другие arch serial) |
-| `-dev`              | пусто        | устройство(а) GPU - см. [platforms.md](platforms.md)                |
-| `-tensor-split`     | пусто        | multi-GPU split - см. [platforms.md](platforms.md)                  |
+| Флаг                | По умолчанию | Описание                                                                                   |
+|---------------------|--------------|--------------------------------------------------------------------------------------------|
+| `-m`                | -            | путь к `.gguf` (взаимоисключающе с `-hf`)                                                  |
+| `-hf` / `--hf-repo` | -            | Hugging Face `owner/repo[:quant]` (скачать + кэш)                                          |
+| `-p`                | -            | текст промпта                                                                              |
+| `-n`                | `128`        | максимум новых токенов                                                                     |
+| `--temp`            | `0`          | температура sampling (`0` = greedy)                                                        |
+| `--top-k`           | `0`          | top-k (`0` = выкл.)                                                                        |
+| `--top-p`           | `1`          | nucleus (`1` = выкл.)                                                                      |
+| `--min-p`           | `0`          | min-p (`0` = выкл.)                                                                        |
+| `--repeat-penalty`  | `1`          | штраф за повтор (`1` = выкл.)                                                              |
+| `--repeat-last-n`   | `64`         | окно истории для repeat penalty                                                            |
+| `--seed`            | `0`          | seed PRNG                                                                                  |
+| `--chat`            | `false`      | обернуть промпт в ChatML/Qwen template                                                     |
+| `--thinking`        | `false`      | режим размышления Qwen3 (с `--chat`)                                                       |
+| `-i`                | `false`      | интерактивный REPL (stdin)                                                                 |
+| `-ngl`              | `0`          | слои на GPU (`0` = CPU; нужна сборка `-tags cuda` + `N > 0`): [platforms.md](platforms.md) |
+| `-b` / `--n-batch`  | `32`         | chunk prefill; dense batch/GEMM; MoE/MLA/SWA serial (`1`)                                  |
+| `-dev`              | пусто        | устройство(а) GPU - см. [platforms.md](platforms.md)                                       |
+| `-tensor-split`     | пусто        | multi-GPU split - см. [platforms.md](platforms.md)                                         |
 
 Без `[:quant]` приоритет: `Q4_K_M`, затем `Q8_0`, иначе первый model `.gguf`.
 
@@ -88,24 +88,30 @@ HTTP-сервер с OpenAI-совместимым API (см. [api.md](api.md)).
 Graceful shutdown по `Ctrl+C` (SIGINT/SIGTERM).
 
 ```bash
+# CPU (по умолчанию: -ngl 0)
 ./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000
+
+# GPU: сборка CUDA + -ngl > 0 (одна сборка offload не включает)
+CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
+./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000 -ngl 999
 ```
 
 Или с Hugging Face:
 
 ```bash
-./build/gogguf serve -hf Qwen/Qwen3-4B-GGUF:Q8_0 --host 127.0.0.1:8000
+./build/gogguf serve -hf Qwen/Qwen3-4B-GGUF:Q8_0 --host 127.0.0.1:8000 -ngl 999
 ```
 
-| Флаг                              | По умолчанию     | Описание                                                     |
-|-----------------------------------|------------------|--------------------------------------------------------------|
-| `-m`                              | -                | путь к `.gguf` (взаимоисключающе с `-hf`)                    |
-| `-hf` / `--hf-repo`               | -                | Hugging Face `owner/repo[:quant]`                            |
-| `--host`                          | `127.0.0.1:8000` | адрес HTTP-сервера                                           |
-| `-ngl` / `-dev` / `-tensor-split` | -                | GPU - см. [platforms.md](platforms.md)                       |
-| `-b` / `--n-batch`                | `1`              | chunk prefill (Qwen3 dense; MoE/другие arch остаются serial) |
-| `--api-key`                       | пусто            | auth Bearer / X-API-Key                                      |
-| `--rate-limit`                    | `0`              | запросов в минуту на IP (`0` = без лимита)                   |
+| Флаг                     | По умолчанию     | Описание                                                                             |
+|--------------------------|------------------|--------------------------------------------------------------------------------------|
+| `-m`                     | -                | путь к `.gguf` (взаимоисключающе с `-hf`)                                            |
+| `-hf` / `--hf-repo`      | -                | Hugging Face `owner/repo[:quant]`                                                    |
+| `--host`                 | `127.0.0.1:8000` | адрес HTTP-сервера                                                                   |
+| `-ngl`                   | `0`              | слои на GPU (`0` = CPU); нужна `-tags cuda` + `N > 0` - [platforms.md](platforms.md) |
+| `-dev` / `-tensor-split` | пусто            | multi-GPU - см. [platforms.md](platforms.md)                                         |
+| `-b` / `--n-batch`       | `32`             | chunk prefill (dense batch/GEMM; MoE/MLA/SWA serial)                                 |
+| `--api-key`              | пусто            | auth Bearer / X-API-Key                                                              |
+| `--rate-limit`           | `0`              | запросов в минуту на IP (`0` = без лимита)                                           |
 
 Эндпоинты: [HTTP API](api.md).
 

@@ -2,10 +2,11 @@ package qwen3
 
 import (
 	"fmt"
-	"github.com/magomedcoder/gogguf/pkg/dtype"
+	"strings"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 	"github.com/magomedcoder/gogguf/pkg/exec/dispatch"
 	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/exec/moe"
@@ -315,18 +316,35 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 }
 
 func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
-	if err := m.embedToken(tokenID); err != nil {
-		return err
+	// Prefer GPU gather into d_resid (no host emb HtoD); else CPU embed + HiddenUpload.
+	gathered := false
+	if m.residency && m.debug == nil && !m.gpuKVStale && m.dev != nil {
+		if raw, err := m.weights.Raw("token_embd.weight"); err == nil {
+			if info, err := m.weights.Info("token_embd.weight"); err == nil {
+				if err := device.TryEmbedGather(m.dev, "token_embd.weight", raw, info.Type, tokenID, m.cfg.VocabSize, m.cfg.EmbeddingDim); err == nil {
+					m.residDevice = true
+					gathered = true
+				}
+			}
+		}
+	}
+	if !gathered {
+		if err := m.embedToken(tokenID); err != nil {
+			return err
+		}
 	}
 
 	if debug && m.debug != nil && m.debug.OnEmbed != nil {
+		if gathered {
+			_ = m.syncHiddenFromDevice()
+		}
 		m.debug.OnEmbed(m.scratch.x[:m.cfg.EmbeddingDim])
 	}
 
-	// §1: single HtoD hidden state per token; layers then run on device.
+	// §1: single HtoD hidden state per token when gather missed; layers then run on device.
 	// Debug hooks read host buffer x, so residency is disabled with them.
 	// gpuKVStale: fused QKV attends using GPU KV-cache, which is incomplete.
-	if m.residency && m.debug == nil && !m.gpuKVStale {
+	if !gathered && m.residency && m.debug == nil && !m.gpuKVStale {
 		if err := m.dev.HiddenUpload(m.scratch.x[:m.cfg.EmbeddingDim]); err != nil {
 			m.residency = false
 		} else {
@@ -388,6 +406,12 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 			return nil
 		}
 
+		// Device KV append failure (-6): mark stale and try rebuild from CPU mirror.
+		if strings.Contains(err.Error(), "code -6") || strings.Contains(err.Error(), "code -2") {
+			m.gpuKVStale = true
+			_ = m.tryRecoverGPUKV()
+		}
+
 		if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {
 			return rerr
 		}
@@ -440,6 +464,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
 			if err := m.dev.KVCacheAppend(layer, kvPos, k, v); err != nil {
 				m.gpuKVStale = true
+				_ = m.tryRecoverGPUKV()
 			}
 		}
 
@@ -511,6 +536,39 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []f
 	}
 
 	return m.attnFFNGPU(layer, ln, nil, attn)
+}
+
+// tryRecoverGPUKV rebuilds device KV from the CPU mirror without ResetCache (session stays).
+func (m *Model) tryRecoverGPUKV() bool {
+	if m.dev == nil || !m.gpuKVStale {
+		return false
+	}
+
+	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
+	m.dev.KVCacheReset()
+	for layer := 0; layer < m.cfg.NumLayers; layer++ {
+		if !device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+			continue
+		}
+
+		k := m.cache.KLayer(layer)
+		v := m.cache.VLayer(layer)
+		if len(k) == 0 || len(v) == 0 || kvDim == 0 {
+			continue
+		}
+
+		n := len(k) / kvDim
+		if n < 1 || len(k) != n*kvDim || len(v) != n*kvDim {
+			return false
+		}
+
+		if err := m.dev.KVCacheAppendN(layer, 0, k, v, n); err != nil {
+			return false
+		}
+	}
+	m.gpuKVStale = false
+
+	return true
 }
 
 // recoverHiddenFromDevice brings hidden state back to host after a device-layer failure.

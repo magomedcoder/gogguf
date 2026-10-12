@@ -18,6 +18,7 @@ type Model struct {
 	dev          device.Backend
 	ngl          int
 	gpuMaxSeq    int
+	nBatch       int // chunk prefill size (1 = per token)
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
@@ -36,7 +37,7 @@ type layerBias struct {
 }
 
 // Load creates Phi-2 from GGUF weights
-func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error) {
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
@@ -45,6 +46,8 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error
 	if ngl > cfg.NumLayers {
 		ngl = cfg.NumLayers
 	}
+
+	nBatch = min(max(nBatch, 1), 512)
 
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)
 	if err != nil {
@@ -78,7 +81,8 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error
 		dev:          g,
 		ngl:          ngl,
 		gpuMaxSeq:    gpuMaxSeq,
-		scratch:      newScratch(cfg),
+		nBatch:       nBatch,
+		scratch:      newScratch(cfg, nBatch),
 		layerNorms:   layerNorms,
 		layerTensors: layerTensors,
 		layerBias:    layerBias,
@@ -174,23 +178,36 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("phi2: empty input")
 	}
 
-	for i, id := range tokenIDs {
-		pos := startPos + i
-		if err := m.embed(id); err != nil {
+	// n_batch>1: multi-token prefill (chunk matmul on GPU with -ngl, else CPU GEMM)
+	if m.nBatch > 1 && len(tokenIDs) > 1 {
+		for i := 0; i < len(tokenIDs); {
+			end := min(i+m.nBatch, len(tokenIDs))
+
+			needLogits := end == len(tokenIDs)
+			if err := m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits); err != nil {
+				return nil, err
+			}
+			i = end
+		}
+	} else {
+		for i, id := range tokenIDs {
+			pos := startPos + i
+			if err := m.embed(id); err != nil {
+				return nil, err
+			}
+
+			for layer := range m.cfg.NumLayers {
+				if err := m.forwardBlock(layer, pos); err != nil {
+					return nil, fmt.Errorf("phi2: layer %d pos %d: %w", layer, pos, err)
+				}
+			}
+
+			m.cache.Advance()
+		}
+
+		if err := m.logitsFinish(); err != nil {
 			return nil, err
 		}
-
-		for layer := range m.cfg.NumLayers {
-			if err := m.forwardBlock(layer, pos); err != nil {
-				return nil, fmt.Errorf("phi2: layer %d pos %d: %w", layer, pos, err)
-			}
-		}
-
-		m.cache.Advance()
-	}
-
-	if err := m.logitsFinish(); err != nil {
-		return nil, err
 	}
 
 	copy(m.scratch.out, m.scratch.logits)
@@ -415,7 +432,12 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logitsFinish() error {
-	if err := compute.LayerNormInto(m.scratch.h, m.scratch.x, m.outNorm.w, m.outNorm.b, m.cfg.LayerNormEps); err != nil {
+	return m.logitsFromHidden(m.scratch.x)
+}
+
+// logitsFromHidden: out_norm + lm_head for hidden state x [embd]
+func (m *Model) logitsFromHidden(x []float32) error {
+	if err := compute.LayerNormInto(m.scratch.h, x, m.outNorm.w, m.outNorm.b, m.cfg.LayerNormEps); err != nil {
 		return err
 	}
 

@@ -29,8 +29,11 @@ type Model struct {
 }
 
 // Load creates DeepSeek2 from weights. GPU runs MLA projections, FFN, and experts (§7),
-// MLA attention itself stays on CPU: its cache layout differs from GPU KV-cache
-func Load(w *weights.Store, g device.Backend, ngl, _ int) (*Model, error) {
+// MLA attention itself stays on CPU: its cache layout differs from GPU KV-cache.
+// MLA / MoE: serial only - n_batch is accepted for API symmetry and forced to 1
+func Load(w *weights.Store, g device.Backend, ngl, _, nBatch int) (*Model, error) {
+	_ = nBatch // n_batch=1: batch prefill is not implemented for absorbed MLA
+
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err

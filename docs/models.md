@@ -38,7 +38,7 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 ### Qwen3 capabilities
 
 - Prefill + autoregressive decode, KV-cache
-- **`n_batch` (`-b`)**: multi-token prefill for **dense** Qwen3 only; MoE forced to `1` (see [cli.md](cli.md))
+- **`n_batch` (`-b`)**: multi-token prefill for **dense** arches (default CLI **32**); MoE/MLA/SWA forced to `1` (see [cli.md](cli.md)). GPU path uses quant `MatMulMat*` GEMM.
 - Full device residency when `-ngl` = all layers and native quants - GPU launch: [platforms.md](platforms.md), internals: [build.md](build.md)
 - BPE tokenizer (`tokenizer.ggml.model` / qwen2-style)
 - Chat template: Jinja from GGUF + ChatML/Qwen fallback
@@ -54,7 +54,7 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 | Q8_0, Q4_0, Q4_K, Q5_K, Q6_K       | yes     | fused                           |
 | Q4_1, Q5_0, Q5_1, Q2_K, Q3_K, Q8_K | yes     | via FP32 dequant (no residency) |
 
-Also listed as Legacy / K-quants / unquantized in tooling: Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K…Q8_K, F16, F32.
+Also listed as Legacy / K-quants / unquantized in tooling: Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K...Q8_K, F16, F32.
 
 ### Planned weight quantizations
 

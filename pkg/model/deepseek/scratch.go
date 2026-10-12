@@ -2,7 +2,18 @@ package deepseek
 
 import "github.com/magomedcoder/gogguf/pkg/model/mempool"
 
+// x/h/q/k/v/attn/gate/up are single-token views (first row) of the nBatch buffers bx/bh/...
 type scratch struct {
+	// batch buffers [nBatch*dim] (prefill chunk; dense models only)
+	bx    []float32
+	bh    []float32
+	bq    []float32
+	bk    []float32
+	bv    []float32
+	battn []float32
+	bgate []float32
+	bup   []float32
+
 	x      []float32
 	h      []float32
 	q      []float32
@@ -19,27 +30,50 @@ type scratch struct {
 	out    []float32
 }
 
-func newScratch(cfg Config) scratch {
+func newScratch(cfg Config, nBatch int) scratch {
+	if nBatch < 1 {
+		nBatch = 1
+	}
+
 	qDim := cfg.NumHeads * cfg.HeadDim
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
+	embd := cfg.EmbeddingDim
 	ffn := cfg.maxFFN()
 	nExp := max(cfg.ExpertCount, 1)
 
-	need := 4*cfg.EmbeddingDim + 2*qDim + 2*kvDim + cfg.ContextLength + 2*ffn + nExp + 2*cfg.VocabSize
+	need := nBatch*(2*embd+2*qDim+2*kvDim+2*ffn) + 2*embd + cfg.ContextLength + nExp + 2*cfg.VocabSize
 	a := mempool.NewArena(need)
+
+	bx := a.Alloc(nBatch * embd)
+	bh := a.Alloc(nBatch * embd)
+	bq := a.Alloc(nBatch * qDim)
+	bk := a.Alloc(nBatch * kvDim)
+	bv := a.Alloc(nBatch * kvDim)
+	battn := a.Alloc(nBatch * qDim)
+	bgate := a.Alloc(nBatch * ffn)
+	bup := a.Alloc(nBatch * ffn)
+
 	return scratch{
-		x:      a.Alloc(cfg.EmbeddingDim),
-		h:      a.Alloc(cfg.EmbeddingDim),
-		q:      a.Alloc(qDim),
-		k:      a.Alloc(kvDim),
-		v:      a.Alloc(kvDim),
-		attn:   a.Alloc(qDim),
+		bx:     bx,
+		bh:     bh,
+		bq:     bq,
+		bk:     bk,
+		bv:     bv,
+		battn:  battn,
+		bgate:  bgate,
+		bup:    bup,
+		x:      bx[:embd],
+		h:      bh[:embd],
+		q:      bq[:qDim],
+		k:      bk[:kvDim],
+		v:      bv[:kvDim],
+		attn:   battn[:qDim],
 		scores: a.Alloc(cfg.ContextLength),
-		gate:   a.Alloc(ffn),
-		up:     a.Alloc(ffn),
+		gate:   bgate[:ffn],
+		up:     bup[:ffn],
 		router: a.Alloc(nExp),
-		moeAcc: a.Alloc(cfg.EmbeddingDim),
-		tmp:    a.Alloc(cfg.EmbeddingDim),
+		moeAcc: a.Alloc(embd),
+		tmp:    a.Alloc(embd),
 		logits: a.Alloc(cfg.VocabSize),
 		out:    a.Alloc(cfg.VocabSize),
 	}

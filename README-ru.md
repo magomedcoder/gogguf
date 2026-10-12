@@ -58,7 +58,7 @@ yarn install # или npm install
 yarn dev # http://localhost:5173 - проксирует /api на :8000
 ```
 
-Подробнее про API: [docs/ru/api.md](docs/ru/api.md). Про UI: [web-ui/README-ru.md](web-ui/README-ru.md).
+Подробнее про API: [docs/ru/api.md](docs/ru/api.md). Про UI: [docs/ru/web-ui.md](docs/ru/web-ui.md).
 
 ## Документация
 
@@ -66,7 +66,7 @@ yarn dev # http://localhost:5173 - проксирует /api на :8000
 * [Сборка: CPU / Docker](docs/ru/build.md)
 * [CLI: `info`, `inspect`, `run`, `serve`](docs/ru/cli.md)
 * [HTTP API сервера](docs/ru/api.md)
-* [Простой web UI](web-ui/README-ru.md)
+* [Простой web UI](docs/ru/web-ui.md)
 * [Inference из Go-кода](docs/ru/library.md)
 * [`debugtok`, `vocab`, `bench`](docs/ru/tools.md)
 * [Формат GGUF](docs/ru/GGUF-FORMAT.md)

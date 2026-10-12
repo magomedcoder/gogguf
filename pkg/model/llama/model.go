@@ -19,6 +19,7 @@ type Model struct {
 	dev          device.Backend
 	ngl          int
 	gpuMaxSeq    int
+	nBatch       int // chunk prefill size (1 = per token); decode always 1
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
@@ -38,7 +39,7 @@ type Model struct {
 }
 
 // Load creates Llama from weights
-func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error) {
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
@@ -47,6 +48,8 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error
 	if ngl > cfg.NumLayers {
 		ngl = cfg.NumLayers
 	}
+
+	nBatch = min(max(nBatch, 1), 512)
 
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)
 	if err != nil {
@@ -65,7 +68,8 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error
 		dev:          g,
 		ngl:          ngl,
 		gpuMaxSeq:    gpuMaxSeq,
-		scratch:      newScratch(cfg),
+		nBatch:       nBatch,
+		scratch:      newScratch(cfg, nBatch),
 		layerNorms:   layerNorms,
 		layerTensors: loadLayerTensors(cfg.NumLayers),
 		outNorm:      outNorm,
@@ -130,16 +134,29 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("llama: empty input")
 	}
 
-	for i, tok := range tokenIDs {
-		pos := startPos + i
-		last := i == len(tokenIDs)-1
-		if err := m.forwardToken(tok, pos, last); err != nil {
+	// n_batch>1: multi-token prefill (chunk matmul on GPU with -ngl, else CPU GEMM). Debug hooks - serial.
+	if m.nBatch > 1 && m.debug == nil && len(tokenIDs) > 1 {
+		for i := 0; i < len(tokenIDs); {
+			end := min(i+m.nBatch, len(tokenIDs))
+
+			needLogits := end == len(tokenIDs)
+			if err := m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits); err != nil {
+				return nil, err
+			}
+			i = end
+		}
+	} else {
+		for i, tok := range tokenIDs {
+			pos := startPos + i
+			last := i == len(tokenIDs)-1
+			if err := m.forwardToken(tok, pos, last); err != nil {
+				return nil, err
+			}
+		}
+
+		if err := m.logitsFinish(); err != nil {
 			return nil, err
 		}
-	}
-
-	if err := m.logitsFinish(); err != nil {
-		return nil, err
 	}
 
 	if m.debug != nil && m.debug.OnLogits != nil {

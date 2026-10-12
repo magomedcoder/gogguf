@@ -20,6 +20,7 @@ type Model struct {
 	dev          device.Backend
 	ngl          int
 	gpuMaxSeq    int
+	nBatch       int              // chunk prefill size (1 = per token); dense models only
 	fused        *gpuresid.Runner // fused GPU paths: FFN, MoE experts (§6)
 	moeGPU       []bool           // layer can run experts on GPU
 	scratch      scratch
@@ -30,7 +31,7 @@ type Model struct {
 }
 
 // Load creates DeepSeek from weights
-func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error) {
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
@@ -38,6 +39,13 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error
 
 	if ngl > cfg.NumLayers {
 		ngl = cfg.NumLayers
+	}
+
+	nBatch = min(max(nBatch, 1), 512)
+
+	// MoE layers (and the dense lead of MoE models): serial only for now (n_batch=1)
+	if cfg.ExpertCount > 0 {
+		nBatch = 1
 	}
 
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)
@@ -62,7 +70,8 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error
 		dev:          g,
 		ngl:          ngl,
 		gpuMaxSeq:    gpuMaxSeq,
-		scratch:      newScratch(cfg),
+		nBatch:       nBatch,
+		scratch:      newScratch(cfg, nBatch),
 		layerNorms:   layerNorms,
 		layerTensors: layerTensors,
 		outNorm:      outNorm,
@@ -140,14 +149,27 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("deepseek: empty input")
 	}
 
-	for i, tok := range tokenIDs {
-		if err := m.forwardToken(tok, startPos+i); err != nil {
+	// n_batch>1 (dense, ExpertCount==0): multi-token prefill; MoE - serial
+	if m.nBatch > 1 && m.cfg.ExpertCount == 0 && len(tokenIDs) > 1 {
+		for i := 0; i < len(tokenIDs); {
+			end := min(i+m.nBatch, len(tokenIDs))
+
+			needLogits := end == len(tokenIDs)
+			if err := m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits); err != nil {
+				return nil, err
+			}
+			i = end
+		}
+	} else {
+		for i, tok := range tokenIDs {
+			if err := m.forwardToken(tok, startPos+i); err != nil {
+				return nil, err
+			}
+		}
+
+		if err := m.logitsFromHidden(m.scratch.x); err != nil {
 			return nil, err
 		}
-	}
-
-	if err := m.logitsFromHidden(m.scratch.x); err != nil {
-		return nil, err
 	}
 
 	copy(m.scratch.out, m.scratch.logits)

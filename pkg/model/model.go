@@ -42,35 +42,36 @@ func Load(r *format.Reader, opts Options) (Model, error) {
 	}
 
 	store := weights.New(r)
+	nBatch := ClampNBatch(opts.NBatch)
 
 	switch arch {
 	case "qwen3":
-		return qwen3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, opts.NBatch)
+		return qwen3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "qwen3moe":
-		return qwen3.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, opts.NBatch)
+		return qwen3.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "qwen2":
-		return qwen2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return qwen2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "qwen2moe":
-		return qwen2.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return qwen2.LoadMoE(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "mistral":
-		return mistral.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return mistral.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "gemma":
-		return gemma.LoadGemma(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return gemma.LoadGemma(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "gemma2":
-		return gemma.LoadGemma2(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return gemma.LoadGemma2(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "phi2":
-		return phi2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return phi2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "phi3":
-		return phi3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return phi3.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "deepseek":
-		return deepseek.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return deepseek.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "deepseek2":
-		return deepseek2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return deepseek2.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	case "llama":
 		if isMixtralModel(r) || isMistralModel(r) {
-			return mistral.LoadLlamaMeta(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+			return mistral.LoadLlamaMeta(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 		}
-		return llama.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq)
+		return llama.Load(store, opts.GPU, opts.NGL, opts.GPUMaxSeq, nBatch)
 	default:
 		return nil, fmt.Errorf("model: architecture %q not supported", arch)
 	}

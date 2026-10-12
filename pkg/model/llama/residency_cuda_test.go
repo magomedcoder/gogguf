@@ -47,7 +47,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 		}
 	}
 
-	m, err := Load(weights.New(r), g, ngl, 0)
+	m, err := Load(weights.New(r), g, ngl, 0, 1)
 	if err != nil {
 		if g != nil {
 			g.Close()

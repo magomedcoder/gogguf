@@ -32,8 +32,8 @@ func runRun(args []string) error {
 	thinking := fs.Bool("thinking", false, "Qwen3: enable thinking mode (with --chat)")
 	interactive := fs.Bool("i", false, "interactive mode (REPL)")
 	ngl := fs.Int("ngl", 0, "GPU layers (CUDA, -tags cuda); on macOS unsupported until Metal kernels (see docs/platforms.md)")
-	nBatch := fs.Int("b", 1, "prefill chunk size (n_batch); >1 speeds up prefill (Qwen3 dense; MoE/other arch serial)")
-	fs.IntVar(nBatch, "n-batch", 1, "alias for -b")
+	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense models use GEMM/batch; MoE/MLA/SWA stay serial (1)")
+	fs.IntVar(nBatch, "n-batch", 32, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
 	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
 
@@ -68,7 +68,11 @@ func runRun(args []string) error {
 		fmt.Fprintf(os.Stderr, "GPU offload: %d layers on %s\n", *ngl, engine.GPUDescription())
 	}
 	if *nBatch > 1 {
-		fmt.Fprintf(os.Stderr, "n_batch: %d\n", *nBatch)
+		if eff := engine.PrefillBatchSize(); eff < *nBatch {
+			fmt.Fprintf(os.Stderr, "n_batch: requested %d, using %d (MoE/MLA/SWA serial)\n", *nBatch, eff)
+		} else {
+			fmt.Fprintf(os.Stderr, "n_batch: %d\n", eff)
+		}
 	}
 
 	ctx, err := engine.NewContext()

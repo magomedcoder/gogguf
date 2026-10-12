@@ -38,7 +38,7 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 ### Возможности Qwen3
 
 - Prefill + autoregressive decode, KV-cache
-- **`n_batch` (`-b`)**: multi-token prefill **только для dense** Qwen3; MoE принудительно `1` (см. [cli.md](cli.md))
+- **`n_batch` (`-b`)**: multi-token prefill для **dense** arch (default CLI **32**); MoE/MLA/SWA принудительно `1` (см. [cli.md](cli.md)). На GPU - quant `MatMulMat*` GEMM.
 - Полная device residency при `-ngl` = все слои и нативных quant - запуск GPU: [platforms.md](platforms.md), детали: [build.md](build.md)
 - Tokenizer BPE (`tokenizer.ggml.model` / qwen2-стиль)
 - Chat template: Jinja из GGUF + fallback ChatML/Qwen
@@ -54,7 +54,7 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 | Q8_0, Q4_0, Q4_K, Q5_K, Q6_K       | да      | fused                              |
 | Q4_1, Q5_0, Q5_1, Q2_K, Q3_K, Q8_K | да      | через FP32 dequant (без residency) |
 
-Также: Legacy / K-quants / без квантизации - Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K…Q8_K, F16, F32.
+Также: Legacy / K-quants / без квантизации - Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K...Q8_K, F16, F32.
 
 ### Планируемые квантизации весов
 

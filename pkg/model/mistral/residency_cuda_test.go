@@ -47,7 +47,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 	}
 
 	// GGUF Mistral-7B-Instruct is tagged as general.architecture=llama
-	m, err := LoadLlamaMeta(weights.New(r), g, ngl, 0)
+	m, err := LoadLlamaMeta(weights.New(r), g, ngl, 0, 1)
 	if err != nil {
 		if g != nil {
 			g.Close()

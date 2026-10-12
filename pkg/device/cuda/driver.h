@@ -259,6 +259,12 @@ int gguf_cuda_upload_q6_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matr
 // gguf_cuda_matmul_vec_q6_k_device matmul Q6_K with weights already on GPU
 int gguf_cuda_matmul_vec_q6_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
+// gguf_cuda_matmul_mat_device: W * X[batch] via one HtoD + B device-offset vec launches + one DtoH (fn = matmul_vec_*).
+int gguf_cuda_matmul_mat_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch);
+
+// gguf_cuda_matmul_mat_q8_0_device: single-launch matmul_mat_q8_0 (fn = that entry); batch==1 uses vec path.
+int gguf_cuda_matmul_mat_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_mat, CUfunction fn_vec, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch);
+
 // gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down (CUDA Graph when has_graphs)
 int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
 
@@ -292,6 +298,12 @@ int gguf_cuda_attn_ffn_residual_device(
 
 // gguf_cuda_hidden_upload puts hidden state in d_resid (one HtoD per token)
 int gguf_cuda_hidden_upload(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, const float *x, int n);
+
+// gguf_cuda_embed_gather_q8_0: dequant token row from device Q8_0 emb into d_resid (no host emb HtoD).
+int gguf_cuda_embed_gather_q8_0(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_emb, int token_id, int embd);
+
+// gguf_cuda_logits_argmax: argmax over device logits buffer; DtoH only {idx_as_f32, value}.
+int gguf_cuda_logits_argmax(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, CUdeviceptr d_logits, int n, int *idx_out, float *val_out);
 
 // gguf_cuda_hidden_download copies resident hidden state from d_resid to host
 int gguf_cuda_hidden_download(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, float *dst, int n);

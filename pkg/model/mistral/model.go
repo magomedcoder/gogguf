@@ -21,6 +21,7 @@ type Model struct {
 	dev          device.Backend
 	ngl          int
 	gpuMaxSeq    int
+	nBatch       int // chunk prefill size (1 = per token); decode always 1
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
@@ -41,26 +42,26 @@ type Model struct {
 }
 
 // Load creates Mistral from weights (mistral.* prefix)
-func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error) {
-	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfig)
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, nBatch, ParseConfig)
 }
 
 // LoadLlamaMeta creates Mistral from GGUF with general.architecture=llama (TheBloke, convert.py)
-func LoadLlamaMeta(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error) {
-	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfigLlama)
+func LoadLlamaMeta(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, nBatch, ParseConfigLlama)
 }
 
 // LoadQwen2 creates a model with qwen2.* prefix (NeoX RoPE, no QK-norm; Distill-Qwen, etc.)
-func LoadQwen2(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error) {
-	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfigQwen2)
+func LoadQwen2(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, nBatch, ParseConfigQwen2)
 }
 
 // LoadQwen2MoE creates Qwen2-MoE (qwen2moe.*, gated shared expert)
-func LoadQwen2MoE(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int) (*Model, error) {
-	return loadWithConfig(w, g, ngl, gpuMaxSeq, ParseConfigQwen2MoE)
+func LoadQwen2MoE(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
+	return loadWithConfig(w, g, ngl, gpuMaxSeq, nBatch, ParseConfigQwen2MoE)
 }
 
-func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int, parse func(*format.Reader) (Config, error)) (*Model, error) {
+func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int, parse func(*format.Reader) (Config, error)) (*Model, error) {
 	cfg, err := parse(w.Reader())
 	if err != nil {
 		return nil, err
@@ -68,6 +69,18 @@ func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int, pars
 
 	if ngl > cfg.NumLayers {
 		ngl = cfg.NumLayers
+	}
+
+	nBatch = min(max(nBatch, 1), 512)
+
+	// MoE: serial only for now (n_batch=1)
+	if cfg.isMoE() {
+		nBatch = 1
+	}
+
+	// SWA: batch attention does not apply the sliding window - serial only
+	if cfg.SlidingWindow > 0 && cfg.SlidingWindow < cfg.ContextLength {
+		nBatch = 1
 	}
 
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)
@@ -92,7 +105,8 @@ func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq int, pars
 		dev:          g,
 		ngl:          ngl,
 		gpuMaxSeq:    gpuMaxSeq,
-		scratch:      newScratch(cfg),
+		nBatch:       nBatch,
+		scratch:      newScratch(cfg, nBatch),
 		layerNorms:   layerNorms,
 		layerTensors: layerTensors,
 		outNorm:      outNorm,
@@ -157,16 +171,29 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("mistral: empty input")
 	}
 
-	for i, tok := range tokenIDs {
-		pos := startPos + i
-		last := i == len(tokenIDs)-1
-		if err := m.forwardToken(tok, pos, last); err != nil {
+	// n_batch>1: multi-token prefill (chunk matmul on GPU with -ngl, else CPU GEMM). MoE/SWA/debug - serial.
+	if m.nBatch > 1 && m.debug == nil && len(tokenIDs) > 1 {
+		for i := 0; i < len(tokenIDs); {
+			end := min(i+m.nBatch, len(tokenIDs))
+
+			needLogits := end == len(tokenIDs)
+			if err := m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits); err != nil {
+				return nil, err
+			}
+			i = end
+		}
+	} else {
+		for i, tok := range tokenIDs {
+			pos := startPos + i
+			last := i == len(tokenIDs)-1
+			if err := m.forwardToken(tok, pos, last); err != nil {
+				return nil, err
+			}
+		}
+
+		if err := m.logitsFinish(); err != nil {
 			return nil, err
 		}
-	}
-
-	if err := m.logitsFinish(); err != nil {
-		return nil, err
 	}
 
 	if m.debug != nil && m.debug.OnLogits != nil {

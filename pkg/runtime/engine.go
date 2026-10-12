@@ -121,6 +121,25 @@ func (e *Engine) LoadOptions() Options {
 	return e.opts
 }
 
+// PrefillBatchSize returns the model's effective n_batch (1 for MoE/MLA/SWA serial).
+func (e *Engine) PrefillBatchSize() int {
+	if e == nil || e.Model == nil {
+		return 1
+	}
+
+	type batchSizer interface{ PrefillBatchSize() int }
+	if s, ok := e.Model.(batchSizer); ok {
+		n := s.PrefillBatchSize()
+		if n < 1 {
+			return 1
+		}
+
+		return n
+	}
+
+	return 1
+}
+
 // Metadata returns model KV metadata.
 func (e *Engine) Metadata() format.Metadata {
 	return e.meta

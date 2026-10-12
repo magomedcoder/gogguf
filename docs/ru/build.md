@@ -33,7 +33,7 @@ CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
 | `output_norm` + `lm_head`                                  | GPU                      | `LogitsFromDevice`, один DtoH на `vocab` float |
 | sampling, зеркало KV, HTTP                                 | CPU                      | `attn`/`k`/`v` слоя пока уходят DtoH           |
 
-Частично на GPU: prefill `-b > 1` (loop-B, не true batched GEMM), другие arch без полного residency, ограничения MoE / DeepSeek2 MLA.  
+Частично на GPU: F32 batch - device-offset vec launches; MoE / DeepSeek2 MLA / SWA -> `n_batch=1`; не у всех arch полный residency. Quant prefill - `MatMulMat*` (Q8_0 single-launch PTX).  
 **`gpuKVStale`:** при сбое GPU KV fused attention отключается до `ResetCache()` / новой сессии.  
 Кванты без нативных kernels (Q4_1, Q5_0/1, Q2_K, Q3_K, Q8_K) -> FP32 и residency выкл.
 

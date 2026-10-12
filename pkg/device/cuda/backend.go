@@ -46,41 +46,47 @@ type gpuQ8Matrix struct {
 
 // Backend - CUDA via Driver API (libcuda.so), without cublas/cudart
 type Backend struct {
-	name        string
-	device      int
-	drv         C.cuda_driver_t
-	lib         unsafe.Pointer
-	ctx         C.CUcontext
-	module      C.CUmodule
-	moduleOps   C.CUmodule
-	fn          C.CUfunction
-	fnQ8        C.CUfunction
-	fnQ4        C.CUfunction
-	fnQ4K       C.CUfunction
-	fnQ5K       C.CUfunction
-	fnQ6K       C.CUfunction
-	fnRMS       C.CUfunction
-	fnRoPE      C.CUfunction
-	fnRoPENorm  C.CUfunction
-	fnSwiGLU    C.CUfunction
-	fnGeGLU     C.CUfunction
-	fnAttnQK    C.CUfunction
-	fnAttnV     C.CUfunction
-	fnSoftmax   C.CUfunction
-	fnAdd       C.CUfunction
-	hasRMS      bool
-	hasRoPE     bool
-	hasRoPENorm bool
-	hasSwiGLU   bool
-	hasGeGLU    bool
-	hasAttn     bool
-	hasSoftmax  bool
-	hasAdd      bool
-	hasGraphs   bool
-	hasQ4       bool
-	hasQ4K      bool
-	hasQ5K      bool
-	hasQ6K      bool
+	name            string
+	device          int
+	drv             C.cuda_driver_t
+	lib             unsafe.Pointer
+	ctx             C.CUcontext
+	module          C.CUmodule
+	moduleOps       C.CUmodule
+	fn              C.CUfunction
+	fnQ8            C.CUfunction
+	fnMatQ8         C.CUfunction // matmul_mat_q8_0 (batched GEMM)
+	fnQ4            C.CUfunction
+	fnQ4K           C.CUfunction
+	fnQ5K           C.CUfunction
+	fnQ6K           C.CUfunction
+	hasMatQ8        bool
+	fnRMS           C.CUfunction
+	fnRoPE          C.CUfunction
+	fnRoPENorm      C.CUfunction
+	fnSwiGLU        C.CUfunction
+	fnGeGLU         C.CUfunction
+	fnAttnQK        C.CUfunction
+	fnAttnV         C.CUfunction
+	fnSoftmax       C.CUfunction
+	fnAdd           C.CUfunction
+	fnEmbedGather   C.CUfunction
+	fnLogitsArgmax  C.CUfunction
+	hasRMS          bool
+	hasRoPE         bool
+	hasRoPENorm     bool
+	hasSwiGLU       bool
+	hasGeGLU        bool
+	hasAttn         bool
+	hasSoftmax      bool
+	hasAdd          bool
+	hasGraphs       bool
+	hasQ4           bool
+	hasQ4K          bool
+	hasQ5K          bool
+	hasQ6K          bool
+	hasEmbedGather  bool
+	hasLogitsArgmax bool
 
 	mu          sync.Mutex
 	matrices    map[string]gpuMatrix
@@ -166,6 +172,12 @@ func (b *Backend) loadMatmulModule(gpuCC int, errBuf *[4096]C.char) error {
 		rc := C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
 		C.free(unsafe.Pointer(cptx))
 		if rc == 0 {
+			cMatQ8 := C.CString("matmul_mat_q8_0")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cMatQ8, &b.fnMatQ8) == 0 {
+				b.hasMatQ8 = true
+			}
+			C.free(unsafe.Pointer(cMatQ8))
+
 			cQ4 := C.CString("matmul_vec_q4_0")
 			if C.gguf_cuda_module_function(&b.drv, b.module, cQ4, &b.fnQ4) == 0 {
 				b.hasQ4 = true
@@ -242,6 +254,18 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 				b.hasAdd = true
 			}
 			C.free(unsafe.Pointer(cAdd))
+
+			cEmb := C.CString("embed_gather_q8_0")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cEmb, &b.fnEmbedGather) == 0 {
+				b.hasEmbedGather = true
+			}
+			C.free(unsafe.Pointer(cEmb))
+
+			cArg := C.CString("logits_argmax")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cArg, &b.fnLogitsArgmax) == 0 {
+				b.hasLogitsArgmax = true
+			}
+			C.free(unsafe.Pointer(cArg))
 
 			return nil
 		}
@@ -1584,7 +1608,7 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t dtype.DType, mode compute.RoPEMo
 		return err
 	}
 
-	if len(cos) < headDim/2 || len(sin) < headDim/2 || len(attn) < nHeads*headDim || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
+	if len(cos) < headDim/2 || len(sin) < headDim/2 || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
 		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: buffers too short")
 	}
 
@@ -1654,6 +1678,11 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t dtype.DType, mode compute.RoPEMo
 	if len(h) >= embd {
 		hPtr = (*C.float)(unsafe.Pointer(&h[0]))
 	}
+	// Residency: skip attn DtoH (AttnFFN uses d_vec); still mirror k/v for CPU cache recovery.
+	var attnPtr *C.float
+	if !resident && len(attn) >= nHeads*headDim {
+		attnPtr = (*C.float)(unsafe.Pointer(&attn[0]))
+	}
 
 	rc := C.gguf_cuda_qkv_rope_attn_device(
 		&b.drv,
@@ -1676,7 +1705,7 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t dtype.DType, mode compute.RoPEMo
 		hPtr,
 		(*C.float)(unsafe.Pointer(&cos[0])),
 		(*C.float)(unsafe.Pointer(&sin[0])),
-		(*C.float)(unsafe.Pointer(&attn[0])),
+		attnPtr,
 		(*C.float)(unsafe.Pointer(&kOut[0])),
 		(*C.float)(unsafe.Pointer(&vOut[0])),
 		C.int(embd),

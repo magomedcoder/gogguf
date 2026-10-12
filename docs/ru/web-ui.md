@@ -1,17 +1,19 @@
-# web-ui для GoGGUF
+# Web UI
 
-[English version](README.md)
+Опциональный веб-чат для GoGGUF - интерфейс к HTTP API (`gogguf serve`).
 
-Веб-чат для [GoGGUF](../) - интерфейс к HTTP API `gguf serve`.
-
-Vue 3 + TypeScript + Vite + Tailwind CSS.
+Исходники: [`web-ui/`](../../web-ui/) (Vue 3 + TypeScript + Vite + Tailwind CSS).
 
 ## Запуск
 
 В одном терминале - сервер с моделью:
 
 ```bash
+# CPU
 ./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000
+
+# GPU (сборка CUDA + -ngl > 0)
+./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000 -ngl 999
 ```
 
 В другом - UI:
@@ -21,12 +23,12 @@ cd web-ui
 
 yarn install # или npm install
 
-yarn dev  # или npm run dev
+yarn dev # или npm run dev
 
 # `http://localhost:5173`
 ```
 
-В режиме разработки запросы к API проксируются: `/api/*` -> `http://127.0.0.1:8000/*` (`vite.config.ts`).
+В режиме разработки запросы к API проксируются: `/api/*` -> `http://127.0.0.1:8000/*` (`web-ui/vite.config.ts`).
 
 ## Возможности
 
@@ -36,4 +38,4 @@ yarn dev  # или npm run dev
 - настройки: `max_tokens`, `temperature`, `frequency_penalty` (совместимо с OpenAI)
 - остановка генерации, сброс чата
 
-Подробнее об эндпоинтах: [docs/api-ru.md](../docs/ru/api.md).
+Эндпоинты: [api.md](api.md). GPU-флаги: [platforms.md](platforms.md).
