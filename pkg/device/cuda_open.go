@@ -8,6 +8,14 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/device/cuda"
 )
 
+// optional capabilities of the CUDA backend (compile-time checks)
+var (
+	_ MLABackend              = (*cuda.Backend)(nil)
+	_ KVBatchAttentionBackend = (*cuda.Backend)(nil)
+	_ MLABackend              = (*MultiBackend)(nil)
+	_ KVBatchAttentionBackend = (*MultiBackend)(nil)
+)
+
 // OpenCUDA initializes CUDA via Driver API (libcuda) on device 0
 func OpenCUDA() (Backend, error) {
 	return cuda.Open()

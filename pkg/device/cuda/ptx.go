@@ -1282,6 +1282,497 @@ AV_EXIT:
     ret;
 }
 
+// attn_flash: fused QK dot + online softmax + weighted V sum, one launch.
+// grid = (n_heads, n_queries), block = 256 threads (fixed), head_dim <= 256.
+// Block (h, qi) attends over seq = seq_base + qi positions of K/V (causal batch: seq_base = past_len + 1; single decode query: n_queries = 1, seq_base = seq_len).
+// q/out rows are [qi][h][head_dim]. K/V are [pos][kv_stride] with kv_off = (h/group)*head_dim.
+// Keys are processed in chunks of 256 (one position per thread); scores live in shared memory, running max/denominator use the flash-attention rescale (corr = exp(m_old - m_new)).
+.visible .entry attn_flash(
+    .param .u64 param_q,
+    .param .u64 param_k,
+    .param .u64 param_v,
+    .param .u64 param_out,
+    .param .u32 param_seq_base,
+    .param .u32 param_head_dim,
+    .param .u32 param_kv_stride,
+    .param .u32 param_group,
+    .param .f32 param_scale
+)
+{
+    .reg .pred      %p<8>;
+    .reg .b32       %r<32>;
+    .reg .b64       %rd<12>;
+    .reg .f32       %f<16>;
+    .shared .align 4 .b8 af_q[1024];
+    .shared .align 4 .b8 af_s[1024];
+    .shared .align 4 .b8 af_red[1024];
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ctaid.y;
+    mov.u32         %r4, %nctaid.x;
+    ld.param.u64    %rd1, [param_q];
+    ld.param.u64    %rd2, [param_k];
+    ld.param.u64    %rd3, [param_v];
+    ld.param.u64    %rd4, [param_out];
+    ld.param.u32    %r5, [param_seq_base];
+    ld.param.u32    %r6, [param_head_dim];
+    ld.param.u32    %r7, [param_kv_stride];
+    ld.param.u32    %r8, [param_group];
+    ld.param.f32    %f1, [param_scale];
+
+    add.u32         %r9, %r5, %r3;
+    div.u32         %r10, %r2, %r8;
+    mul.lo.u32      %r11, %r10, %r6;
+    mad.lo.u32      %r12, %r3, %r4, %r2;
+    mul.lo.u32      %r12, %r12, %r6;
+    mul.wide.u32    %rd5, %r12, 4;
+    add.u64         %rd1, %rd1, %rd5;
+    add.u64         %rd4, %rd4, %rd5;
+
+    mov.u32         %r20, af_q;
+    mov.u32         %r21, af_s;
+    mov.u32         %r22, af_red;
+    shl.b32         %r25, %r1, 2;
+    add.u32         %r26, %r21, %r25;
+    add.u32         %r27, %r22, %r25;
+    setp.lt.u32     %p6, %r1, %r6;
+
+    mov.u32         %r15, %r1;
+AF_LOADQ:
+    setp.ge.u32     %p0, %r15, %r6;
+    @%p0            bra AF_LOADQ_DONE;
+    mul.wide.u32    %rd5, %r15, 4;
+    add.u64         %rd6, %rd1, %rd5;
+    ld.global.f32   %f7, [%rd6];
+    shl.b32         %r23, %r15, 2;
+    add.u32         %r24, %r20, %r23;
+    st.shared.f32   [%r24], %f7;
+    add.u32         %r15, %r15, 256;
+    bra             AF_LOADQ;
+AF_LOADQ_DONE:
+    bar.sync        0;
+
+    mov.f32         %f2, 0fFF800000;
+    mov.f32         %f3, 0f00000000;
+    mov.f32         %f4, 0f00000000;
+    mov.f32         %f14, 0f3FB8AA3B;
+    mov.u32         %r13, 0;
+
+AF_CHUNK:
+    setp.ge.u32     %p0, %r13, %r9;
+    @%p0            bra AF_FINISH;
+    add.u32         %r14, %r13, %r1;
+    mov.f32         %f5, 0fFF800000;
+    setp.ge.u32     %p1, %r14, %r9;
+    @%p1            bra AF_SCORE_DONE;
+
+    mul.wide.u32    %rd5, %r14, %r7;
+    cvt.u64.u32     %rd6, %r11;
+    add.u64         %rd5, %rd5, %rd6;
+    shl.b64         %rd5, %rd5, 2;
+    add.u64         %rd7, %rd2, %rd5;
+    mov.f32         %f6, 0f00000000;
+    mov.u32         %r15, 0;
+AF_DOT:
+    setp.ge.u32     %p2, %r15, %r6;
+    @%p2            bra AF_DOT_DONE;
+    shl.b32         %r23, %r15, 2;
+    add.u32         %r24, %r20, %r23;
+    ld.shared.f32   %f7, [%r24];
+    mul.wide.u32    %rd8, %r15, 4;
+    add.u64         %rd9, %rd7, %rd8;
+    ld.global.f32   %f8, [%rd9];
+    fma.rn.f32      %f6, %f7, %f8, %f6;
+    add.u32         %r15, %r15, 1;
+    bra             AF_DOT;
+AF_DOT_DONE:
+    mul.f32         %f5, %f6, %f1;
+AF_SCORE_DONE:
+    st.shared.f32   [%r27], %f5;
+    bar.sync        0;
+
+    mov.u32         %r16, 128;
+AF_MAXRED:
+    setp.ge.u32     %p3, %r1, %r16;
+    @%p3            bra AF_MAXRED_SYNC;
+    add.u32         %r23, %r1, %r16;
+    shl.b32         %r23, %r23, 2;
+    add.u32         %r24, %r22, %r23;
+    ld.shared.f32   %f8, [%r24];
+    ld.shared.f32   %f9, [%r27];
+    max.f32         %f9, %f9, %f8;
+    st.shared.f32   [%r27], %f9;
+AF_MAXRED_SYNC:
+    bar.sync        0;
+    shr.u32         %r16, %r16, 1;
+    setp.ne.u32     %p4, %r16, 0;
+    @%p4            bra AF_MAXRED;
+
+    ld.shared.f32   %f9, [%r22];
+    max.f32         %f10, %f2, %f9;
+    sub.f32         %f11, %f2, %f10;
+    mul.f32         %f11, %f11, %f14;
+    ex2.approx.f32  %f11, %f11;
+    mov.f32         %f2, %f10;
+    sub.f32         %f12, %f5, %f2;
+    mul.f32         %f12, %f12, %f14;
+    ex2.approx.f32  %f12, %f12;
+    fma.rn.f32      %f3, %f3, %f11, %f12;
+    st.shared.f32   [%r26], %f12;
+    bar.sync        0;
+
+    @!%p6           bra AF_V_DONE;
+    mul.f32         %f4, %f4, %f11;
+    sub.u32         %r18, %r9, %r13;
+    min.u32         %r18, %r18, 256;
+    mov.u32         %r17, 0;
+AF_VLOOP:
+    setp.ge.u32     %p5, %r17, %r18;
+    @%p5            bra AF_V_DONE;
+    shl.b32         %r23, %r17, 2;
+    add.u32         %r24, %r21, %r23;
+    ld.shared.f32   %f12, [%r24];
+    add.u32         %r19, %r13, %r17;
+    mul.wide.u32    %rd5, %r19, %r7;
+    cvt.u64.u32     %rd6, %r11;
+    add.u64         %rd5, %rd5, %rd6;
+    cvt.u64.u32     %rd6, %r1;
+    add.u64         %rd5, %rd5, %rd6;
+    shl.b64         %rd5, %rd5, 2;
+    add.u64         %rd6, %rd3, %rd5;
+    ld.global.f32   %f13, [%rd6];
+    fma.rn.f32      %f4, %f12, %f13, %f4;
+    add.u32         %r17, %r17, 1;
+    bra             AF_VLOOP;
+AF_V_DONE:
+    bar.sync        0;
+    add.u32         %r13, %r13, 256;
+    bra             AF_CHUNK;
+
+AF_FINISH:
+    st.shared.f32   [%r27], %f3;
+    bar.sync        0;
+    mov.u32         %r16, 128;
+AF_SUMRED:
+    setp.ge.u32     %p3, %r1, %r16;
+    @%p3            bra AF_SUMRED_SYNC;
+    add.u32         %r23, %r1, %r16;
+    shl.b32         %r23, %r23, 2;
+    add.u32         %r24, %r22, %r23;
+    ld.shared.f32   %f8, [%r24];
+    ld.shared.f32   %f9, [%r27];
+    add.f32         %f9, %f9, %f8;
+    st.shared.f32   [%r27], %f9;
+AF_SUMRED_SYNC:
+    bar.sync        0;
+    shr.u32         %r16, %r16, 1;
+    setp.ne.u32     %p4, %r16, 0;
+    @%p4            bra AF_SUMRED;
+
+    ld.shared.f32   %f9, [%r22];
+    @!%p6           bra AF_EXIT;
+    div.rn.f32      %f4, %f4, %f9;
+    mul.wide.u32    %rd5, %r1, 4;
+    add.u64         %rd6, %rd4, %rd5;
+    st.global.f32   [%rd6], %f4;
+AF_EXIT:
+    ret;
+}
+
+// mla_attn: absorbed MLA decode attention (DeepSeek-V2/V3), one block per head, 256 threads.
+//   q   : [n_heads][nope + rope]  (q_nope unrotated, q_pe already rotated on host)
+//   kb  : [n_heads][kvlora][nope] f32 (attn_k_b, ggml layout {nope, kvlora, n_heads})
+//   wvb : [n_heads][vhead][kvlora] f32 (attn_v_b)
+//   kc  : [pos][kvlora + rope]  K cache (kv_cmpr, k_pe)   vc : [pos][kvlora]  V cache (kv_cmpr)
+//   out : [n_heads][vhead]
+// Steps: q_abs[m] = sum_k kb[m][k]*q_nope[k]; scores = q_abs|q_pe . K row (online softmax, chunks of 256); ctx = softmax-weighted V (up to 4 dims per thread, kvlora <= 1024); out = wvb . ctx.
+// Limits: kvlora <= 1024, kvlora + rope <= 1280.
+.visible .entry mla_attn(
+    .param .u64 param_q,
+    .param .u64 param_kb,
+    .param .u64 param_wvb,
+    .param .u64 param_kc,
+    .param .u64 param_vc,
+    .param .u64 param_out,
+    .param .u32 param_seq,
+    .param .u32 param_nope,
+    .param .u32 param_kvlora,
+    .param .u32 param_rope,
+    .param .u32 param_vhead,
+    .param .f32 param_scale
+)
+{
+    .reg .pred      %p<12>;
+    .reg .b32       %r<40>;
+    .reg .b64       %rd<24>;
+    .reg .f32       %f<24>;
+    .shared .align 4 .b8 ml_q[5120];
+    .shared .align 4 .b8 ml_s[1024];
+    .shared .align 4 .b8 ml_red[1024];
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    ld.param.u64    %rd1, [param_q];
+    ld.param.u64    %rd2, [param_kb];
+    ld.param.u64    %rd3, [param_wvb];
+    ld.param.u64    %rd4, [param_kc];
+    ld.param.u64    %rd5, [param_vc];
+    ld.param.u64    %rd6, [param_out];
+    ld.param.u32    %r3, [param_seq];
+    ld.param.u32    %r4, [param_nope];
+    ld.param.u32    %r5, [param_kvlora];
+    ld.param.u32    %r6, [param_rope];
+    ld.param.u32    %r7, [param_vhead];
+    ld.param.f32    %f1, [param_scale];
+
+    add.u32         %r8, %r5, %r6;
+    add.u32         %r9, %r4, %r6;
+
+    mul.wide.u32    %rd7, %r2, %r9;
+    shl.b64         %rd7, %rd7, 2;
+    add.u64         %rd1, %rd1, %rd7;
+
+    mul.lo.u32      %r10, %r5, %r4;
+    mul.wide.u32    %rd7, %r2, %r10;
+    shl.b64         %rd7, %rd7, 2;
+    add.u64         %rd2, %rd2, %rd7;
+
+    mul.lo.u32      %r10, %r7, %r5;
+    mul.wide.u32    %rd7, %r2, %r10;
+    shl.b64         %rd7, %rd7, 2;
+    add.u64         %rd3, %rd3, %rd7;
+
+    mul.wide.u32    %rd7, %r2, %r7;
+    shl.b64         %rd7, %rd7, 2;
+    add.u64         %rd6, %rd6, %rd7;
+
+    mov.u32         %r20, ml_q;
+    mov.u32         %r21, ml_s;
+    mov.u32         %r22, ml_red;
+    shl.b32         %r25, %r1, 2;
+    add.u32         %r26, %r21, %r25;
+    add.u32         %r27, %r22, %r25;
+    add.u32         %r28, %r20, %r25;
+    setp.lt.u32     %p6, %r1, %r5;
+    add.u32         %r29, %r1, 256;
+    setp.lt.u32     %p7, %r29, %r5;
+    add.u32         %r29, %r1, 512;
+    setp.lt.u32     %p8, %r29, %r5;
+    add.u32         %r29, %r1, 768;
+    setp.lt.u32     %p9, %r29, %r5;
+    mov.f32         %f16, 0f00000000;
+    mov.f32         %f17, 0f00000000;
+    mov.f32         %f18, 0f00000000;
+    mov.f32         %f19, 0f00000000;
+
+    mov.u32         %r15, %r1;
+ML_ABS:
+    setp.ge.u32     %p0, %r15, %r5;
+    @%p0            bra ML_ROPE;
+    mul.wide.u32    %rd8, %r15, %r4;
+    shl.b64         %rd8, %rd8, 2;
+    add.u64         %rd8, %rd2, %rd8;
+    mov.f32         %f6, 0f00000000;
+    mov.u32         %r16, 0;
+ML_ABS_DOT:
+    setp.ge.u32     %p1, %r16, %r4;
+    @%p1            bra ML_ABS_DOT_DONE;
+    mul.wide.u32    %rd9, %r16, 4;
+    add.u64         %rd10, %rd8, %rd9;
+    ld.global.f32   %f7, [%rd10];
+    add.u64         %rd11, %rd1, %rd9;
+    ld.global.f32   %f8, [%rd11];
+    fma.rn.f32      %f6, %f7, %f8, %f6;
+    add.u32         %r16, %r16, 1;
+    bra             ML_ABS_DOT;
+ML_ABS_DOT_DONE:
+    shl.b32         %r23, %r15, 2;
+    add.u32         %r24, %r20, %r23;
+    st.shared.f32   [%r24], %f6;
+    add.u32         %r15, %r15, 256;
+    bra             ML_ABS;
+
+ML_ROPE:
+    mov.u32         %r15, %r1;
+ML_ROPE_LOOP:
+    setp.ge.u32     %p0, %r15, %r6;
+    @%p0            bra ML_ROPE_DONE;
+    add.u32         %r16, %r15, %r4;
+    mul.wide.u32    %rd9, %r16, 4;
+    add.u64         %rd10, %rd1, %rd9;
+    ld.global.f32   %f7, [%rd10];
+    add.u32         %r17, %r15, %r5;
+    shl.b32         %r23, %r17, 2;
+    add.u32         %r24, %r20, %r23;
+    st.shared.f32   [%r24], %f7;
+    add.u32         %r15, %r15, 256;
+    bra             ML_ROPE_LOOP;
+ML_ROPE_DONE:
+    bar.sync        0;
+
+    mov.f32         %f2, 0fFF800000;
+    mov.f32         %f3, 0f00000000;
+    mov.f32         %f20, 0f3FB8AA3B;
+    mov.u32         %r13, 0;
+
+ML_CHUNK:
+    setp.ge.u32     %p0, %r13, %r3;
+    @%p0            bra ML_FINISH;
+    add.u32         %r14, %r13, %r1;
+    mov.f32         %f5, 0fFF800000;
+    setp.ge.u32     %p1, %r14, %r3;
+    @%p1            bra ML_SCORE_DONE;
+
+    mul.wide.u32    %rd12, %r14, %r8;
+    shl.b64         %rd12, %rd12, 2;
+    add.u64         %rd13, %rd4, %rd12;
+    mov.f32         %f6, 0f00000000;
+    mov.u32         %r15, 0;
+ML_DOT:
+    setp.ge.u32     %p2, %r15, %r8;
+    @%p2            bra ML_DOT_DONE;
+    shl.b32         %r23, %r15, 2;
+    add.u32         %r24, %r20, %r23;
+    ld.shared.f32   %f7, [%r24];
+    mul.wide.u32    %rd9, %r15, 4;
+    add.u64         %rd10, %rd13, %rd9;
+    ld.global.f32   %f8, [%rd10];
+    fma.rn.f32      %f6, %f7, %f8, %f6;
+    add.u32         %r15, %r15, 1;
+    bra             ML_DOT;
+ML_DOT_DONE:
+    mul.f32         %f5, %f6, %f1;
+ML_SCORE_DONE:
+    st.shared.f32   [%r27], %f5;
+    bar.sync        0;
+
+    mov.u32         %r16, 128;
+ML_MAXRED:
+    setp.ge.u32     %p3, %r1, %r16;
+    @%p3            bra ML_MAXRED_SYNC;
+    add.u32         %r23, %r1, %r16;
+    shl.b32         %r23, %r23, 2;
+    add.u32         %r24, %r22, %r23;
+    ld.shared.f32   %f8, [%r24];
+    ld.shared.f32   %f9, [%r27];
+    max.f32         %f9, %f9, %f8;
+    st.shared.f32   [%r27], %f9;
+ML_MAXRED_SYNC:
+    bar.sync        0;
+    shr.u32         %r16, %r16, 1;
+    setp.ne.u32     %p4, %r16, 0;
+    @%p4            bra ML_MAXRED;
+
+    ld.shared.f32   %f9, [%r22];
+    max.f32         %f10, %f2, %f9;
+    sub.f32         %f11, %f2, %f10;
+    mul.f32         %f11, %f11, %f20;
+    ex2.approx.f32  %f11, %f11;
+    mov.f32         %f2, %f10;
+    sub.f32         %f12, %f5, %f2;
+    mul.f32         %f12, %f12, %f20;
+    ex2.approx.f32  %f12, %f12;
+    fma.rn.f32      %f3, %f3, %f11, %f12;
+    st.shared.f32   [%r26], %f12;
+    bar.sync        0;
+
+    mul.f32         %f16, %f16, %f11;
+    mul.f32         %f17, %f17, %f11;
+    mul.f32         %f18, %f18, %f11;
+    mul.f32         %f19, %f19, %f11;
+    sub.u32         %r18, %r3, %r13;
+    min.u32         %r18, %r18, 256;
+    mov.u32         %r17, 0;
+ML_VLOOP:
+    setp.ge.u32     %p5, %r17, %r18;
+    @%p5            bra ML_V_DONE;
+    shl.b32         %r23, %r17, 2;
+    add.u32         %r24, %r21, %r23;
+    ld.shared.f32   %f12, [%r24];
+    add.u32         %r19, %r13, %r17;
+    mul.wide.u32    %rd14, %r19, %r5;
+    cvt.u64.u32     %rd15, %r1;
+    add.u64         %rd14, %rd14, %rd15;
+    shl.b64         %rd14, %rd14, 2;
+    add.u64         %rd15, %rd5, %rd14;
+    @%p6            ld.global.f32   %f13, [%rd15];
+    @%p6            fma.rn.f32      %f16, %f12, %f13, %f16;
+    @%p7            ld.global.f32   %f14, [%rd15+1024];
+    @%p7            fma.rn.f32      %f17, %f12, %f14, %f17;
+    @%p8            ld.global.f32   %f15, [%rd15+2048];
+    @%p8            fma.rn.f32      %f18, %f12, %f15, %f18;
+    @%p9            ld.global.f32   %f21, [%rd15+3072];
+    @%p9            fma.rn.f32      %f19, %f12, %f21, %f19;
+    add.u32         %r17, %r17, 1;
+    bra             ML_VLOOP;
+ML_V_DONE:
+    bar.sync        0;
+    add.u32         %r13, %r13, 256;
+    bra             ML_CHUNK;
+
+ML_FINISH:
+    st.shared.f32   [%r27], %f3;
+    bar.sync        0;
+    mov.u32         %r16, 128;
+ML_SUMRED:
+    setp.ge.u32     %p3, %r1, %r16;
+    @%p3            bra ML_SUMRED_SYNC;
+    add.u32         %r23, %r1, %r16;
+    shl.b32         %r23, %r23, 2;
+    add.u32         %r24, %r22, %r23;
+    ld.shared.f32   %f8, [%r24];
+    ld.shared.f32   %f9, [%r27];
+    add.f32         %f9, %f9, %f8;
+    st.shared.f32   [%r27], %f9;
+ML_SUMRED_SYNC:
+    bar.sync        0;
+    shr.u32         %r16, %r16, 1;
+    setp.ne.u32     %p4, %r16, 0;
+    @%p4            bra ML_SUMRED;
+
+    ld.shared.f32   %f9, [%r22];
+    @%p6            div.rn.f32      %f16, %f16, %f9;
+    @%p6            st.shared.f32   [%r28], %f16;
+    @%p7            div.rn.f32      %f17, %f17, %f9;
+    @%p7            st.shared.f32   [%r28+1024], %f17;
+    @%p8            div.rn.f32      %f18, %f18, %f9;
+    @%p8            st.shared.f32   [%r28+2048], %f18;
+    @%p9            div.rn.f32      %f19, %f19, %f9;
+    @%p9            st.shared.f32   [%r28+3072], %f19;
+    bar.sync        0;
+
+    mov.u32         %r15, %r1;
+ML_OUT:
+    setp.ge.u32     %p0, %r15, %r7;
+    @%p0            bra ML_EXIT;
+    mul.wide.u32    %rd8, %r15, %r5;
+    shl.b64         %rd8, %rd8, 2;
+    add.u64         %rd9, %rd3, %rd8;
+    mov.f32         %f6, 0f00000000;
+    mov.u32         %r16, 0;
+ML_OUT_DOT:
+    setp.ge.u32     %p1, %r16, %r5;
+    @%p1            bra ML_OUT_DOT_DONE;
+    shl.b32         %r23, %r16, 2;
+    add.u32         %r24, %r20, %r23;
+    ld.shared.f32   %f7, [%r24];
+    mul.wide.u32    %rd10, %r16, 4;
+    add.u64         %rd11, %rd9, %rd10;
+    ld.global.f32   %f8, [%rd11];
+    fma.rn.f32      %f6, %f7, %f8, %f6;
+    add.u32         %r16, %r16, 1;
+    bra             ML_OUT_DOT;
+ML_OUT_DOT_DONE:
+    mul.wide.u32    %rd10, %r15, 4;
+    add.u64         %rd11, %rd6, %rd10;
+    st.global.f32   [%rd11], %f6;
+    add.u32         %r15, %r15, 256;
+    bra             ML_OUT;
+ML_EXIT:
+    ret;
+}
+
 // softmax - single-thread in-place softmax over scores (decode: short seq)
 .visible .entry softmax(
     .param .u64 param_x,

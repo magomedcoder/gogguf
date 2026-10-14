@@ -58,9 +58,7 @@ func AttentionScoresBatchCausalInto(dst, q, k, v, scores []float32, pastLen, bat
 
 			outOff := dstBase + h*headDim
 			vBase := kvHead * headDim
-			for i := range headDim {
-				dst[outOff+i] = vec.DotStride(headScores, v, vBase+i, kvDim, causalEnd)
-			}
+			vec.DotStrideBlock(dst[outOff:outOff+headDim], headScores, v, vBase, kvDim, causalEnd)
 		}
 	}
 

@@ -57,7 +57,7 @@ func skipOOM(t *testing.T, err error) {
 	testutil.SkipOOM(t, err)
 }
 
-// §1+§2: on full Q8_0 offload residency enables; hidden stays on device between layers; logits computed on GPU
+// on full Q8_0 offload residency enables; hidden stays on device between layers; logits computed on GPU
 func TestResidencyEngagedFullOffload(t *testing.T) {
 	m := loadResidentModel(t, 0, 1)
 	defer m.Close()
@@ -91,7 +91,7 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 	}
 }
 
-// §4: batch-prefill with offload must not leave GPU KV-cache stale
+// batch-prefill with offload must not leave GPU KV-cache stale
 func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 	m := loadResidentModel(t, 0, 32)
 	defer m.Close()
@@ -117,7 +117,7 @@ func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 	}
 }
 
-// §4: GPU loop-B matmul + AttentionScoresKV match serial GPU prefill logits
+// GPU loop-B matmul + AttentionScoresKV match serial GPU prefill logits
 func TestGPUBatchMatmulAttnParity(t *testing.T) {
 	tokens := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
@@ -157,7 +157,7 @@ func TestGPUBatchMatmulAttnParity(t *testing.T) {
 	}
 }
 
-// §4: when GPU KV-cache is shorter than prompt, KVCacheAppendN hits max_seq, model marks cache stale and uses CPU mirror for attention - logits must still match
+// when GPU KV-cache is shorter than prompt, KVCacheAppendN hits max_seq, model marks cache stale and uses CPU mirror for attention - logits must still match
 func TestGPUKVStaleFallsBackToCPUAttention(t *testing.T) {
 	tokens := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 

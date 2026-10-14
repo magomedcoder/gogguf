@@ -45,20 +45,7 @@ func SwiGLUInPlace(gate, up []float32) {
 }
 
 func siluInPlace(x []float32) {
-	n := len(x)
-	i := 0
-	for ; i+3 < n; i += 4 {
-		for j := range 4 {
-			idx := i + j
-			v := x[idx]
-			x[idx] = v / (1 + float32(math.Exp(float64(-v))))
-		}
-	}
-
-	for ; i < n; i++ {
-		v := x[i]
-		x[i] = v / (1 + float32(math.Exp(float64(-v))))
-	}
+	vec.SiLUInPlace(x)
 }
 
 // SiLU x * sigmoid(x)

@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
 )
 
-// initFused sets up fused GPU layer paths (§5). Mistral / Qwen2: NeoX RoPE, no QK-norm
+// initFused sets up fused GPU layer paths. Mistral / Qwen2: NeoX RoPE, no QK-norm
 func (m *Model) initFused() {
 	if m.dev == nil {
 		return
@@ -48,39 +48,38 @@ func (m *Model) initFused() {
 
 		m.layerQuant[i] = device.FusedQuantSupported(gpuresid.LayerQuant(m.weights, names...))
 
-		// §6: experts on GPU only with natively supported quant
+		// experts on GPU only with natively supported quant
 		if lt.moe && !m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps) {
 			m.moeGPU = false
 		}
 	}
 }
 
-// initResidency enables device-resident hidden state (§1, §5).
-// MoE layers run on host (experts), so residency is only for dense models
+// initResidency enables device-resident hidden state.
+// MoE layers run on host (experts), so residency is only for dense models.
+//
+// MoE (P1 deferred): full device-resident MoE layers need batched expert dispatch (router top-k, then per-expert FFN and accumulation on device) and n_batch>1 support.
+// Until then MoE layers keep the per-token ExpertFFN path (n_batch=1, hidden state on host); only out_norm + lm_head may run on GPU via gpuresid.LogitsFromHost when ngl covers every layer.
 func (m *Model) initResidency() {
-	if m.dev == nil || m.ngl < m.cfg.NumLayers || m.fused == nil || m.cfg.isMoE() {
+	if m.fused == nil {
 		return
 	}
 
+	if m.cfg.isMoE() {
+		m.initMoELogits()
+		return
+	}
+
+	if !gpuresid.AllLayersOffloaded(m.ngl, m.cfg.NumLayers) {
+		return
+	}
 	// SWA: fused QKV attends over the full GPU KV-cache; it does not apply the window
 	if m.cfg.SlidingWindow > 0 && m.cfg.SlidingWindow < m.cfg.ContextLength {
 		return
 	}
-
-	if !gpuresid.HiddenResidencyEnabled() || !gpuresid.QKVResidencyEnabled() || !gpuresid.AttnFFNResidencyEnabled() {
+	if !gpuresid.CanEnableResidency(m.dev, m.layerQuant) {
 		return
 	}
-
-	if !m.dev.HiddenResident() {
-		return
-	}
-
-	for _, ok := range m.layerQuant {
-		if !ok {
-			return
-		}
-	}
-
 	m.residency = true
 	m.logitsOnGPU = true
 }
@@ -159,7 +158,19 @@ func (m *Model) syncHiddenFromDevice() error {
 	return m.dev.HiddenDownload(m.scratch.x)
 }
 
-// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH hidden (§2)
+// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH hidden
 func (m *Model) logitsDevice() error {
 	return m.fused.LogitsDevice("output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
+}
+
+// initMoELogits: MoE layers run on host, but the final hidden state can still go through the GPU lm_head
+func (m *Model) initMoELogits() {
+	if gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
+		m.logitsOnGPU = true
+	}
+}
+
+// logitsFromHost: hidden state is on host (MoE layers): upload once, out_norm + lm_head on GPU
+func (m *Model) logitsFromHost() error {
+	return m.fused.LogitsFromHost(m.scratch.x, "output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 }

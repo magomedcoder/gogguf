@@ -7,7 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
 )
 
-// initFused sets up fused GPU layer paths (§5). Llama: RoPE NORM and no QK-norm
+// initFused sets up fused GPU layer paths. Llama: RoPE NORM and no QK-norm
 func (m *Model) initFused() {
 	if m.dev == nil {
 		return
@@ -45,26 +45,14 @@ func (m *Model) initFused() {
 	}
 }
 
-// initResidency enables device-resident hidden state (§1, §5): all layers on GPU, fused paths, and one supported weight quant in every layer
+// initResidency enables device-resident hidden state: all layers on GPU, fused paths, and one supported weight quant in every layer
 func (m *Model) initResidency() {
-	if m.dev == nil || m.ngl < m.cfg.NumLayers || m.fused == nil {
+	if m.fused == nil || !gpuresid.AllLayersOffloaded(m.ngl, m.cfg.NumLayers) {
 		return
 	}
-
-	if !gpuresid.HiddenResidencyEnabled() || !gpuresid.QKVResidencyEnabled() || !gpuresid.AttnFFNResidencyEnabled() {
+	if !gpuresid.CanEnableResidency(m.dev, m.layerQuant) {
 		return
 	}
-
-	if !m.dev.HiddenResident() {
-		return
-	}
-
-	for _, ok := range m.layerQuant {
-		if !ok {
-			return
-		}
-	}
-
 	m.residency = true
 	m.logitsOnGPU = true
 }
@@ -139,7 +127,7 @@ func (m *Model) syncHiddenFromDevice() error {
 	return m.dev.HiddenDownload(m.scratch.x)
 }
 
-// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH hidden (§2)
+// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH hidden
 func (m *Model) logitsDevice() error {
 	return m.fused.LogitsDevice("output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 }

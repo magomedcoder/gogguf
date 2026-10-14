@@ -21,13 +21,14 @@ type Model struct {
 	ngl          int
 	gpuMaxSeq    int
 	nBatch       int              // chunk prefill size (1 = per token); dense models only
-	fused        *gpuresid.Runner // fused GPU paths: FFN, MoE experts (§6)
+	fused        *gpuresid.Runner // fused GPU paths: FFN, MoE experts
 	moeGPU       []bool           // layer can run experts on GPU
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
 	outNorm      []float32
 	lmHeadName   string
+	logitsOnGPU  bool // out_norm + lm_head on GPU from the final host hidden state
 }
 
 // Load creates DeepSeek from weights
@@ -87,13 +88,17 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Mode
 	return m, nil
 }
 
-// initFused sets up GPU layer paths (§6). DeepSeek v1: RoPE NORM, experts via ExpertFFN
+// initFused sets up GPU layer paths. DeepSeek v1: RoPE NORM, experts via ExpertFFN.
+//
+// MoE (P1 deferred): full device-resident MoE layers need batched expert dispatch (router top-k, then per-expert FFN and accumulation on device) and n_batch>1 support.
+// Until then MoE layers keep the per-token ExpertFFN path (n_batch=1, hidden state on host); only out_norm + lm_head may run on GPU via gpuresid.LogitsFromHost when ngl covers every layer.
 func (m *Model) initFused() {
 	if m.dev == nil || m.ngl <= 0 {
 		return
 	}
 
 	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENorm)
+	m.logitsOnGPU = gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName)
 	m.moeGPU = make([]bool, m.cfg.NumLayers)
 	for i, lt := range m.layerTensors {
 		if !lt.moe {
@@ -144,6 +149,8 @@ func (m *Model) Close() error {
 }
 
 // Forward runs forward pass for tokenIDs starting at startPos
+// Returns logits for the last token [vocabSize].
+// The slice is the model's internal scratch buffer (no copy): the caller must not retain or modify it across the next Forward / Embed call
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("deepseek: empty input")
@@ -167,13 +174,12 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 			}
 		}
 
-		if err := m.logitsFromHidden(m.scratch.x); err != nil {
+		if err := m.logitsFromLast(m.scratch.x); err != nil {
 			return nil, err
 		}
 	}
 
-	copy(m.scratch.out, m.scratch.logits)
-	return m.scratch.out, nil
+	return m.scratch.logits, nil
 }
 
 // EmbeddingDim returns the hidden state dimension
@@ -354,7 +360,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	nExp := m.cfg.ExpertCount
 	ffn := m.cfg.ExpertFFN
 
-	// §6: router matmul on GPU via MatMulInto (same quant cache)
+	// router matmul on GPU via MatMulInto (same quant cache)
 	if err := m.matmulInto(lt.gateInp, nExp, embd, m.scratch.h, m.scratch.router[:nExp], layer); err != nil {
 		return err
 	}
@@ -363,7 +369,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 
 	clear(m.scratch.moeAcc)
 
-	// §6: selected experts - fused FFN on GPU from raw weight slice
+	// selected experts - fused FFN on GPU from raw weight slice
 	if m.moeExpertsGPU(lt, layer, idxs, weights) {
 		return m.sharedExpert(lt, layer)
 	}
@@ -561,6 +567,20 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 	}
 
 	return m.dev.MatMulVecCached(name, f32, rows, cols, vec)
+}
+
+// logitsFromLast: lm_head on GPU (hidden uploaded once) when enabled, else on host
+func (m *Model) logitsFromLast(x []float32) error {
+	if m.logitsOnGPU && m.fused != nil {
+		err := m.fused.LogitsFromHost(x, "output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
+		if err == nil {
+			return nil
+		}
+
+		m.logitsOnGPU = false
+	}
+
+	return m.logitsFromHidden(x)
 }
 
 func (m *Model) logitsFromHidden(x []float32) error {

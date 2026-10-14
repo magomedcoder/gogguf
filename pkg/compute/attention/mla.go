@@ -69,9 +69,7 @@ func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHead
 
 		SoftmaxInPlace(headScores)
 
-		for i := range kvLora {
-			ctx[i] = vec.DotStride(headScores, v, i, kvLora, seqLen)
-		}
+		vec.DotStrideBlock(ctx, headScores, v, 0, kvLora, seqLen)
 
 		// wv_b[h]: out[v] = Σ_k W[k + kvLora*v + kvLora*vHead*h] * ctx[k]
 		base := h * kvLora * vHead
@@ -89,7 +87,7 @@ func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHead
 	return nil
 }
 
-// MatMulColMajorInto: out[m] = Σ_k W[k + kDim*m] * vec[k] (ggml_mul_mat layout for wk_b: {kDim, mDim})
+// MatMulColMajorInto out[m] = Σ_k W[k + kDim*m] * vec[k] (ggml_mul_mat layout for wk_b: {kDim, mDim})
 func MatMulColMajorInto(w []float32, kDim, mDim int, vec, out []float32) error {
 	if len(vec) < kDim || len(out) < mDim || len(w) < kDim*mDim {
 		return fmt.Errorf("compute: MatMulColMajor size mismatch")

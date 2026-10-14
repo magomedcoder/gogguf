@@ -122,6 +122,8 @@ typedef struct {
 	PFN_cuGraphLaunch cuGraphLaunch;
 	PFN_cuGraphExecDestroy cuGraphExecDestroy;
 	int has_graphs;
+	// fn_attn_flash: fused attn_flash kernel (set by Go after module load; NULL = unfused qk/softmax/v path)
+	CUfunction fn_attn_flash;
 } cuda_driver_t;
 
 #define GGUF_CUDA_MIN_CC 60
@@ -395,6 +397,40 @@ int gguf_cuda_kv_append_n(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *ca
 
 // gguf_cuda_kv_attention attention with K/V already on GPU
 int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, gguf_kv_cache_t *cache, gguf_attn_pool_t *pool, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim);
+
+// gguf_cuda_kv_attention_batch causal multi-query attention in one launch (needs fn_attn_flash; -30 = unavailable)
+int gguf_cuda_kv_attention_batch(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, float *dst, const float *q, int n, int past_len, int n_heads, int n_kv_heads, int head_dim);
+
+// MLA (DeepSeek-V2/V3 absorbed attention) device cache: K row = kv_lora+rope, V row = kv_lora
+typedef struct {
+	CUdeviceptr d_k;
+	CUdeviceptr d_v;
+} gguf_mla_layer_t;
+
+typedef struct {
+	gguf_mla_layer_t *layers;
+	int num_layers;
+	int max_seq;
+	int k_dim;
+	int v_dim;
+	CUdeviceptr d_q;   // q scratch [q_elems]
+	CUdeviceptr d_out; // attention output scratch [out_elems]
+	int q_elems;
+	int out_elems;
+} gguf_mla_cache_t;
+
+// gguf_cuda_mla_init allocates per-layer K/V (max_seq x k_dim / v_dim) and q/out scratch
+int gguf_cuda_mla_init(cuda_driver_t *drv, CUcontext ctx, gguf_mla_cache_t *cache, int num_layers, int max_seq, int k_dim, int v_dim, int q_elems, int out_elems);
+
+void gguf_cuda_mla_free(cuda_driver_t *drv, gguf_mla_cache_t *cache);
+
+// gguf_cuda_mla_append stores one token's K (k_dim) and V (v_dim) at pos
+int gguf_cuda_mla_append(cuda_driver_t *drv, CUcontext ctx, gguf_mla_cache_t *cache, int layer, int pos, const float *k, const float *v);
+
+// gguf_cuda_mla_attention: absorb q_nope via k_b, attend over seq_len cached positions, project with v_b.
+// q: [n_heads][nope+rope] (host); d_kb [n_heads][kv_lora][nope], d_wvb [n_heads][v_head][kv_lora] (device f32).
+// dst: [n_heads*v_head] (host). Limits: kv_lora <= 1024, kv_lora+rope <= 1280.
+int gguf_cuda_mla_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_mla, gguf_mla_cache_t *cache, int layer, float *dst, const float *q, CUdeviceptr d_kb, CUdeviceptr d_wvb, int seq_len, int n_heads, int nope, int kv_lora, int rope, int v_head, float scale);
 
 // gguf_cuda_attn_pool_init allocates reusable attention buffers (+ K/V token, RoPE)
 int gguf_cuda_attn_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_attn_pool_t *pool, int q_elems, int max_seq, int kv_dim, int rope_half);

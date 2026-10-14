@@ -29,11 +29,11 @@ type Model struct {
 	lmHeadName   string
 	debug        *DebugHooks
 
-	fused      *gpuresid.Runner   // fused GPU layer paths (§5)
+	fused      *gpuresid.Runner   // fused GPU layer paths
 	fusedDims  gpuresid.Dims      // dimensions for fused paths
 	gpuLayers  []gpuresid.Tensors // layer weight names for fused paths
 	layerQuant []bool             // layer fully in supported fused quant
-	moeGPU     bool               // MoE experts computed on GPU (§6)
+	moeGPU     bool               // MoE experts computed on GPU
 
 	residency   bool // layers can keep hidden state on device
 	residDevice bool // hidden state is on device; host buffer x is stale
@@ -166,6 +166,9 @@ func (m *Model) SetDebugHooks(h *DebugHooks) {
 }
 
 // Forward runs forward pass for tokenIDs starting at startPos
+// Returns logits for the last token [vocabSize]. The slice is the model's
+// internal scratch buffer (no copy): the caller must not retain or modify it
+// across the next Forward / Embed call
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("mistral: empty input")
@@ -200,8 +203,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		m.debug.OnLogits(m.scratch.logits)
 	}
 
-	copy(m.scratch.out, m.scratch.logits)
-	return m.scratch.out, nil
+	return m.scratch.logits, nil
 }
 
 // EmbeddingDim returns the hidden state dimension
@@ -246,7 +248,7 @@ func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 		m.debug.OnEmbed(m.scratch.x)
 	}
 
-	// §5: single HtoD hidden state per token; layers then run on device
+	// single HtoD hidden state per token; layers then run on device
 	m.uploadHidden()
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
@@ -325,7 +327,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	onGPU := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 	usedQKVResidency := false
 
-	// §5: entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals
+	// entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals
 	if m.residDevice {
 		err := m.forwardBlockDevice(layer, pos, ln, m.scratch.k, m.scratch.v, m.scratch.attn)
 		if err == nil {
@@ -449,7 +451,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 
 	clear(m.scratch.moeAcc)
 
-	// §6: selected experts - fused FFN on GPU from expert raw weight slice
+	// selected experts - fused FFN on GPU from expert raw weight slice
 	if m.moeGPU && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.moeExpertsGPU(lt, idxs, weights, ffn); err == nil {
 			return m.sharedExpert(lt, layer)
@@ -522,7 +524,7 @@ func (m *Model) sharedExpert(lt layerTensors, layer int) error {
 		gateScale = siluDiv(gateInp[0])
 	}
 
-	// §6: shared expert uses same fused FFN on same resident weight buffer
+	// shared expert uses same fused FFN on same resident weight buffer
 	done := false
 	if m.fused != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.fused.FFNNamed(lt.gateShexp, lt.upShexp, lt.downShexp, m.scratch.h, m.scratch.tmp, embd, shared); err == nil {
@@ -655,7 +657,7 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logitsFinish() error {
-	// §2: hidden on device - out_norm + lm_head on GPU too; only logits go to host
+	// hidden on device - out_norm + lm_head on GPU too; only logits go to host
 	if m.residDevice && m.logitsOnGPU {
 		if err := m.logitsDevice(); err == nil {
 			return nil
@@ -666,6 +668,15 @@ func (m *Model) logitsFinish() error {
 
 	if err := m.syncHiddenFromDevice(); err != nil {
 		return err
+	}
+
+	// hidden on host (MoE): lm_head on GPU after one upload
+	if m.logitsOnGPU && m.cfg.isMoE() {
+		if err := m.logitsFromHost(); err == nil {
+			return nil
+		}
+
+		m.logitsOnGPU = false
 	}
 
 	return m.logitsFromHidden(m.scratch.x)

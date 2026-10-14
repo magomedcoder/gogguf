@@ -452,6 +452,16 @@ func (m *MultiBackend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nH
 	return dev.AttentionScoresKV(local, dst, q, seqLen, nHeads, nKVHeads, headDim)
 }
 
+// AttentionScoresKVBatch routes causal batch attention to the device owning layer (falls back to a per-query loop when that device lacks KVBatchAttentionBackend).
+func (m *MultiBackend) AttentionScoresKVBatch(layer int, dst, q []float32, n, pastLen, nHeads, nKVHeads, headDim int) error {
+	dev, local, err := m.route(layer)
+	if err != nil {
+		return err
+	}
+
+	return AttentionScoresKVBatch(dev, local, dst, q, n, pastLen, nHeads, nKVHeads, headDim)
+}
+
 func (m *MultiBackend) Close() error {
 	var errs []error
 	for _, d := range m.devs {

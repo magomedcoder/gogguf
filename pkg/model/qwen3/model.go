@@ -36,10 +36,10 @@ type Model struct {
 	logitsOnGPU bool          // out_norm + lm_head computed on GPU
 	gpuKVStale  bool          // GPU KV-cache incomplete: attention on CPU only
 
-	fused     *gpuresid.Runner   // fused GPU layer paths (§5)
+	fused     *gpuresid.Runner   // fused GPU layer paths
 	fusedDims gpuresid.Dims      // dimensions for fused paths
 	gpuLayers []gpuresid.Tensors // layer weight names for fused paths
-	moeGPU    bool               // MoE experts computed on GPU (§6)
+	moeGPU    bool               // MoE experts computed on GPU
 }
 
 // Load creates Qwen3 from weights
@@ -116,7 +116,7 @@ func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch i
 	return m, nil
 }
 
-// initFused sets up shared fused GPU path wiring (§5): Qwen3 - NeoX RoPE + QK-norm
+// initFused sets up shared fused GPU path wiring: Qwen3 - NeoX RoPE + QK-norm
 func (m *Model) initFused() {
 	if m.dev == nil {
 		return
@@ -151,7 +151,7 @@ func (m *Model) initFused() {
 		}
 	}
 
-	// §6: experts on GPU only if all expert weights are natively quantized
+	// experts on GPU only if all expert weights are natively quantized
 	m.moeGPU = m.cfg.ExpertCount > 0
 	for _, lt := range m.layerTensors {
 		if lt.moe && !m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps) {
@@ -176,27 +176,29 @@ func resolveLayerQuants(w *weights.Store, lts []layerTensors) []dtype.DType {
 	return kinds
 }
 
-// initResidency enables device-resident hidden state (§1): all layers on GPU required,
+// initResidency enables device-resident hidden state: all layers on GPU required,
 // fused QKV/residual paths and a single supported weight quant across all layers
+// MoE (P1 deferred): full device-resident MoE layers need batched expert dispatch (router top-k, then per-expert FFN and accumulation on device) and n_batch>1 support.
+// Until then MoE layers keep the per-token ExpertFFN path (n_batch=1, hidden state on host); only out_norm + lm_head may run on GPU via gpuresid.LogitsFromHost when ngl covers every layer.
 func (m *Model) initResidency() {
-	if m.dev == nil || m.ngl < m.cfg.NumLayers || m.cfg.ExpertCount > 0 {
-		return
-	}
-
-	if !hiddenResidencyEnabled() || !qkvResidencyEnabled() || !attnFFNResidencyEnabled() {
-		return
-	}
-
-	if !m.dev.HiddenResident() {
-		return
-	}
-
-	for _, t := range m.layerQuant {
-		if !device.FusedQuantSupported(t) {
-			return
+	if m.cfg.ExpertCount > 0 {
+		if m.fused != nil && gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
+			m.logitsOnGPU = true
 		}
+
+		return
 	}
 
+	if !gpuresid.AllLayersOffloaded(m.ngl, m.cfg.NumLayers) {
+		return
+	}
+	ok := make([]bool, len(m.layerQuant))
+	for i, t := range m.layerQuant {
+		ok[i] = device.FusedQuantSupported(t)
+	}
+	if !gpuresid.CanEnableResidency(m.dev, ok) {
+		return
+	}
 	m.residency = true
 	m.logitsOnGPU = true
 }
@@ -341,7 +343,7 @@ func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 		m.debug.OnEmbed(m.scratch.x[:m.cfg.EmbeddingDim])
 	}
 
-	// §1: single HtoD hidden state per token when gather missed; layers then run on device.
+	// single HtoD hidden state per token when gather missed; layers then run on device.
 	// Debug hooks read host buffer x, so residency is disabled with them.
 	// gpuKVStale: fused QKV attends using GPU KV-cache, which is incomplete.
 	if !gathered && m.residency && m.debug == nil && !m.gpuKVStale {
@@ -398,7 +400,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	gate := m.scratch.gate[:ffn]
 	up := m.scratch.up[:ffn]
 
-	// §1: entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals.
+	// entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals.
 	// host x is not read or updated.
 	if m.residDevice {
 		err := m.forwardBlockDevice(layer, pos, ln, k, v, attn)
@@ -613,7 +615,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 
 	clear(m.scratch.moeAcc)
 
-	// §6: selected experts on GPU; expert weights cached on device as raw tensor slice, no full expert matrix dequant on host
+	// selected experts on GPU; expert weights cached on device as raw tensor slice, no full expert matrix dequant on host
 	if m.moeGPU && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.moeExpertsGPU(lt, idxs, weights, h, ffn); err == nil {
 			return nil
@@ -679,13 +681,13 @@ func qkvResidencyEnabled() bool {
 }
 
 // attnFFNGPU: WO + residual + ffn_norm + FFN + residual on GPU.
-// x == nil - hidden resident on device (§1).
+// x == nil - hidden resident on device .
 func (m *Model) attnFFNGPU(layer int, ln layerNorms, x, attn []float32) error {
 	return m.fused.AttnFFN(m.gpuLayers[layer], m.fusedDims, ln.ffnNorm, x, attn)
 }
 
 // qkvAttnGPU: QKV + QK-norm + RoPE + KV append + attention on GPU.
-// h == nil - hidden resident: attn_norm computed on device from residual (§1).
+// h == nil - hidden resident: attn_norm computed on device from residual.
 func (m *Model) qkvAttnGPU(layer, pos int, ln layerNorms, h, kOut, vOut, attn []float32) error {
 	kvPos := m.cache.Len()
 
@@ -835,7 +837,7 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logits() error {
-	// §2: hidden on device - out_norm + lm_head on GPU too; only logits go to host
+	// hidden on device - out_norm + lm_head on GPU too; only logits go to host
 	if m.residDevice && m.logitsOnGPU {
 		if err := m.logitsDevice(); err == nil {
 			return nil
@@ -847,6 +849,16 @@ func (m *Model) logits() error {
 
 	if err := m.syncHiddenFromDevice(); err != nil {
 		return err
+	}
+
+	// hidden on host (MoE): lm_head on GPU after one upload
+	if m.logitsOnGPU && m.cfg.ExpertCount > 0 && m.fused != nil {
+		err := m.fused.LogitsFromHost(m.scratch.x, "output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
+		if err == nil {
+			return nil
+		}
+
+		m.logitsOnGPU = false
 	}
 
 	return m.logitsFromHidden(m.scratch.x[:m.cfg.EmbeddingDim])

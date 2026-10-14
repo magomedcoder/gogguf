@@ -28,7 +28,6 @@ type scratch struct {
 	moeAcc []float32
 	tmp    []float32
 	logits []float32
-	out    []float32
 }
 
 func newScratch(cfg Config, nBatch int) scratch {
@@ -75,6 +74,5 @@ func newScratch(cfg Config, nBatch int) scratch {
 		moeAcc: a.Alloc(embd),
 		tmp:    a.Alloc(embd),
 		logits: a.Alloc(cfg.VocabSize),
-		out:    a.Alloc(cfg.VocabSize),
 	}
 }

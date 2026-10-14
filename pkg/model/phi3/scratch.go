@@ -29,7 +29,6 @@ type scratch struct {
 	gate   []float32
 	up     []float32
 	logits []float32
-	out    []float32
 }
 
 func newScratch(cfg Config, nBatch int) scratch {
@@ -79,6 +78,5 @@ func newScratch(cfg Config, nBatch int) scratch {
 		gate:    bgate[:ffn],
 		up:      bup[:ffn],
 		logits:  a.Alloc(cfg.VocabSize),
-		out:     a.Alloc(cfg.VocabSize),
 	}
 }

@@ -27,7 +27,6 @@ type scratch struct {
 	scores  []float32
 	up      []float32
 	logits  []float32
-	out     []float32
 }
 
 func newScratch(cfg Config, nBatch int) scratch {
@@ -73,6 +72,5 @@ func newScratch(cfg Config, nBatch int) scratch {
 		scores:   a.Alloc(cfg.ContextLength),
 		up:       bup[:cfg.FFNHidden],
 		logits:   a.Alloc(cfg.VocabSize),
-		out:      a.Alloc(cfg.VocabSize),
 	}
 }

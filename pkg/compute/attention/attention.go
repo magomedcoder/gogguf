@@ -66,6 +66,8 @@ func attentionOneHead(dst, q, k, v, headScores []float32, h, groupSize, seqLen, 
 	kvHead := h / groupSize
 	qOff := h * headDim
 
+	// QK: one Dot (SIMD) per key row.
+	// K rows are strided by nKVHeads*headDim, so batching several keys into one kernel gains little without a flash-style rewrite (see roadmap); the V side below uses the batched DotStrideBlock.
 	for t := range seqLen {
 		kOff := t*nKVHeads*headDim + kvHead*headDim
 		s := float64(vec.Dot(q[qOff:qOff+headDim], k[kOff:kOff+headDim]) * scale)
@@ -80,7 +82,5 @@ func attentionOneHead(dst, q, k, v, headScores []float32, h, groupSize, seqLen, 
 	outOff := h * headDim
 	vStride := nKVHeads * headDim
 	vBase := kvHead * headDim
-	for i := range headDim {
-		dst[outOff+i] = vec.DotStride(headScores, v, vBase+i, vStride, seqLen)
-	}
+	vec.DotStrideBlock(dst[outOff:outOff+headDim], headScores, v, vBase, vStride, seqLen)
 }

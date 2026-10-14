@@ -63,7 +63,7 @@ func skipOOM(t *testing.T, err error) {
 	testutil.SkipOOM(t, err)
 }
 
-// §5: on full Q8_0 offload residency enables and hidden lives on device.
+// on full Q8_0 offload residency enables and hidden lives on device.
 // If full model does not fit VRAM - try fewer layers: fused QKV/AttnFFN must still run without host fallback for those layers
 func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 	m := loadModel(t, 999)
@@ -113,7 +113,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 	}
 }
 
-// §5: GPU-path logits must match CPU. Try full offload + residency first; on 4GB VRAM OOM - partial ngl without residency (same fused QKV/AttnFFN)
+// GPU-path logits must match CPU. Try full offload + residency first; on 4GB VRAM OOM - partial ngl without residency (same fused QKV/AttnFFN)
 func TestLlamaFullOffloadLogitsParity(t *testing.T) {
 	tokens := []int{128000, 9906, 11, 1917, 0, 24248, 757, 922, 22915}
 

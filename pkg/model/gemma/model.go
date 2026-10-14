@@ -27,9 +27,14 @@ type Model struct {
 	outNorm      []float32
 	lmHeadName   string
 
-	fused     *gpuresid.Runner   // fused GPU layer paths (§5)
-	fusedDims gpuresid.Dims      // dimensions for fused FFN
-	gpuLayers []gpuresid.Tensors // layer weight names for fused paths
+	fused      *gpuresid.Runner   // fused GPU layer paths
+	fusedDims  gpuresid.Dims      // dimensions for fused paths
+	gpuLayers  []gpuresid.Tensors // layer weight names for fused paths
+	layerQuant []bool             // layer fully in supported fused quant
+
+	residency   bool // fused QKV+attention decode (Gemma 1 only; hidden stays on host, see initResidency)
+	logitsOnGPU bool // out_norm + lm_head computed on GPU from the final hidden state
+	gpuKVStale  bool // GPU KV-cache incomplete: attention on CPU only
 }
 
 // LoadGemma creates Gemma 1
@@ -83,34 +88,9 @@ func load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int, parse 
 	}
 
 	m.initFused()
+	m.initResidency()
 
 	return m, nil
-}
-
-// initFused sets up fused GPU layer FFN (§5). Gemma: GeGLU instead of SwiGLU; residency not enabled yet - blocked by post-norm, softcap, and SWA
-func (m *Model) initFused() {
-	if m.dev == nil {
-		return
-	}
-
-	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENeoX)
-	m.fusedDims = gpuresid.Dims{
-		Embd:     m.cfg.EmbeddingDim,
-		NHeads:   m.cfg.NumHeads,
-		NKVHeads: m.cfg.NumKVHeads,
-		HeadDim:  m.cfg.HeadDim,
-		FFN:      m.cfg.FFNHidden,
-		Eps:      m.cfg.RMSNormEps,
-	}
-
-	m.gpuLayers = make([]gpuresid.Tensors, m.cfg.NumLayers)
-	for i, lt := range m.layerTensors {
-		m.gpuLayers[i] = gpuresid.Tensors{
-			FFNGate: lt.ffnGate,
-			FFNUp:   lt.ffnUp,
-			FFNDown: lt.ffnDown,
-		}
-	}
 }
 
 func (m *Model) initGPUKVCache() error {
@@ -129,6 +109,7 @@ func (m *Model) Config() Config { return m.cfg }
 // ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
+	m.gpuKVStale = false
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -145,7 +126,8 @@ func (m *Model) Close() error {
 	return err
 }
 
-// Forward runs the forward pass
+// Forward runs forward pass for tokenIDs starting at startPos Returns logits for the last token [vocabSize].
+// The slice is the model's internal scratch buffer (no copy): the caller must not retain or modify it across the next Forward / Embed call
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("gemma: empty input")
@@ -182,8 +164,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		}
 	}
 
-	copy(m.scratch.out, m.scratch.logits)
-	return m.scratch.out, nil
+	return m.scratch.logits, nil
 }
 
 // EmbeddingDim returns the hidden state dimension
@@ -287,35 +268,54 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 	qDim := m.cfg.NumHeads * m.cfg.HeadDim
 	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
-	if err := m.matmulInto(lt.attnQ, qDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.q, layer); err != nil {
-		return err
+	onGPU := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
+	usedQKVResidency := false
+
+	// Gemma 1 only (m.residency): fused QKV+RoPE+attention reads the GPU KV-cache, so it must be complete
+	if m.residency && onGPU && !m.gpuKVStale {
+		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
+			if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
+				return err
+			}
+			usedQKVResidency = true
+		}
 	}
 
-	if err := m.matmulInto(lt.attnK, kvDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.k, layer); err != nil {
-		return err
-	}
+	if !usedQKVResidency {
+		if err := m.matmulInto(lt.attnQ, qDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.q, layer); err != nil {
+			return err
+		}
 
-	if err := m.matmulInto(lt.attnV, kvDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.v, layer); err != nil {
-		return err
-	}
+		if err := m.matmulInto(lt.attnK, kvDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.k, layer); err != nil {
+			return err
+		}
 
-	base := m.cfg.ropeBase(layer)
-	compute.ApplyRoPEHeads(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, pos, base)
-	compute.ApplyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, base)
+		if err := m.matmulInto(lt.attnV, kvDim, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.v, layer); err != nil {
+			return err
+		}
 
-	kvPos := m.cache.Len()
-	if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
-		return err
-	}
-	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		_ = m.dev.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
-	}
+		base := m.cfg.ropeBase(layer)
+		compute.ApplyRoPEHeads(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, pos, base)
+		compute.ApplyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, base)
 
-	seqLen := m.cache.Len() + 1
-	k, v, attnSeq := m.attentionKV(layer, seqLen)
+		kvPos := m.cache.Len()
+		if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
+			return err
+		}
 
-	if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, k, v, m.scratch.scores, attnSeq, layer); err != nil {
-		return err
+		// token missed GPU KV-cache - disable GPU attention until ResetCache
+		if onGPU && !m.gpuKVStale {
+			if err := m.dev.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v); err != nil {
+				m.gpuKVStale = true
+			}
+		}
+
+		seqLen := m.cache.Len() + 1
+		k, v, attnSeq := m.attentionKV(layer, seqLen)
+
+		if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, k, v, m.scratch.scores, attnSeq, layer); err != nil {
+			return err
+		}
 	}
 
 	if err := m.matmulInto(lt.attnOut, m.cfg.EmbeddingDim, qDim, m.scratch.attn, m.scratch.h, layer); err != nil {
@@ -346,7 +346,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	return nil
 }
 
-// ffnInto: gate/up + GeGLU + down. On GPU - one fused call (§5), otherwise piecewise
+// ffnInto: gate/up + GeGLU + down. On GPU - one fused call, otherwise piecewise
 func (m *Model) ffnInto(layer int, lt layerTensors, x, out []float32) error {
 	if m.fused != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.fused.FFNGeGLU(m.gpuLayers[layer], m.fusedDims, x, out); err == nil {
@@ -392,7 +392,7 @@ func (m *Model) attentionKV(layer, seqLen int) (k, v []float32, attnSeq int) {
 func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, layer int) error {
 	softcap := m.cfg.AttnLogitSoftcap
 	swaClip := m.cfg.IsSWALayer(layer) && m.cfg.SlidingWindow > 0
-	if softcap == 0 && !swaClip && m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	if softcap == 0 && !swaClip && !m.gpuKVStale && m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.dev.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil
 		}
@@ -442,7 +442,21 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logitsFinish() error {
-	return m.logitsFromHidden(m.scratch.x)
+	return m.logitsFromLast(m.scratch.x)
+}
+
+// logitsFromLast: lm_head on GPU (hidden uploaded once) when enabled, else on host
+func (m *Model) logitsFromLast(x []float32) error {
+	if m.logitsOnGPU && m.fused != nil {
+		if err := m.logitsDevice(x); err == nil {
+			return nil
+		}
+
+		// lm_head on GPU failed (weight type / VRAM): continue on host
+		m.recoverLogits()
+	}
+
+	return m.logitsFromHidden(x)
 }
 
 // logitsFromHidden: out_norm + lm_head for hidden state x [embd]

@@ -40,7 +40,7 @@ func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) erro
 		return nil
 	}
 
-	return m.logitsFromHidden(m.scratch.bx[(b-1)*embd : b*embd])
+	return m.logitsFromLast(m.scratch.bx[(b-1)*embd : b*embd])
 }
 
 func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
@@ -90,9 +90,11 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	}
 
 	// mirror chunk K/V into GPU KV-cache (same best-effort policy as the serial path)
-	gpuKV := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
+	gpuKV := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale
 	if gpuKV {
 		if err := m.dev.KVCacheAppendN(layer, pastLen, k, v, batch); err != nil {
+			// chunk missed GPU KV-cache: decode must not read it until ResetCache
+			m.gpuKVStale = true
 			gpuKV = false
 		}
 	}

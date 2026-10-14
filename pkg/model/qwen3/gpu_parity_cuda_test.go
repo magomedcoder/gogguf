@@ -36,7 +36,7 @@ func skipOOM(t *testing.T, err error) {
 	}
 }
 
-// §1+§2: full offload with resident hidden and GPU out_norm+lm_head must match CPU-path logits
+// full offload with resident hidden and GPU out_norm+lm_head must match CPU-path logits
 func TestGPUFullOffloadLogitsParity(t *testing.T) {
 	path := testModelPath(t)
 
@@ -73,7 +73,7 @@ func TestGPUFullOffloadLogitsParity(t *testing.T) {
 	}
 }
 
-// §4: -b with -ngl is allowed and yields same logits as token-wise GPU prefill
+// -b with -ngl is allowed and yields same logits as token-wise GPU prefill
 func TestGPUNBatchPrefillParity(t *testing.T) {
 	path := testModelPath(t)
 

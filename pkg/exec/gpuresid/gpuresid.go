@@ -53,6 +53,7 @@ type Runner struct {
 	rope device.RoPEMode
 	cos  []float32
 	sin  []float32
+	tmp  []float32 // scratch for releasing residency after logits-only passes
 }
 
 // New creates a runner for the model with the given RoPE mode
@@ -60,8 +61,8 @@ func New(w *weights.Store, g device.Backend, rope device.RoPEMode) *Runner {
 	return &Runner{w: w, g: g, rope: rope}
 }
 
-// QKVAttn: QKV + QK-norm + RoPE + KV append + attention on GPU.
-// h == nil - hidden is resident on device: attn_norm from residual (§1), host buffer h is not read
+// QKVAttn QKV + QK-norm + RoPE + KV append + attention on GPU.
+// h == nil - hidden is resident on device: attn_norm from residual, host buffer h is not read
 func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOut, vOut []float32, layer, pos, kvPos, seqLen int) error {
 	info, err := r.w.Info(t.AttnQ)
 	if err != nil {
@@ -77,7 +78,7 @@ func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOu
 	cos, sin := r.cos[:half], r.sin[:half]
 	compute.RoPECosSin(cos, sin, d.HeadDim, pos, d.RopeBase)
 
-	// §3: supported quants use fused path natively, without host Floats
+	// supported quants use fused path natively, without host Floats
 	if device.FusedQuantSupported(info.Type) {
 		qRaw, kRaw, vRaw, err := r.raw3(t.AttnQ, t.AttnK, t.AttnV)
 		if err != nil {
@@ -104,8 +105,8 @@ func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOu
 	return r.g.QKVRoPEAttentionCached(t.AttnQ, t.AttnK, t.AttnV, t.QNorm, t.KNorm, qW, kW, vW, qNorm, kNorm, h, cos, sin, attn, kOut, vOut, d.Embd, d.NHeads, d.NKVHeads, d.HeadDim, layer, kvPos, seqLen, d.Eps)
 }
 
-// AttnFFN: WO + residual + ffn_norm + FFN + residual on GPU.
-// x == nil - residual stays on device (§1)
+// AttnFFN WO + residual + ffn_norm + FFN + residual on GPU.
+// x == nil - residual stays on device
 func (r *Runner) AttnFFN(t Tensors, d Dims, ffnNorm, x, attn []float32) error {
 	info, err := r.w.Info(t.AttnOut)
 	if err != nil {
@@ -143,17 +144,17 @@ func (r *Runner) AttnFFN(t Tensors, d Dims, ffnNorm, x, attn []float32) error {
 	return r.g.AttnFFNResidualCached(t.AttnOut, t.FFNNorm, t.FFNGate, t.FFNUp, t.FFNDown, woW, ffnNorm, gateW, upW, downW, x, attn, d.Embd, d.QDim(), d.FFN, d.Eps)
 }
 
-// FFN: gate/up/down + SwiGLU on GPU
+// FFN gate/up/down + SwiGLU on GPU
 func (r *Runner) FFN(t Tensors, d Dims, x, out []float32) error {
 	return r.ffn(false, t.FFNGate, t.FFNUp, t.FFNDown, x, out, d.Embd, d.FFN)
 }
 
-// FFNGeGLU: same fused FFN with GeGLU activation (Gemma)
+// FFNGeGLU same fused FFN with GeGLU activation (Gemma)
 func (r *Runner) FFNGeGLU(t Tensors, d Dims, x, out []float32) error {
 	return r.ffn(true, t.FFNGate, t.FFNUp, t.FFNDown, x, out, d.Embd, d.FFN)
 }
 
-// FFNNamed - fused SwiGLU-FFN with arbitrary weight names (shared expert MoE)
+// FFNNamed fused SwiGLU-FFN with arbitrary weight names (shared expert MoE)
 func (r *Runner) FFNNamed(gateName, upName, downName string, x, out []float32, embd, ffn int) error {
 	return r.ffn(false, gateName, upName, downName, x, out, embd, ffn)
 }
@@ -189,7 +190,7 @@ func (r *Runner) ffn(geglu bool, gateName, upName, downName string, x, out []flo
 	return r.g.FFNSwiGLUCached(gateName, upName, downName, gateW, upW, downW, x, out, embd, ffn)
 }
 
-// MatMulInto - single matmul on GPU by weight name (§7: MLA projections, MoE router, lm_head). Result is written to out
+// MatMulInto single matmul on GPU by weight name (MLA projections, MoE router, lm_head). Result is written to out
 func (r *Runner) MatMulInto(name string, rows, cols int, vec, out []float32) error {
 	if len(out) < rows {
 		return fmt.Errorf("gpuresid: %s: short out: %d < %d", name, len(out), rows)
@@ -244,7 +245,7 @@ func (r *Runner) matMulQuant(t dtype.DType, name string, raw []byte, rows, cols 
 	}
 }
 
-// ExpertFFN: FFN of one MoE expert on GPU (§6).
+// ExpertFFN FFN of one MoE expert on GPU.
 // Expert weights are one tensor [n_exp][rows][cols]; only expert slice goes to device as "<tensor>#<expert>", without dequantizing full matrix on host
 func (r *Runner) ExpertFFN(gateExps, upExps, downExps string, expert int, x, out []float32, embd, ffn int) error {
 	gate, err := r.expertSlice(gateExps, expert, ffn, embd)
@@ -281,7 +282,7 @@ func (r *Runner) MoESupported(names ...string) bool {
 	return true
 }
 
-// LogitsDevice: out_norm + lm_head on GPU over resident hidden (§2)
+// LogitsDevice out_norm + lm_head on GPU over resident hidden
 func (r *Runner) LogitsDevice(normName string, norm []float32, headName string, logits []float32, vocab, embd int, eps float32) error {
 	info, err := r.w.Info(headName)
 	if err != nil {

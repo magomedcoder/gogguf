@@ -69,6 +69,8 @@ type Backend struct {
 	fnAttnQK        C.CUfunction
 	fnAttnV         C.CUfunction
 	fnSoftmax       C.CUfunction
+	fnAttnFlash     C.CUfunction // attn_flash (fused QK+softmax+V, optional)
+	fnMLA           C.CUfunction // mla_attn (absorbed MLA, optional)
 	fnAdd           C.CUfunction
 	fnEmbedGather   C.CUfunction
 	fnLogitsArgmax  C.CUfunction
@@ -79,6 +81,8 @@ type Backend struct {
 	hasGeGLU        bool
 	hasAttn         bool
 	hasSoftmax      bool
+	hasAttnFlash    bool
+	hasMLA          bool
 	hasAdd          bool
 	hasGraphs       bool
 	hasQ4           bool
@@ -97,8 +101,11 @@ type Backend struct {
 	matricesQ6K map[string]gpuQ8Matrix
 	kvCache     C.gguf_kv_cache_t
 	kvReady     bool
+	mlaCache    C.gguf_mla_cache_t
+	mlaReady    bool
 	attnPool    C.gguf_attn_pool_t
 	matmulPool  C.gguf_matmul_pool_t
+	wc          weightCache // LRU over uploaded weight matrices (see weight_cache.go)
 	lastVecAddr uintptr
 	lastVecLen  int
 
@@ -127,6 +134,8 @@ func OpenDevice(device int) (*Backend, error) {
 		matricesQ5K: make(map[string]gpuQ8Matrix),
 		matricesQ6K: make(map[string]gpuQ8Matrix),
 	}
+
+	b.loadWeightCacheEnv()
 
 	var nameBuf [256]C.char
 	var initErr [512]C.char
@@ -243,6 +252,19 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 			C.free(unsafe.Pointer(cAttnQK))
 			C.free(unsafe.Pointer(cAttnV))
 
+			cFlash := C.CString("attn_flash")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cFlash, &b.fnAttnFlash) == 0 {
+				b.hasAttnFlash = true
+				b.drv.fn_attn_flash = b.fnAttnFlash
+			}
+			C.free(unsafe.Pointer(cFlash))
+
+			cMLA := C.CString("mla_attn")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cMLA, &b.fnMLA) == 0 {
+				b.hasMLA = true
+			}
+			C.free(unsafe.Pointer(cMLA))
+
 			cSoftmax := C.CString("softmax")
 			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cSoftmax, &b.fnSoftmax) == 0 {
 				b.hasSoftmax = true
@@ -301,6 +323,11 @@ func (b *Backend) Close() error {
 	if b.kvReady {
 		C.gguf_cuda_kv_free(&b.drv, &b.kvCache)
 		b.kvReady = false
+	}
+
+	if b.mlaReady {
+		C.gguf_cuda_mla_free(&b.drv, &b.mlaCache)
+		b.mlaReady = false
 	}
 
 	C.gguf_cuda_attn_pool_free(&b.drv, &b.attnPool)
@@ -388,26 +415,32 @@ func (b *Backend) MatMulVecCachedInto(name string, matrix []float32, rows, cols 
 	defer b.mu.Unlock()
 
 	gm, ok := b.matrices[name]
+	if ok {
+		b.touchWeight(kindF32, name)
+	}
 	if !ok || gm.rows != rows || gm.cols != cols {
 		if ok {
-			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-			C.gguf_cuda_free(&b.drv, gm.ptr)
-			b.lastVecAddr = 0
-			b.lastVecLen = 0
+			b.freeWeight(kindF32, name)
 		}
 
 		var ptr C.CUdeviceptr
-		rc := C.gguf_cuda_upload_matrix(
-			&b.drv, b.ctx, &ptr,
-			(*C.float)(unsafe.Pointer(&matrix[0])),
-			C.int(rows), C.int(cols),
-		)
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_matrix(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				(*C.float)(unsafe.Pointer(&matrix[0])),
+				C.int(rows),
+				C.int(cols),
+			)
+		})
 		if rc != 0 {
 			return uploadFail("matrix", name, rc)
 		}
 
 		gm = gpuMatrix{ptr: ptr, rows: rows, cols: cols}
 		b.matrices[name] = gm
+		b.trackWeight(kindF32, name, int(gm.rows)*int(gm.cols)*4)
 	}
 
 	b.prepareVecUpload(vec)
@@ -450,20 +483,25 @@ func (b *Backend) MatMulVecQ8_0CachedInto(name string, raw []byte, rows, cols in
 	defer b.mu.Unlock()
 
 	gm, ok := b.matricesQ8[name]
+	if ok {
+		b.touchWeight(kindQ8, name)
+	}
+
 	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
 		if ok {
-			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-			C.gguf_cuda_free(&b.drv, gm.ptr)
-			b.lastVecAddr = 0
-			b.lastVecLen = 0
+			b.freeWeight(kindQ8, name)
 		}
 
 		var ptr C.CUdeviceptr
-		rc := C.gguf_cuda_upload_q8_0(
-			&b.drv, b.ctx, &ptr,
-			unsafe.Pointer(&raw[0]),
-			C.size_t(len(raw)),
-		)
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q8_0(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
 		if rc != 0 {
 			return uploadFail("q8_0", name, rc)
 		}
@@ -475,6 +513,7 @@ func (b *Backend) MatMulVecQ8_0CachedInto(name string, raw []byte, rows, cols in
 			bytes: len(raw),
 		}
 		b.matricesQ8[name] = gm
+		b.trackWeight(kindQ8, name, gm.bytes)
 	}
 
 	b.prepareVecUpload(vec)
@@ -521,20 +560,25 @@ func (b *Backend) MatMulVecQ4_0CachedInto(name string, raw []byte, rows, cols in
 	defer b.mu.Unlock()
 
 	gm, ok := b.matricesQ4[name]
+	if ok {
+		b.touchWeight(kindQ4, name)
+	}
+
 	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
 		if ok {
-			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-			C.gguf_cuda_free(&b.drv, gm.ptr)
-			b.lastVecAddr = 0
-			b.lastVecLen = 0
+			b.freeWeight(kindQ4, name)
 		}
 
 		var ptr C.CUdeviceptr
-		rc := C.gguf_cuda_upload_q4_0(
-			&b.drv, b.ctx, &ptr,
-			unsafe.Pointer(&raw[0]),
-			C.size_t(len(raw)),
-		)
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q4_0(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
 		if rc != 0 {
 			return uploadFail("q4_0", name, rc)
 		}
@@ -546,6 +590,7 @@ func (b *Backend) MatMulVecQ4_0CachedInto(name string, raw []byte, rows, cols in
 			bytes: len(raw),
 		}
 		b.matricesQ4[name] = gm
+		b.trackWeight(kindQ4, name, gm.bytes)
 	}
 
 	b.prepareVecUpload(vec)
@@ -593,20 +638,25 @@ func (b *Backend) MatMulVecQ4_KCachedInto(name string, raw []byte, rows, cols in
 	defer b.mu.Unlock()
 
 	gm, ok := b.matricesQ4K[name]
+	if ok {
+		b.touchWeight(kindQ4K, name)
+	}
+
 	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
 		if ok {
-			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-			C.gguf_cuda_free(&b.drv, gm.ptr)
-			b.lastVecAddr = 0
-			b.lastVecLen = 0
+			b.freeWeight(kindQ4K, name)
 		}
 
 		var ptr C.CUdeviceptr
-		rc := C.gguf_cuda_upload_q4_k(
-			&b.drv, b.ctx, &ptr,
-			unsafe.Pointer(&raw[0]),
-			C.size_t(len(raw)),
-		)
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q4_k(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
 		if rc != 0 {
 			return uploadFail("q4_k", name, rc)
 		}
@@ -618,6 +668,7 @@ func (b *Backend) MatMulVecQ4_KCachedInto(name string, raw []byte, rows, cols in
 			bytes: len(raw),
 		}
 		b.matricesQ4K[name] = gm
+		b.trackWeight(kindQ4K, name, gm.bytes)
 	}
 
 	b.prepareVecUpload(vec)
@@ -665,20 +716,25 @@ func (b *Backend) MatMulVecQ5_KCachedInto(name string, raw []byte, rows, cols in
 	defer b.mu.Unlock()
 
 	gm, ok := b.matricesQ5K[name]
+	if ok {
+		b.touchWeight(kindQ5K, name)
+	}
+
 	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
 		if ok {
-			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-			C.gguf_cuda_free(&b.drv, gm.ptr)
-			b.lastVecAddr = 0
-			b.lastVecLen = 0
+			b.freeWeight(kindQ5K, name)
 		}
 
 		var ptr C.CUdeviceptr
-		rc := C.gguf_cuda_upload_q5_k(
-			&b.drv, b.ctx, &ptr,
-			unsafe.Pointer(&raw[0]),
-			C.size_t(len(raw)),
-		)
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q5_k(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
 		if rc != 0 {
 			return uploadFail("q5_k", name, rc)
 		}
@@ -690,6 +746,7 @@ func (b *Backend) MatMulVecQ5_KCachedInto(name string, raw []byte, rows, cols in
 			bytes: len(raw),
 		}
 		b.matricesQ5K[name] = gm
+		b.trackWeight(kindQ5K, name, gm.bytes)
 	}
 
 	b.prepareVecUpload(vec)
@@ -737,20 +794,25 @@ func (b *Backend) MatMulVecQ6_KCachedInto(name string, raw []byte, rows, cols in
 	defer b.mu.Unlock()
 
 	gm, ok := b.matricesQ6K[name]
+	if ok {
+		b.touchWeight(kindQ6K, name)
+	}
+
 	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
 		if ok {
-			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-			C.gguf_cuda_free(&b.drv, gm.ptr)
-			b.lastVecAddr = 0
-			b.lastVecLen = 0
+			b.freeWeight(kindQ6K, name)
 		}
 
 		var ptr C.CUdeviceptr
-		rc := C.gguf_cuda_upload_q6_k(
-			&b.drv, b.ctx, &ptr,
-			unsafe.Pointer(&raw[0]),
-			C.size_t(len(raw)),
-		)
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q6_k(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
 		if rc != 0 {
 			return uploadFail("q6_k", name, rc)
 		}
@@ -763,6 +825,7 @@ func (b *Backend) MatMulVecQ6_KCachedInto(name string, raw []byte, rows, cols in
 		}
 
 		b.matricesQ6K[name] = gm
+		b.trackWeight(kindQ6K, name, gm.bytes)
 	}
 
 	b.prepareVecUpload(vec)
@@ -824,26 +887,28 @@ func (b *Backend) ensureHeadNorm(name string, norm []float32, headDim int) (C.CU
 
 func (b *Backend) ensureFP32Matrix(name string, matrix []float32, rows, cols int) (gpuMatrix, error) {
 	gm, ok := b.matrices[name]
+	if ok {
+		b.touchWeight(kindF32, name)
+	}
 	if ok && gm.rows == rows && gm.cols == cols {
 		return gm, nil
 	}
 
 	if ok {
-		C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-		C.gguf_cuda_free(&b.drv, gm.ptr)
-		b.lastVecAddr = 0
-		b.lastVecLen = 0
+		b.freeWeight(kindF32, name)
 	}
 
 	var ptr C.CUdeviceptr
-	rc := C.gguf_cuda_upload_matrix(
-		&b.drv,
-		b.ctx,
-		&ptr,
-		(*C.float)(unsafe.Pointer(&matrix[0])),
-		C.int(rows),
-		C.int(cols),
-	)
+	rc := b.withEvict(func() C.int {
+		return C.gguf_cuda_upload_matrix(
+			&b.drv,
+			b.ctx,
+			&ptr,
+			(*C.float)(unsafe.Pointer(&matrix[0])),
+			C.int(rows),
+			C.int(cols),
+		)
+	})
 	if rc != 0 {
 		return gpuMatrix{}, uploadFail("matrix", name, rc)
 	}
@@ -854,6 +919,7 @@ func (b *Backend) ensureFP32Matrix(name string, matrix []float32, rows, cols int
 		cols: cols,
 	}
 	b.matrices[name] = gm
+	b.trackWeight(kindF32, name, int(gm.rows)*int(gm.cols)*4)
 
 	return gm, nil
 }
@@ -930,15 +996,15 @@ func (b *Backend) ensureQuantMatrix(t dtype.DType, name string, raw []byte, rows
 	}
 
 	gm, ok := cache[name]
+	if ok {
+		b.touchWeight(quantKind(t), name)
+	}
 	if ok && gm.rows == rows && gm.cols == cols && gm.bytes == len(raw) {
 		return gm, nil
 	}
 
 	if ok {
-		C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-		C.gguf_cuda_free(&b.drv, gm.ptr)
-		b.lastVecAddr = 0
-		b.lastVecLen = 0
+		b.freeWeight(quantKind(t), name)
 	}
 
 	if len(raw) == 0 {
@@ -946,7 +1012,9 @@ func (b *Backend) ensureQuantMatrix(t dtype.DType, name string, raw []byte, rows
 	}
 
 	var ptr C.CUdeviceptr
-	if rc := b.uploadQuant(t, &ptr, raw); rc != 0 {
+	if rc := b.withEvict(func() C.int {
+		return b.uploadQuant(t, &ptr, raw)
+	}); rc != 0 {
 		return gpuQ8Matrix{}, uploadFail(t.String(), name, rc)
 	}
 
@@ -957,31 +1025,34 @@ func (b *Backend) ensureQuantMatrix(t dtype.DType, name string, raw []byte, rows
 		bytes: len(raw),
 	}
 	cache[name] = gm
+	b.trackWeight(quantKind(t), name, gm.bytes)
 
 	return gm, nil
 }
 
 func (b *Backend) ensureQ8Matrix(name string, raw []byte, rows, cols int) (gpuQ8Matrix, error) {
 	gm, ok := b.matricesQ8[name]
+	if ok {
+		b.touchWeight(kindQ8, name)
+	}
 	if ok && gm.rows == rows && gm.cols == cols && gm.bytes == len(raw) {
 		return gm, nil
 	}
 
 	if ok {
-		C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-		C.gguf_cuda_free(&b.drv, gm.ptr)
-		b.lastVecAddr = 0
-		b.lastVecLen = 0
+		b.freeWeight(kindQ8, name)
 	}
 
 	var ptr C.CUdeviceptr
-	rc := C.gguf_cuda_upload_q8_0(
-		&b.drv,
-		b.ctx,
-		&ptr,
-		unsafe.Pointer(&raw[0]),
-		C.size_t(len(raw)),
-	)
+	rc := b.withEvict(func() C.int {
+		return C.gguf_cuda_upload_q8_0(
+			&b.drv,
+			b.ctx,
+			&ptr,
+			unsafe.Pointer(&raw[0]),
+			C.size_t(len(raw)),
+		)
+	})
 	if rc != 0 {
 		return gpuQ8Matrix{}, uploadFail("q8_0", name, rc)
 	}
@@ -993,6 +1064,7 @@ func (b *Backend) ensureQ8Matrix(name string, raw []byte, rows, cols int) (gpuQ8
 		bytes: len(raw),
 	}
 	b.matricesQ8[name] = gm
+	b.trackWeight(kindQ8, name, gm.bytes)
 
 	return gm, nil
 }
@@ -2129,6 +2201,15 @@ func (b *Backend) KVCacheAppendN(layer, pos int, k, v []float32, n int) error {
 }
 
 func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.attentionScoresKVLocked(layer, dst, q, seqLen, nHeads, nKVHeads, headDim)
+}
+
+// attentionScoresKVLocked - single-query attention over KV cache (caller holds b.mu).
+// Prefers fused attn_flash (one launch for all heads); falls back to per-head attn_qk/softmax/attn_v.
+func (b *Backend) attentionScoresKVLocked(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	if !b.hasAttn {
 		return fmt.Errorf("cuda: attention kernels unavailable")
 	}
@@ -2140,9 +2221,6 @@ func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads,
 	if len(q) < nHeads*headDim {
 		return fmt.Errorf("cuda: AttentionScoresKV: q too short")
 	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	if !b.kvReady {
 		return fmt.Errorf("cuda: kv cache not initialized")
@@ -2170,6 +2248,66 @@ func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads,
 	)
 	if rc != 0 {
 		return fmt.Errorf("cuda: kv_attention layer=%d: code %d", layer, int(rc))
+	}
+
+	return nil
+}
+
+// HasFlashAttention reports whether the fused attn_flash kernel is loaded.
+func (b *Backend) HasFlashAttention() bool { return b.hasAttnFlash }
+
+// AttentionScoresKVBatch - causal attention for n queries over the GPU KV cache.
+// q/dst are [n][nHeads*headDim]; query i attends to pastLen+i+1 positions (K/V of all n tokens must already be in the cache, e.g. via KVCacheAppendN).
+//
+// With attn_flash: ONE Q HtoD, ONE launch (grid = nHeads x n), ONE DtoH.
+// Limits for the fused path: headDim <= 256, pastLen+n <= maxSeq.
+// Temporary q/out buffers (n*nHeads*headDim floats each) are allocated per call.
+// Otherwise falls back to a loop of single-query attention (per-query HtoD/DtoH, three launches per head).
+func (b *Backend) AttentionScoresKVBatch(layer int, dst, q []float32, n, pastLen, nHeads, nKVHeads, headDim int) error {
+	if !b.hasAttn {
+		return fmt.Errorf("cuda: attention kernels unavailable")
+	}
+
+	if n <= 0 || pastLen < 0 || nHeads <= 0 || nKVHeads <= 0 || headDim <= 0 || nHeads%nKVHeads != 0 {
+		return fmt.Errorf("cuda: AttentionScoresKVBatch: invalid dimensions")
+	}
+
+	qDim := nHeads * headDim
+	if len(dst) < n*qDim || len(q) < n*qDim {
+		return fmt.Errorf("cuda: AttentionScoresKVBatch: q/dst too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache not initialized")
+	}
+
+	if b.hasAttnFlash && headDim <= 256 {
+		rc := C.gguf_cuda_kv_attention_batch(
+			&b.drv,
+			b.ctx,
+			&b.kvCache,
+			C.int(layer),
+			(*C.float)(unsafe.Pointer(&dst[0])),
+			(*C.float)(unsafe.Pointer(&q[0])),
+			C.int(n),
+			C.int(pastLen),
+			C.int(nHeads),
+			C.int(nKVHeads),
+			C.int(headDim),
+		)
+		if rc == 0 {
+			return nil
+		}
+	}
+
+	for i := range n {
+		off := i * qDim
+		if err := b.attentionScoresKVLocked(layer, dst[off:off+qDim], q[off:off+qDim], pastLen+i+1, nHeads, nKVHeads, headDim); err != nil {
+			return err
+		}
 	}
 
 	return nil

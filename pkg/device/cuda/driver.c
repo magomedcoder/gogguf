@@ -401,6 +401,118 @@ static void gguf_cuda_attn_clear_graphs(cuda_driver_t *drv, gguf_attn_pool_t *po
 	pool->graph_count = 0;
 }
 
+#define GGUF_ATTN_FLASH_BLOCK 256
+#define GGUF_ATTN_FLASH_MAX_HEAD_DIM 256
+
+// gguf_cuda_launch_attn_flash: one launch for n_queries x n_heads blocks.
+// Query qi attends over seq_base + qi K/V positions (n_queries=1: plain decode).
+// Grid.y is chunked (<= 65535) when n_queries is large.
+static int gguf_cuda_launch_attn_flash(cuda_driver_t *drv, CUdeviceptr d_q, CUdeviceptr d_k, CUdeviceptr d_v, CUdeviceptr d_out, int seq_base, int n_queries, int n_heads, int n_kv_heads, int head_dim, CUstream stream) {
+	if (!drv->fn_attn_flash || head_dim > GGUF_ATTN_FLASH_MAX_HEAD_DIM || n_queries <= 0) {
+		return -1;
+	}
+
+	unsigned int kv_stride = (unsigned int)(n_kv_heads * head_dim);
+	unsigned int group = (unsigned int)(n_heads / n_kv_heads);
+	unsigned int hd = (unsigned int)head_dim;
+	float scale = 1.0f / sqrtf((float)head_dim);
+	size_t q_row_bytes = (size_t)n_heads * (size_t)head_dim * sizeof(float);
+
+	int done = 0;
+	while (done < n_queries) {
+		int n = n_queries - done;
+		if (n > 65535) {
+			n = 65535;
+		}
+
+		unsigned int sb = (unsigned int)(seq_base + done);
+		CUdeviceptr q_ptr = d_q + (CUdeviceptr)((size_t)done * q_row_bytes);
+		CUdeviceptr o_ptr = d_out + (CUdeviceptr)((size_t)done * q_row_bytes);
+
+		void *params[9];
+		params[0] = &q_ptr;
+		params[1] = &d_k;
+		params[2] = &d_v;
+		params[3] = &o_ptr;
+		params[4] = &sb;
+		params[5] = &hd;
+		params[6] = &kv_stride;
+		params[7] = &group;
+		params[8] = &scale;
+
+		if (drv->cuLaunchKernel(drv->fn_attn_flash, (unsigned int)n_heads, (unsigned int)n, 1, GGUF_ATTN_FLASH_BLOCK, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
+			return -2;
+		}
+
+		done += n;
+	}
+
+	return 0;
+}
+
+// gguf_cuda_attention_flash_device: fused single-query attention (all heads, one launch).
+// Returns 0 on success; non-zero means "not done" and caller falls back to qk/softmax/v.
+static int gguf_cuda_attention_flash_device(cuda_driver_t *drv, float *dst, const float *q, CUdeviceptr d_k, CUdeviceptr d_v, gguf_attn_pool_t *pool, int seq_len, int n_heads, int n_kv_heads, int head_dim, int skip_q_htod, int skip_dst_dtoh, CUstream stream) {
+	if (!drv->fn_attn_flash || head_dim > GGUF_ATTN_FLASH_MAX_HEAD_DIM) {
+		return -1;
+	}
+
+	int q_elems = n_heads * head_dim;
+	size_t q_bytes = (size_t)q_elems * sizeof(float);
+	CUdeviceptr d_q = 0;
+	CUdeviceptr d_dst = 0;
+	int pooled = 0;
+
+	if (pool && pool->d_q && pool->d_dst && pool->q_elems >= q_elems) {
+		d_q = pool->d_q;
+		d_dst = pool->d_dst;
+		pooled = 1;
+	} else if (skip_q_htod) {
+		return -1;
+	}
+
+	if (!pooled) {
+		if (drv->cuMemAlloc(&d_q, q_bytes) != CUDA_SUCCESS) {
+			return -1;
+		}
+
+		if (drv->cuMemAlloc(&d_dst, q_bytes) != CUDA_SUCCESS) {
+			drv->cuMemFree(d_q);
+			return -1;
+		}
+	}
+
+	int rc = 0;
+	if (!skip_q_htod) {
+		if (!q || drv->cuMemcpyHtoD(d_q, q, q_bytes) != CUDA_SUCCESS) {
+			rc = -1;
+		}
+	}
+
+	if (rc == 0) {
+		rc = gguf_cuda_launch_attn_flash(drv, d_q, d_k, d_v, d_dst, seq_len, 1, n_heads, n_kv_heads, head_dim, stream);
+	}
+
+	if (rc == 0 && !skip_dst_dtoh) {
+		if (stream && drv->cuStreamSynchronize) {
+			if (drv->cuStreamSynchronize(stream) != CUDA_SUCCESS) {
+				rc = -1;
+			}
+		}
+
+		if (rc == 0 && (!dst || drv->cuMemcpyDtoH(dst, d_dst, q_bytes) != CUDA_SUCCESS)) {
+			rc = -1;
+		}
+	}
+
+	if (!pooled) {
+		drv->cuMemFree(d_q);
+		drv->cuMemFree(d_dst);
+	}
+
+	return rc;
+}
+
 static int gguf_cuda_attention_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, float *dst, const float *q, CUdeviceptr d_k, CUdeviceptr d_v, gguf_attn_pool_t *pool, int seq_len, int n_heads, int n_kv_heads, int head_dim, int skip_q_htod, int skip_dst_dtoh, CUstream stream) {
 	if (gguf_cuda_set_context(drv, ctx) != 0) {
 		return -10;
@@ -412,6 +524,11 @@ static int gguf_cuda_attention_device(cuda_driver_t *drv, CUcontext ctx, CUfunct
 
 	if (skip_q_htod && (!pool || !pool->d_q)) {
 		return -12;
+	}
+
+	// preferred: fused flash-style kernel; any failure falls through to qk/softmax/v
+	if (drv->fn_attn_flash && gguf_cuda_attention_flash_device(drv, dst, q, d_k, d_v, pool, seq_len, n_heads, n_kv_heads, head_dim, skip_q_htod, skip_dst_dtoh, stream) == 0) {
+		return 0;
 	}
 
 	int group = n_heads / n_kv_heads;
@@ -845,6 +962,224 @@ int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, 
 	}
 
 	return gguf_cuda_attention_device(drv, ctx, fn_qk, fn_v, fn_softmax, dst, q, ly->d_k, ly->d_v, pool, seq_len, n_heads, n_kv_heads, head_dim, 0, 0, NULL);
+}
+
+// gguf_cuda_kv_attention_batch: causal batch attention, one Q HtoD + one launch + one DtoH.
+// Query i (0..n-1) sees past_len + i + 1 cached positions; K/V for all n tokens must already be appended.
+// Needs fn_attn_flash and head_dim <= 256 (returns -30 otherwise so the caller can loop single-query attention).
+int gguf_cuda_kv_attention_batch(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, float *dst, const float *q, int n, int past_len, int n_heads, int n_kv_heads, int head_dim) {
+	if (!cache || !cache->layers || layer < 0 || layer >= cache->num_layers || !dst || !q) {
+		return -1;
+	}
+
+	if (n <= 0 || past_len < 0 || n_heads <= 0 || n_kv_heads <= 0 || head_dim <= 0 || n_heads % n_kv_heads != 0) {
+		return -11;
+	}
+
+	if (!drv->fn_attn_flash || head_dim > GGUF_ATTN_FLASH_MAX_HEAD_DIM) {
+		return -30;
+	}
+
+	gguf_kv_layer_t *ly = &cache->layers[layer];
+	if (past_len + n > ly->max_seq || ly->kv_dim != n_kv_heads * head_dim) {
+		return -2;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	size_t bytes = (size_t)n * (size_t)n_heads * (size_t)head_dim * sizeof(float);
+	CUdeviceptr d_q = 0;
+	CUdeviceptr d_out = 0;
+	if (drv->cuMemAlloc(&d_q, bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	if (drv->cuMemAlloc(&d_out, bytes) != CUDA_SUCCESS) {
+		drv->cuMemFree(d_q);
+		return -3;
+	}
+
+	int rc = 0;
+	if (drv->cuMemcpyHtoD(d_q, q, bytes) != CUDA_SUCCESS) {
+		rc = -4;
+	}
+
+	if (rc == 0 && gguf_cuda_launch_attn_flash(drv, d_q, ly->d_k, ly->d_v, d_out, past_len + 1, n, n_heads, n_kv_heads, head_dim, NULL) != 0) {
+		rc = -5;
+	}
+
+	if (rc == 0 && drv->cuMemcpyDtoH(dst, d_out, bytes) != CUDA_SUCCESS) {
+		rc = -4;
+	}
+
+	drv->cuMemFree(d_q);
+	drv->cuMemFree(d_out);
+	return rc;
+}
+
+int gguf_cuda_mla_init(cuda_driver_t *drv, CUcontext ctx, gguf_mla_cache_t *cache, int num_layers, int max_seq, int k_dim, int v_dim, int q_elems, int out_elems) {
+	if (!cache || num_layers <= 0 || max_seq <= 0 || k_dim <= 0 || v_dim <= 0 || q_elems <= 0 || out_elems <= 0) {
+		return -1;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	memset(cache, 0, sizeof(*cache));
+	cache->layers = (gguf_mla_layer_t *)calloc((size_t)num_layers, sizeof(gguf_mla_layer_t));
+	if (!cache->layers) {
+		return -2;
+	}
+
+	cache->num_layers = num_layers;
+	cache->max_seq = max_seq;
+	cache->k_dim = k_dim;
+	cache->v_dim = v_dim;
+	cache->q_elems = q_elems;
+	cache->out_elems = out_elems;
+
+	size_t k_bytes = (size_t)max_seq * (size_t)k_dim * sizeof(float);
+	size_t v_bytes = (size_t)max_seq * (size_t)v_dim * sizeof(float);
+	for (int i = 0; i < num_layers; i++) {
+		if (drv->cuMemAlloc(&cache->layers[i].d_k, k_bytes) != CUDA_SUCCESS || drv->cuMemAlloc(&cache->layers[i].d_v, v_bytes) != CUDA_SUCCESS) {
+			gguf_cuda_mla_free(drv, cache);
+			return -3;
+		}
+	}
+
+	if (drv->cuMemAlloc(&cache->d_q, (size_t)q_elems * sizeof(float)) != CUDA_SUCCESS || drv->cuMemAlloc(&cache->d_out, (size_t)out_elems * sizeof(float)) != CUDA_SUCCESS) {
+		gguf_cuda_mla_free(drv, cache);
+		return -3;
+	}
+
+	return 0;
+}
+
+void gguf_cuda_mla_free(cuda_driver_t *drv, gguf_mla_cache_t *cache) {
+	if (!cache) {
+		return;
+	}
+
+	if (cache->layers) {
+		for (int i = 0; i < cache->num_layers; i++) {
+			if (cache->layers[i].d_k) {
+				drv->cuMemFree(cache->layers[i].d_k);
+			}
+
+			if (cache->layers[i].d_v) {
+				drv->cuMemFree(cache->layers[i].d_v);
+			}
+		}
+
+		free(cache->layers);
+	}
+
+	if (cache->d_q) {
+		drv->cuMemFree(cache->d_q);
+	}
+
+	if (cache->d_out) {
+		drv->cuMemFree(cache->d_out);
+	}
+
+	memset(cache, 0, sizeof(*cache));
+}
+
+int gguf_cuda_mla_append(cuda_driver_t *drv, CUcontext ctx, gguf_mla_cache_t *cache, int layer, int pos, const float *k, const float *v) {
+	if (!cache || !cache->layers || layer < 0 || layer >= cache->num_layers || pos < 0 || !k || !v) {
+		return -1;
+	}
+
+	if (pos >= cache->max_seq) {
+		return -2;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	gguf_mla_layer_t *ly = &cache->layers[layer];
+	size_t k_off = (size_t)pos * (size_t)cache->k_dim * sizeof(float);
+	size_t v_off = (size_t)pos * (size_t)cache->v_dim * sizeof(float);
+	if (drv->cuMemcpyHtoD(ly->d_k + (CUdeviceptr)k_off, k, (size_t)cache->k_dim * sizeof(float)) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	if (drv->cuMemcpyHtoD(ly->d_v + (CUdeviceptr)v_off, v, (size_t)cache->v_dim * sizeof(float)) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	return 0;
+}
+
+int gguf_cuda_mla_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_mla, gguf_mla_cache_t *cache, int layer, float *dst, const float *q, CUdeviceptr d_kb, CUdeviceptr d_wvb, int seq_len, int n_heads, int nope, int kv_lora, int rope, int v_head, float scale) {
+	if (!fn_mla || !cache || !cache->layers || layer < 0 || layer >= cache->num_layers || !dst || !q || !d_kb || !d_wvb) {
+		return -1;
+	}
+
+	if (seq_len <= 0 || n_heads <= 0 || nope <= 0 || kv_lora <= 0 || rope < 0 || v_head <= 0) {
+		return -11;
+	}
+
+	if (kv_lora > 1024 || kv_lora + rope > 1280 || n_heads > 65535) {
+		return -30; // kernel limits
+	}
+
+	if (seq_len > cache->max_seq || cache->k_dim != kv_lora + rope || cache->v_dim != kv_lora) {
+		return -2;
+	}
+
+	int q_elems = n_heads * (nope + rope);
+	int out_elems = n_heads * v_head;
+	if (q_elems > cache->q_elems || out_elems > cache->out_elems) {
+		return -2;
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	if (drv->cuMemcpyHtoD(cache->d_q, q, (size_t)q_elems * sizeof(float)) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	gguf_mla_layer_t *ly = &cache->layers[layer];
+	CUdeviceptr d_q = cache->d_q;
+	CUdeviceptr d_out = cache->d_out;
+	CUdeviceptr d_k = ly->d_k;
+	CUdeviceptr d_v = ly->d_v;
+	unsigned int u_seq = (unsigned int)seq_len;
+	unsigned int u_nope = (unsigned int)nope;
+	unsigned int u_lora = (unsigned int)kv_lora;
+	unsigned int u_rope = (unsigned int)rope;
+	unsigned int u_vh = (unsigned int)v_head;
+
+	void *params[12];
+	params[0] = &d_q;
+	params[1] = &d_kb;
+	params[2] = &d_wvb;
+	params[3] = &d_k;
+	params[4] = &d_v;
+	params[5] = &d_out;
+	params[6] = &u_seq;
+	params[7] = &u_nope;
+	params[8] = &u_lora;
+	params[9] = &u_rope;
+	params[10] = &u_vh;
+	params[11] = &scale;
+
+	if (drv->cuLaunchKernel(fn_mla, (unsigned int)n_heads, 1, 1, 256, 1, 1, 0, NULL, params, NULL) != CUDA_SUCCESS) {
+		return -5;
+	}
+
+	if (drv->cuMemcpyDtoH(dst, d_out, (size_t)out_elems * sizeof(float)) != CUDA_SUCCESS) {
+		return -4;
+	}
+
+	return 0;
 }
 
 int gguf_cuda_attn_pool_init(cuda_driver_t *drv, CUcontext ctx, gguf_attn_pool_t *pool, int q_elems, int max_seq, int kv_dim, int rope_half) {

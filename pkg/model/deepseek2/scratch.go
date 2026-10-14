@@ -7,6 +7,7 @@ type scratch struct {
 	h      []float32
 	qFull  []float32 // nHeads*(qkNope+rope) before absorb
 	qAbs   []float32 // nHeads*(kvLora+rope)
+	qRope  []float32 // nHeads*(qkNope+rope): q_nope raw + RoPE'd q_pe (device MLA input)
 	kvPe   []float32 // kvLora + rope
 	kCache []float32 // K for one token
 	vCache []float32 // V for one token
@@ -31,13 +32,14 @@ func newScratch(cfg Config) scratch {
 
 	qLora := max(cfg.QLoraRank, 1)
 
-	need := 4*cfg.EmbeddingDim + qFull + qAbs + cfg.qkDim() + cfg.KVLoraRank + attn + cfg.ContextLength + 2*ffn + nExp + qLora + cfg.VocabSize + cfg.qkDim()
+	need := 4*cfg.EmbeddingDim + 2*qFull + qAbs + cfg.qkDim() + cfg.KVLoraRank + attn + cfg.ContextLength + 2*ffn + nExp + qLora + cfg.VocabSize + cfg.qkDim()
 	a := mempool.NewArena(need)
 	return scratch{
 		x:      a.Alloc(cfg.EmbeddingDim),
 		h:      a.Alloc(cfg.EmbeddingDim),
 		qFull:  a.Alloc(qFull),
 		qAbs:   a.Alloc(qAbs),
+		qRope:  a.Alloc(qFull),
 		kvPe:   a.Alloc(cfg.qkDim()),
 		kCache: a.Alloc(cfg.qkDim()),
 		vCache: a.Alloc(cfg.KVLoraRank),

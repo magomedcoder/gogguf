@@ -7,6 +7,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/exec/dispatch"
+	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
 	"github.com/magomedcoder/gogguf/pkg/weights"
 )
 
@@ -26,6 +27,9 @@ type Model struct {
 	outNorm      outNorms
 	lmHeadName   string
 	lmHeadBias   []float32
+
+	fused       *gpuresid.Runner // lm_head on GPU (see initResidency)
+	logitsOnGPU bool             // lm_head matmul runs on GPU after host LayerNorm
 }
 
 type layerBias struct {
@@ -94,6 +98,8 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Mode
 	if err := m.initGPUKVCache(); err != nil {
 		return nil, err
 	}
+
+	m.initResidency()
 
 	return m, nil
 }
@@ -173,6 +179,9 @@ func (m *Model) Close() error {
 }
 
 // Forward runs forward pass for tokenIDs starting at startPos
+// Returns logits for the last token [vocabSize]. The slice is the model's
+// internal scratch buffer (no copy): the caller must not retain or modify it
+// across the next Forward / Embed call
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("phi2: empty input")
@@ -210,8 +219,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		}
 	}
 
-	copy(m.scratch.out, m.scratch.logits)
-	return m.scratch.out, nil
+	return m.scratch.logits, nil
 }
 
 // EmbeddingDim returns the hidden state dimension
@@ -439,6 +447,11 @@ func (m *Model) logitsFinish() error {
 func (m *Model) logitsFromHidden(x []float32) error {
 	if err := compute.LayerNormInto(m.scratch.h, x, m.outNorm.w, m.outNorm.b, m.cfg.LayerNormEps); err != nil {
 		return err
+	}
+
+	if m.lmHeadGPU(m.scratch.h) {
+		compute.AddBiasInPlace(m.scratch.logits, m.lmHeadBias)
+		return nil
 	}
 
 	name := m.lmHeadName

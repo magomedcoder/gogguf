@@ -77,16 +77,20 @@ func (b *Backend) MatMulMatQ8_0CachedInto(name string, raw []byte, rows, cols in
 	defer b.mu.Unlock()
 
 	gm, ok := b.matricesQ8[name]
+	if ok {
+		b.touchWeight(kindQ8, name)
+	}
+
 	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
 		if ok {
-			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-			C.gguf_cuda_free(&b.drv, gm.ptr)
-			b.lastVecAddr = 0
-			b.lastVecLen = 0
+			b.freeWeight(kindQ8, name)
 		}
 
 		var ptr C.CUdeviceptr
-		rc := C.gguf_cuda_upload_q8_0(&b.drv, b.ctx, &ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q8_0(&b.drv, b.ctx, &ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+		})
+
 		if rc != 0 {
 			return uploadFail("q8_0", name, rc)
 		}
@@ -98,6 +102,7 @@ func (b *Backend) MatMulMatQ8_0CachedInto(name string, raw []byte, rows, cols in
 			bytes: len(raw),
 		}
 		b.matricesQ8[name] = gm
+		b.trackWeight(kindQ8, name, gm.bytes)
 	}
 
 	b.lastVecAddr = 0
@@ -150,17 +155,20 @@ func (b *Backend) matMulMatQuantCachedInto(name string, raw []byte, rows, cols, 
 	defer b.mu.Unlock()
 
 	gm, ok := cache[name]
+	if ok {
+		b.touchWeight(kind, name)
+	}
+
 	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
 		if ok {
-			C.gguf_cuda_matmul_pool_clear_graphs(&b.drv, &b.matmulPool)
-			C.gguf_cuda_free(&b.drv, gm.ptr)
-			b.lastVecAddr = 0
-			b.lastVecLen = 0
+			b.freeWeight(kind, name)
 		}
+
 		var ptr C.CUdeviceptr
-		if rc := upload(&ptr); rc != 0 {
+		if rc := b.withEvict(func() C.int { return upload(&ptr) }); rc != 0 {
 			return uploadFail(kind, name, rc)
 		}
+
 		gm = gpuQ8Matrix{
 			ptr:   ptr,
 			rows:  rows,
@@ -168,6 +176,7 @@ func (b *Backend) matMulMatQuantCachedInto(name string, raw []byte, rows, cols, 
 			bytes: len(raw),
 		}
 		cache[name] = gm
+		b.trackWeight(kind, name, gm.bytes)
 	}
 
 	b.lastVecAddr = 0

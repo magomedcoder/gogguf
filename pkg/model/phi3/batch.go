@@ -9,7 +9,7 @@ import (
 )
 
 // forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
-// With -ngl matmul uses MatMulMat*Cached; attention - loop AttentionScoresKV over GPU KV; otherwise CPU GEMM + CPU causal attn.
+// With -ngl matmul uses MatMulMat*Cached; attention - device.AttentionScoresKVBatch over GPU KV (one launch with CUDA attn_flash); otherwise CPU GEMM + CPU causal attn.
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
 	b := len(tokenIDs)
 	if b == 0 {
@@ -38,7 +38,7 @@ func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) erro
 		return nil
 	}
 
-	return m.logitsFromHidden(m.scratch.bx[(b-1)*embd : b*embd])
+	return m.logitsFromLast(m.scratch.bx[(b-1)*embd : b*embd])
 }
 
 func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
@@ -172,22 +172,11 @@ func (m *Model) ffnBatch(lt layerTensors, layer int, h []float32, batch int) err
 }
 
 // attentionBatchCausalInto: causal multi-query attention for batch.
-// On GPU - loop AttentionScoresKV with seqLen=past+i+1; else CPU reference.
+// On GPU - device.AttentionScoresKVBatch (queries see past+i+1); else CPU reference.
 func (m *Model) attentionBatchCausalInto(attn, q []float32, layer, pastLen, batch int, gpuKV bool) error {
-	qDim := m.cfg.NumHeads * m.cfg.HeadDim
-
 	if gpuKV {
-		ok := true
-		for i := range batch {
-			seqLen := pastLen + i + 1
-			off := i * qDim
-			if err := m.dev.AttentionScoresKV(layer, attn[off:off+qDim], q[off:off+qDim], seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err != nil {
-				ok = false
-				break
-			}
-		}
-
-		if ok {
+		// single launch (fused attn_flash on CUDA) when the backend supports it, else per-query loop
+		if err := device.AttentionScoresKVBatch(m.dev, layer, attn, q, batch, pastLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil
 		}
 	}

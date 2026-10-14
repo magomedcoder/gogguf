@@ -43,7 +43,7 @@ func makeQ8Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 	return raw, ref
 }
 
-// §1: HiddenUpload/HiddenDownload - hidden state survives roundtrip via d_resid
+// HiddenUpload/HiddenDownload - hidden state survives roundtrip via d_resid
 func TestHiddenUploadDownloadRoundtrip(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -96,7 +96,7 @@ func TestHiddenUploadDownloadRoundtrip(t *testing.T) {
 	}
 }
 
-// §1+§3: attn+ffn residual with keep-on-device gives same x as host path
+// attn+ffn residual with keep-on-device gives same x as host path
 func TestAttnFFNResidualDeviceResident(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -249,7 +249,7 @@ func makeQ4Matrix(t *testing.T, rows, cols, seed int) ([]byte, []float32) {
 	return raw, ref
 }
 
-// §3: fused FFN SwiGLU on Q4_0 weights matches CPU on dequant weights
+// fused FFN SwiGLU on Q4_0 weights matches CPU on dequant weights
 func TestFFNSwiGLUQuantQ4_0(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -299,7 +299,7 @@ func TestFFNSwiGLUQuantQ4_0(t *testing.T) {
 	}
 }
 
-// §1: QKV with h from d_resid (RMSNorm on device) matches host path with same RMSNorm on CPU
+// QKV with h from d_resid (RMSNorm on device) matches host path with same RMSNorm on CPU
 func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -407,7 +407,7 @@ func TestQKVRoPEAttentionFromDevice(t *testing.T) {
 	}
 }
 
-// §2: LogitsFromDevice = rmsnorm(d_resid) + lm_head without downloading hidden to host
+// LogitsFromDevice = rmsnorm(d_resid) + lm_head without downloading hidden to host
 func TestLogitsFromDeviceFP32(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -465,7 +465,7 @@ func TestLogitsFromDeviceFP32(t *testing.T) {
 	}
 }
 
-// §2: same path but lm_head quantized as Q8_0
+// same path but lm_head quantized as Q8_0
 func TestLogitsFromDeviceQ8(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -514,7 +514,7 @@ func TestLogitsFromDeviceQ8(t *testing.T) {
 	}
 }
 
-// §4: KVCacheAppendN stores n tokens and attention sees them all
+// KVCacheAppendN stores n tokens and attention sees them all
 func TestKVCacheAppendN(t *testing.T) {
 	b, err := Open()
 	if err != nil {

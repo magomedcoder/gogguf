@@ -73,7 +73,7 @@ TEXT ·scaleInPlaceNEONAsm(SB), NOSPLIT, $0-40
 	MOVD  n+32(FP), R2
 
 loop_scale:
-	CM   ZR, R2
+	CMP  ZR, R2
 	BLE   done_scale
 	VLD1  (R0), [V1.S4]
 	VFMUL  V1.S4, V0.S4, V1.S4

@@ -27,7 +27,9 @@ type Model struct {
 	lmHeadName       string
 	ropeFactorsShort []float32
 	ropeFactorsLong  []float32
-	fused            *gpuresid.Runner // fused GPU layer FFN (§5)
+	fused            *gpuresid.Runner // fused GPU layer FFN
+	ffnGPU           []bool           // layer FFN runs fused on GPU (separate gate/up only)
+	logitsOnGPU      bool             // out_norm + lm_head computed on GPU from the final hidden state
 }
 
 // Load creates Phi-3 from GGUF weights
@@ -85,9 +87,8 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Mode
 	}
 
 	// fused FFN only for layers with separate ffn_gate/ffn_up: merged ffn_up [embd, 2*ffn] would need a separate kernel
-	if g != nil && ngl > 0 {
-		m.fused = gpuresid.New(w, g, device.RoPENeoX)
-	}
+	m.initFused()
+	m.initResidency()
 
 	return m, nil
 }
@@ -128,6 +129,9 @@ func (m *Model) Close() error {
 }
 
 // Forward runs forward pass for tokenIDs starting at startPos
+// Returns logits for the last token [vocabSize]. The slice is the model's
+// internal scratch buffer (no copy): the caller must not retain or modify it
+// across the next Forward / Embed call
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("phi3: empty input")
@@ -165,8 +169,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		}
 	}
 
-	copy(m.scratch.out, m.scratch.logits)
-	return m.scratch.out, nil
+	return m.scratch.logits, nil
 }
 
 // EmbeddingDim returns the hidden state dimension
@@ -367,8 +370,8 @@ func (m *Model) ffn(lt layerTensors, layer int) error {
 		return m.matmulInto(lt.ffnDown, m.cfg.EmbeddingDim, ffn, m.scratch.gate, m.scratch.h, layer)
 	}
 
-	// §5: separate gate/up go through one fused SwiGLU call on GPU
-	if m.fused != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	// separate gate/up go through one fused SwiGLU call on GPU
+	if m.fused != nil && layer < len(m.ffnGPU) && m.ffnGPU[layer] {
 		if err := m.fused.FFNNamed(lt.ffnGate, lt.ffnUp, lt.ffnDown, m.scratch.h, m.scratch.h, m.cfg.EmbeddingDim, ffn); err == nil {
 			return nil
 		}
@@ -437,7 +440,7 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logitsFinish() error {
-	return m.logitsFromHidden(m.scratch.x)
+	return m.logitsFromLast(m.scratch.x)
 }
 
 // logitsFromHidden: out_norm + lm_head for hidden state x [embd]

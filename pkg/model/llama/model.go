@@ -27,7 +27,7 @@ type Model struct {
 	lmHeadName   string
 	debug        *DebugHooks
 
-	fused      *gpuresid.Runner   // fused GPU layer paths (§5)
+	fused      *gpuresid.Runner   // fused GPU layer paths
 	fusedDims  gpuresid.Dims      // dimensions for fused paths
 	gpuLayers  []gpuresid.Tensors // layer weight names for fused paths
 	layerQuant []bool             // layer fully in supported fused quant
@@ -128,7 +128,8 @@ func (m *Model) SetDebugHooks(h *DebugHooks) {
 	m.debug = h
 }
 
-// Forward runs forward pass for tokenIDs starting at startPos
+// Forward runs forward pass for tokenIDs starting at startPos Returns logits for the last token [vocabSize].
+// The slice is the model's internal scratch buffer (no copy): the caller must not retain or modify it across the next Forward / Embed call
 func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	if len(tokenIDs) == 0 {
 		return nil, fmt.Errorf("llama: empty input")
@@ -163,8 +164,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		m.debug.OnLogits(m.scratch.logits)
 	}
 
-	copy(m.scratch.out, m.scratch.logits)
-	return m.scratch.out, nil
+	return m.scratch.logits, nil
 }
 
 // EmbeddingDim returns the hidden state dimension
@@ -210,7 +210,7 @@ func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 		m.debug.OnEmbed(m.scratch.x)
 	}
 
-	// §5: single HtoD hidden state per token; layers then run on device
+	// single HtoD hidden state per token; layers then run on device
 	m.uploadHidden()
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
@@ -288,7 +288,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	onGPU := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 	usedQKVResidency := false
 
-	// §5: entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals.
+	// entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals.
 	// host x is not read or updated
 	if m.residDevice {
 		err := m.forwardBlockDevice(layer, pos, ln, m.scratch.k, m.scratch.v, m.scratch.attn)
@@ -459,7 +459,7 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 }
 
 func (m *Model) logitsFinish() error {
-	// §2: hidden on device - out_norm + lm_head on GPU too; only logits go to host
+	// hidden on device - out_norm + lm_head on GPU too; only logits go to host
 	if m.residDevice && m.logitsOnGPU {
 		if err := m.logitsDevice(); err == nil {
 			return nil

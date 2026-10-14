@@ -3,6 +3,7 @@ package deepseek2
 import (
 	"fmt"
 	"github.com/magomedcoder/gogguf/pkg/dtype"
+	"math"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/device"
@@ -26,12 +27,19 @@ type Model struct {
 	layerTensors []layerTensors
 	outNorm      []float32
 	lmHeadName   string
+
+	// device MLA (absorbed attention + latent KV cache on GPU); nil = CPU attention
+	gpuMaxSeq int
+	mlaDev    device.MLABackend
+	mlaParams device.MLAParams
+	mlaStale  bool // device latent cache missed a token: GPU MLA stays off until ResetCache
 }
 
-// Load creates DeepSeek2 from weights. GPU runs MLA projections, FFN, and experts (§7),
-// MLA attention itself stays on CPU: its cache layout differs from GPU KV-cache.
+// Load creates DeepSeek2 from weights. GPU runs MLA projections, FFN, and experts.
+// With a device.MLABackend (CUDA) absorbed MLA attention also runs on GPU over a latent KV cache (kvLora+rope K, kvLora V) for the first ngl layers; k_b/v_b are uploaded once as FP32 device buffers.
+// CPU attention remains the fallback (error / unsupported backend / seq > gpuMaxSeq).
 // MLA / MoE: serial only - n_batch is accepted for API symmetry and forced to 1
-func Load(w *weights.Store, g device.Backend, ngl, _, nBatch int) (*Model, error) {
+func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
 	_ = nBatch // n_batch=1: batch prefill is not implemented for absorbed MLA
 
 	cfg, err := ParseConfig(w.Reader())
@@ -69,14 +77,19 @@ func Load(w *weights.Store, g device.Backend, ngl, _, nBatch int) (*Model, error
 		layerTensors: layerTensors,
 		outNorm:      outNorm,
 		lmHeadName:   lmHeadName,
+		gpuMaxSeq:    gpuMaxSeq,
 	}
 
 	m.initFused()
+	m.initMLAGPU()
 
 	return m, nil
 }
 
-// initFused sets up GPU layer paths (§7). MLA attention stays on CPU: absorbed wk_b/wv_b are column-major, MLA cache is K=kv_lora+rope, V=kv_lora, which GPU KV-cache (n_kv_heads * head_dim) does not represent
+// initFused sets up GPU layer paths. MLA attention uses the dedicated device MLA cache (see initMLAGPU): K=kv_lora+rope, V=kv_lora does not fit the GQA KV-cache (n_kv_heads * head_dim)
+//
+// MoE (P1 deferred): full device-resident MoE layers need batched expert dispatch (router top-k, then per-expert FFN and accumulation on device) and n_batch>1 support.
+// Until then MoE layers keep the per-token ExpertFFN path (n_batch=1, hidden state on host); only out_norm + lm_head may run on GPU (lm_head already runs on GPU through matmulInto here).
 func (m *Model) initFused() {
 	if m.dev == nil || m.ngl <= 0 {
 		return
@@ -93,6 +106,88 @@ func (m *Model) initFused() {
 	}
 }
 
+// initMLAGPU allocates the device latent KV cache when the backend supports MLA.
+// Any failure leaves mlaDev nil (CPU attention).
+func (m *Model) initMLAGPU() {
+	if m.dev == nil || m.ngl <= 0 {
+		return
+	}
+
+	absorbed := false
+	for _, lt := range m.layerTensors {
+		if lt.absorbed {
+			absorbed = true
+			break
+		}
+	}
+
+	if !absorbed {
+		return
+	}
+
+	mb, ok := device.AsMLABackend(m.dev)
+	if !ok {
+		return
+	}
+
+	scale := m.cfg.AttnScale
+	if scale == 0 {
+		scale = float32(1 / math.Sqrt(float64(m.cfg.qkDim())))
+	}
+
+	p := device.MLAParams{
+		NHeads: m.cfg.NumHeads,
+		Nope:   m.cfg.QKNopeDim,
+		KVLora: m.cfg.KVLoraRank,
+		Rope:   m.cfg.RopeDim,
+		VHead:  m.cfg.VHeadDim,
+		Scale:  scale,
+	}
+
+	maxSeq := device.CapMaxSeq(m.cfg.ContextLength, m.gpuMaxSeq)
+	if err := mb.MLACacheInit(m.ngl, maxSeq, p); err != nil {
+		return
+	}
+
+	m.mlaDev = mb
+	m.mlaParams = p
+}
+
+// mlaOnGPU reports whether this layer's MLA attention should be attempted on the device
+func (m *Model) mlaOnGPU(layer int) bool {
+	return m.mlaDev != nil && !m.mlaStale && m.layerOnGPU(layer)
+}
+
+// mlaWeightLoader dequantizes k_b / v_b once for the device upload and drops the host copy (Store.ReleaseRaw: no F32 duplicate stays in RAM on the hot path).
+func (m *Model) mlaWeightLoader(name string) ([]float32, error) {
+	f, err := m.weights.Floats(name)
+	if err != nil {
+		return nil, err
+	}
+
+	m.weights.ReleaseRaw(name)
+
+	return f, nil
+}
+
+// mlaAttnGPU: RoPE q_pe on host, append latent K/V to the device cache, run mla_attn (absorb k_b, attention, v_b projection) into scratch.attn.
+// Any error: caller falls back to CPU and sets mlaStale.
+func (m *Model) mlaAttnGPU(layer, pos, devPos, seqLen int, lt layerTensors) error {
+	cfg := m.cfg
+	headK := cfg.QKNopeDim + cfg.RopeDim
+	for h := 0; h < cfg.NumHeads; h++ {
+		dst := m.scratch.qRope[h*headK : (h+1)*headK]
+		copy(dst, m.scratch.qFull[h*headK:(h+1)*headK])
+		compute.ApplyRoPEPartialScaled(dst[cfg.QKNopeDim:], pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+	}
+
+	if err := m.mlaDev.MLACacheAppend(layer, devPos, m.scratch.kCache, m.scratch.vCache); err != nil {
+		return err
+	}
+
+	return m.mlaDev.MLAAttention(layer, m.scratch.attn, m.scratch.qRope, seqLen, m.mlaParams, lt.kB, lt.vB, m.mlaWeightLoader)
+}
+
 // layerOnGPU reports whether the layer runs on GPU
 func (m *Model) layerOnGPU(layer int) bool {
 	return m.fused != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
@@ -104,6 +199,7 @@ func (m *Model) Config() Config {
 
 func (m *Model) ResetCache() {
 	m.cache.Reset()
+	m.mlaStale = false
 }
 
 func (m *Model) Close() error {
@@ -114,6 +210,7 @@ func (m *Model) Close() error {
 	err := m.dev.Close()
 	m.dev = nil
 	m.fused = nil
+	m.mlaDev = nil
 
 	return err
 }
@@ -260,7 +357,7 @@ func (m *Model) forwardBlock(layer, pos int) error {
 	return nil
 }
 
-// ffnDense - dense layer FFN; on GPU one fused SwiGLU call (§7)
+// ffnDense - dense layer FFN; on GPU one fused SwiGLU call
 func (m *Model) ffnDense(lt layerTensors, layer int) error {
 	if m.layerOnGPU(layer) {
 		if err := m.fused.FFNNamed(lt.ffnGate, lt.ffnUp, lt.ffnDown, m.scratch.h, m.scratch.tmp, m.cfg.EmbeddingDim, m.cfg.FFNHidden); err == nil {
@@ -324,6 +421,25 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		return m.mlaAttnLegacy(layer, pos, lt)
 	}
 
+	// to cache: K = concat(kv_cmpr, k_pe), V = kv_cmpr
+	copy(m.scratch.kCache[:cfg.KVLoraRank], m.scratch.vCache)
+	copy(m.scratch.kCache[cfg.KVLoraRank:], kPe)
+	devPos := m.cache.Len()
+	if err := m.cache.Append(layer, m.scratch.kCache, m.scratch.vCache); err != nil {
+		return err
+	}
+	seqLen := devPos + 1
+
+	// GPU: absorb + attention + v_b projection in one launch; CPU path below is the fallback
+	if m.mlaOnGPU(layer) {
+		if err := m.mlaAttnGPU(layer, pos, devPos, seqLen, lt); err == nil {
+			return m.matmulInto(lt.attnOut, cfg.EmbeddingDim, cfg.NumHeads*cfg.VHeadDim, m.scratch.attn, m.scratch.tmp, layer)
+		}
+
+		// device latent cache may now miss this token: keep CPU until ResetCache
+		m.mlaStale = true
+	}
+
 	// absorb q_nope via wk_b; RoPE on q_pe; Q = concat(q_absorbed, q_pe)
 	kBW, err := m.weights.Floats(lt.kB)
 	if err != nil {
@@ -353,13 +469,6 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 		copy(m.scratch.qAbs[h*qk+cfg.KVLoraRank:h*qk+qk], qPe)
 	}
 
-	// to cache: K = concat(kv_cmpr, k_pe), V = kv_cmpr
-	copy(m.scratch.kCache[:cfg.KVLoraRank], m.scratch.vCache)
-	copy(m.scratch.kCache[cfg.KVLoraRank:], kPe)
-	if err := m.cache.Append(layer, m.scratch.kCache, m.scratch.vCache); err != nil {
-		return err
-	}
-	seqLen := m.cache.Len() + 1
 	if err := compute.AttentionMLAAbsorbedInto(
 		m.scratch.attn,
 		m.scratch.qAbs,
@@ -438,7 +547,7 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, m.cfg.ExpertWeightsNorm, m.cfg.ExpertWeightScale)
 	clear(m.scratch.moeAcc)
 
-	// §6: selected experts run on GPU via tensor slice, without dequantizing full expert matrix on host
+	// selected experts run on GPU via tensor slice, without dequantizing full expert matrix on host
 	if m.moeExpertsGPU(lt, layer, idxs, weights) {
 		return m.sharedExpert(lt, layer)
 	}

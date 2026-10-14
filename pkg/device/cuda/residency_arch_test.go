@@ -10,7 +10,7 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/dtype"
 )
 
-// §5: fused FFN GeGLU (Gemma) on Q8_0 weights matches CPU path
+// fused FFN GeGLU (Gemma) on Q8_0 weights matches CPU path
 func TestFFNGeGLUQuantQ8(t *testing.T) {
 	b, err := Open()
 	if err != nil {
@@ -60,7 +60,7 @@ func TestFFNGeGLUQuantQ8(t *testing.T) {
 	}
 }
 
-// §5: fused QKV in RoPE NORM mode without QK-norm (Llama / Mistral) matches CPU path on same dequant weights
+// fused QKV in RoPE NORM mode without QK-norm (Llama / Mistral) matches CPU path on same dequant weights
 func TestQKVRoPENormWithoutQKNorm(t *testing.T) {
 	b, err := Open()
 	if err != nil {

@@ -59,7 +59,7 @@ func loadModel(t *testing.T, ngl int) *Model {
 	return m
 }
 
-// §5: fused QKV Mistral (NeoX RoPE, no QK-norm) on Q4_K must match CPU logits. Few layers only: full 7B does not fit 4 GB VRAM
+// fused QKV Mistral (NeoX RoPE, no QK-norm) on Q4_K must match CPU logits. Few layers only: full 7B does not fit 4 GB VRAM
 func TestMistralPartialOffloadLogitsParity(t *testing.T) {
 	const ngl = 4
 

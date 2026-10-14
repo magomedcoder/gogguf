@@ -28,6 +28,21 @@ func (t *TensorInfo) RawView() ([]byte, bool) {
 	return nil, false
 }
 
+// MappedRawView is like RawView but only succeeds when the bytes are backed by the file mapping created by OpenFileMapped (never for heap copies / bytes.Reader sources).
+// Callers may madvise(MADV_DONTNEED) such views: pages re-fault from the file.
+func (t *TensorInfo) MappedRawView() ([]byte, bool) {
+	if _, ok := t.reader.r.(*mmapSource); !ok {
+		return nil, false
+	}
+
+	v, ok := t.RawView()
+	if !ok || v == nil {
+		return nil, false
+	}
+
+	return v, true
+}
+
 type dataReader interface {
 	Slice(off, size int64) []byte
 }

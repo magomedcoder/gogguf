@@ -8,7 +8,7 @@ import (
 )
 
 // QuantBytes returns raw byte size of a rows*cols matrix for a quantized type.
-// Used to slice MoE expert tensor without dequantization (§6)
+// Used to slice MoE expert tensor without dequantization
 func QuantBytes(t dtype.DType, rows, cols int) (int, error) {
 	if rows <= 0 || cols <= 0 {
 		return 0, fmt.Errorf("rows=%d cols=%d", rows, cols)

@@ -157,3 +157,76 @@ func buildTinyGGUF(name string, dims []uint64, values []float32) []byte {
 
 	return append(hdr.Bytes(), data.Bytes()...)
 }
+
+func TestReleaseRawMmapKeepsData(t *testing.T) {
+	vals := make([]float32, 1<<16) // 256 KiB: spans many pages
+	for i := range vals {
+		vals[i] = float32(i)
+	}
+
+	raw := buildTinyGGUF("blk.0.w", []uint64{uint64(len(vals))}, vals)
+	path := filepath.Join(t.TempDir(), "big.gguf")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mr, err := format.OpenFileMapped(path)
+	if err != nil {
+		t.Fatalf("OpenFileMapped: %v", err)
+	}
+	defer mr.Close()
+
+	s := New(mr.Reader)
+	b, err := s.Raw("blk.0.w")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f1, err := s.Floats("blk.0.w")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	released := s.ReleaseLayer("blk.0.")
+	if released < 0 {
+		t.Fatalf("released=%d", released)
+	}
+
+	// pages re-fault from the file: previously handed-out view still valid
+	f2, err := s.Floats("blk.0.w")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if &f1[0] == &f2[0] {
+		t.Fatal("ReleaseLayer must drop Floats cache")
+	}
+
+	for _, i := range []int{0, 1, 4095, 4096, len(vals) - 1} {
+		if f2[i] != float32(i) {
+			t.Fatalf("floats[%d]=%v", i, f2[i])
+		}
+	}
+
+	if len(b) != len(vals)*4 {
+		t.Fatalf("raw len=%d", len(b))
+	}
+}
+
+func TestReleaseRawHeapSourceNoop(t *testing.T) {
+	raw := buildTinyGGUF("w", []uint64{4}, []float32{1, 2, 3, 4})
+	r, err := format.Open(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(r)
+	if n := s.ReleaseRaw("w"); n != 0 {
+		t.Fatalf("heap source must not madvise, got %d", n)
+	}
+
+	f, err := s.Floats("w")
+	if err != nil || f[3] != 4 {
+		t.Fatalf("floats %v err=%v", f, err)
+	}
+}
