@@ -48,11 +48,11 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 
 ### Поддерживаемые квантизации весов
 
-| Тип                                | CPU     | Native GPU + residency             |
-|------------------------------------|---------|------------------------------------|
-| F16, F32                           | dequant | путь FP32                          |
-| Q8_0, Q4_0, Q4_K, Q5_K, Q6_K       | да      | fused                              |
-| Q4_1, Q5_0, Q5_1, Q2_K, Q3_K, Q8_K | да      | через FP32 dequant (без residency) |
+| Тип                                | CPU     | Native GPU + residency |
+|------------------------------------|---------|------------------------|
+| F16, F32                           | dequant | путь FP32              |
+| Q8_0, Q4_0, Q4_1, Q5_0, Q5_1       | да      | fused                  |
+| Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K | да      | fused                  |
 
 Также: Legacy / K-quants / без квантизации - Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K...Q8_K, F16, F32.
 

@@ -820,7 +820,622 @@ Q6K_EXIT:
 }
 `
 
-const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel + matmulMatQ8Kernel + matmulQ4Kernel + matmulQ4KKernel + matmulQ5KKernel + matmulQ6KKernel
+// GPU block: f32 d + f32 m + 16 qs = 24
+const matmulQ41Kernel = `
+.visible .entry matmul_vec_q4_1(
+    .param .u64 param_matrix,
+    .param .u64 param_vec,
+    .param .u64 param_out,
+    .param .u32 param_rows,
+    .param .u32 param_cols
+)
+{
+    .reg .pred      %p<8>;
+    .reg .s8        %s<1>;
+    .reg .b32       %r<32>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<10>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_rows];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra Q41_EXIT;
+
+    ld.param.u64    %rd1, [param_matrix];
+    ld.param.u64    %rd2, [param_vec];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_cols];
+
+    shr.u32         %r7, %r6, 5;
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r8, 0;
+
+Q41_BLOCK:
+    setp.ge.u32     %p1, %r8, %r7;
+    @%p1            bra Q41_DONE;
+
+    mul.lo.u32      %r9, %r4, %r7;
+    add.u32         %r9, %r9, %r8;
+    mul.wide.u32    %rd4, %r9, 24;
+    add.u64         %rd5, %rd1, %rd4;
+
+    ld.global.f32   %f2, [%rd5];
+    ld.global.f32   %f3, [%rd5+4];
+    add.u64         %rd6, %rd5, 8;
+    shl.b32         %r10, %r8, 5;
+    mov.u32         %r11, 0;
+
+Q41_INNER:
+    setp.ge.u32     %p2, %r11, 32;
+    @%p2            bra Q41_INNER_DONE;
+
+    shr.u32         %r12, %r11, 1;
+    cvt.u64.u32     %rd7, %r12;
+    add.u64         %rd8, %rd6, %rd7;
+    ld.global.u8    %r13, [%rd8];
+
+    and.b32         %r14, %r11, 1;
+    shl.b32         %r14, %r14, 2;
+    shr.u32         %r15, %r13, %r14;
+    and.b32         %r15, %r15, 15;
+    cvt.rn.f32.u32  %f4, %r15;
+    fma.rn.f32      %f5, %f2, %f4, %f3;
+
+    add.u32         %r16, %r10, %r11;
+    mul.wide.u32    %rd9, %r16, 4;
+    add.u64         %rd10, %rd2, %rd9;
+    ld.global.f32   %f6, [%rd10];
+    fma.rn.f32      %f1, %f5, %f6, %f1;
+
+    add.u32         %r11, %r11, 1;
+    bra Q41_INNER;
+
+Q41_INNER_DONE:
+    add.u32         %r8, %r8, 1;
+    bra Q41_BLOCK;
+
+Q41_DONE:
+    cvt.u64.u32     %rd14, %r4;
+    shl.b64         %rd15, %rd14, 2;
+    add.u64         %rd16, %rd3, %rd15;
+    st.global.f32   [%rd16], %f1;
+
+Q41_EXIT:
+    ret;
+}
+`
+
+// GPU block: f32 d + u32 qh + 16 qs = 24
+const matmulQ50Kernel = `
+.visible .entry matmul_vec_q5_0(
+    .param .u64 param_matrix,
+    .param .u64 param_vec,
+    .param .u64 param_out,
+    .param .u32 param_rows,
+    .param .u32 param_cols
+)
+{
+    .reg .pred      %p<8>;
+    .reg .s8        %s<1>;
+    .reg .b32       %r<32>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<10>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_rows];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra Q50_EXIT;
+
+    ld.param.u64    %rd1, [param_matrix];
+    ld.param.u64    %rd2, [param_vec];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_cols];
+
+    shr.u32         %r7, %r6, 5;
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r8, 0;
+
+Q50_BLOCK:
+    setp.ge.u32     %p1, %r8, %r7;
+    @%p1            bra Q50_DONE;
+
+    mul.lo.u32      %r9, %r4, %r7;
+    add.u32         %r9, %r9, %r8;
+    mul.wide.u32    %rd4, %r9, 24;
+    add.u64         %rd5, %rd1, %rd4;
+
+    ld.global.f32   %f2, [%rd5];
+    ld.global.u32   %r10, [%rd5+4];
+    add.u64         %rd6, %rd5, 8;
+    shl.b32         %r11, %r8, 5;
+    mov.u32         %r12, 0;
+
+Q50_INNER:
+    setp.ge.u32     %p2, %r12, 16;
+    @%p2            bra Q50_INNER_DONE;
+
+    cvt.u64.u32     %rd7, %r12;
+    add.u64         %rd8, %rd6, %rd7;
+    ld.global.u8    %r13, [%rd8];
+
+    shr.u32         %r14, %r10, %r12;
+    shl.b32         %r14, %r14, 4;
+    and.b32         %r14, %r14, 16;
+    add.u32         %r15, %r12, 12;
+    shr.u32         %r15, %r10, %r15;
+    and.b32         %r15, %r15, 16;
+
+    and.b32         %r16, %r13, 15;
+    or.b32          %r16, %r16, %r14;
+    sub.s32         %r16, %r16, 16;
+    cvt.rn.f32.s32  %f3, %r16;
+    mul.f32         %f3, %f2, %f3;
+
+    shr.u32         %r17, %r13, 4;
+    or.b32          %r17, %r17, %r15;
+    sub.s32         %r17, %r17, 16;
+    cvt.rn.f32.s32  %f4, %r17;
+    mul.f32         %f4, %f2, %f4;
+
+    add.u32         %r18, %r11, %r12;
+    mul.wide.u32    %rd9, %r18, 4;
+    add.u64         %rd10, %rd2, %rd9;
+    ld.global.f32   %f5, [%rd10];
+    fma.rn.f32      %f1, %f3, %f5, %f1;
+    ld.global.f32   %f6, [%rd10+64];
+    fma.rn.f32      %f1, %f4, %f6, %f1;
+
+    add.u32         %r12, %r12, 1;
+    bra Q50_INNER;
+
+Q50_INNER_DONE:
+    add.u32         %r8, %r8, 1;
+    bra Q50_BLOCK;
+
+Q50_DONE:
+    cvt.u64.u32     %rd14, %r4;
+    shl.b64         %rd15, %rd14, 2;
+    add.u64         %rd16, %rd3, %rd15;
+    st.global.f32   [%rd16], %f1;
+
+Q50_EXIT:
+    ret;
+}
+`
+
+// GPU block: f32 d + f32 m + u32 qh + 16 qs = 28
+const matmulQ51Kernel = `
+.visible .entry matmul_vec_q5_1(
+    .param .u64 param_matrix,
+    .param .u64 param_vec,
+    .param .u64 param_out,
+    .param .u32 param_rows,
+    .param .u32 param_cols
+)
+{
+    .reg .pred      %p<8>;
+    .reg .s8        %s<1>;
+    .reg .b32       %r<32>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<10>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_rows];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra Q51_EXIT;
+
+    ld.param.u64    %rd1, [param_matrix];
+    ld.param.u64    %rd2, [param_vec];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_cols];
+
+    shr.u32         %r7, %r6, 5;
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r8, 0;
+
+Q51_BLOCK:
+    setp.ge.u32     %p1, %r8, %r7;
+    @%p1            bra Q51_DONE;
+
+    mul.lo.u32      %r9, %r4, %r7;
+    add.u32         %r9, %r9, %r8;
+    mul.wide.u32    %rd4, %r9, 28;
+    add.u64         %rd5, %rd1, %rd4;
+
+    ld.global.f32   %f2, [%rd5];
+    ld.global.f32   %f7, [%rd5+4];
+    ld.global.u32   %r10, [%rd5+8];
+    add.u64         %rd6, %rd5, 12;
+    shl.b32         %r11, %r8, 5;
+    mov.u32         %r12, 0;
+
+Q51_INNER:
+    setp.ge.u32     %p2, %r12, 16;
+    @%p2            bra Q51_INNER_DONE;
+
+    cvt.u64.u32     %rd7, %r12;
+    add.u64         %rd8, %rd6, %rd7;
+    ld.global.u8    %r13, [%rd8];
+
+    shr.u32         %r14, %r10, %r12;
+    shl.b32         %r14, %r14, 4;
+    and.b32         %r14, %r14, 16;
+    add.u32         %r15, %r12, 12;
+    shr.u32         %r15, %r10, %r15;
+    and.b32         %r15, %r15, 16;
+
+    and.b32         %r16, %r13, 15;
+    or.b32          %r16, %r16, %r14;
+    cvt.rn.f32.u32  %f3, %r16;
+    fma.rn.f32      %f3, %f2, %f3, %f7;
+
+    shr.u32         %r17, %r13, 4;
+    or.b32          %r17, %r17, %r15;
+    cvt.rn.f32.u32  %f4, %r17;
+    fma.rn.f32      %f4, %f2, %f4, %f7;
+
+    add.u32         %r18, %r11, %r12;
+    mul.wide.u32    %rd9, %r18, 4;
+    add.u64         %rd10, %rd2, %rd9;
+    ld.global.f32   %f5, [%rd10];
+    fma.rn.f32      %f1, %f3, %f5, %f1;
+    ld.global.f32   %f6, [%rd10+64];
+    fma.rn.f32      %f1, %f4, %f6, %f1;
+
+    add.u32         %r12, %r12, 1;
+    bra Q51_INNER;
+
+Q51_INNER_DONE:
+    add.u32         %r8, %r8, 1;
+    bra Q51_BLOCK;
+
+Q51_DONE:
+    cvt.u64.u32     %rd14, %r4;
+    shl.b64         %rd15, %rd14, 2;
+    add.u64         %rd16, %rd3, %rd15;
+    st.global.f32   [%rd16], %f1;
+
+Q51_EXIT:
+    ret;
+}
+`
+
+// GPU block: 16*f32 dl + 16*f32 ml + 64 qs = 192
+const matmulQ2KKernel = `
+.visible .entry matmul_vec_q2_k(
+    .param .u64 param_matrix,
+    .param .u64 param_vec,
+    .param .u64 param_out,
+    .param .u32 param_rows,
+    .param .u32 param_cols
+)
+{
+    .reg .pred      %p<8>;
+    .reg .s8        %s<1>;
+    .reg .b32       %r<32>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<10>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_rows];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra Q2K_EXIT;
+
+    ld.param.u64    %rd1, [param_matrix];
+    ld.param.u64    %rd2, [param_vec];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_cols];
+
+    shr.u32         %r7, %r6, 8;
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r8, 0;
+
+Q2K_BLOCK:
+    setp.ge.u32     %p1, %r8, %r7;
+    @%p1            bra Q2K_DONE;
+
+    mul.lo.u32      %r9, %r4, %r7;
+    add.u32         %r9, %r9, %r8;
+    mul.wide.u32    %rd4, %r9, 192;
+    add.u64         %rd5, %rd1, %rd4;
+
+    shl.b32         %r10, %r8, 8;
+    mov.u32         %r11, 0;
+
+Q2K_CHUNK:
+    setp.ge.u32     %p2, %r11, 16;
+    @%p2            bra Q2K_CHUNK_DONE;
+
+    mul.wide.u32    %rd6, %r11, 4;
+    add.u64         %rd7, %rd5, %rd6;
+    ld.global.f32   %f2, [%rd7];
+    ld.global.f32   %f3, [%rd7+64];
+
+    shr.u32         %r12, %r11, 3;
+    shl.b32         %r12, %r12, 5;
+    and.b32         %r13, %r11, 1;
+    shl.b32         %r13, %r13, 4;
+    add.u32         %r12, %r12, %r13;
+    shr.u32         %r14, %r11, 1;
+    and.b32         %r14, %r14, 3;
+    shl.b32         %r14, %r14, 1;
+
+    cvt.u64.u32     %rd8, %r12;
+    add.u64         %rd9, %rd5, 128;
+    add.u64         %rd9, %rd9, %rd8;
+
+    shl.b32         %r15, %r11, 4;
+    add.u32         %r15, %r15, %r10;
+    mov.u32         %r16, 0;
+
+Q2K_INNER:
+    setp.ge.u32     %p3, %r16, 16;
+    @%p3            bra Q2K_INNER_DONE;
+
+    cvt.u64.u32     %rd10, %r16;
+    add.u64         %rd11, %rd9, %rd10;
+    ld.global.u8    %r17, [%rd11];
+    shr.u32         %r17, %r17, %r14;
+    and.b32         %r17, %r17, 3;
+    cvt.rn.f32.u32  %f4, %r17;
+    mul.f32         %f4, %f2, %f4;
+    sub.f32         %f4, %f4, %f3;
+
+    add.u32         %r18, %r15, %r16;
+    mul.wide.u32    %rd12, %r18, 4;
+    add.u64         %rd13, %rd2, %rd12;
+    ld.global.f32   %f5, [%rd13];
+    fma.rn.f32      %f1, %f4, %f5, %f1;
+
+    add.u32         %r16, %r16, 1;
+    bra Q2K_INNER;
+
+Q2K_INNER_DONE:
+    add.u32         %r11, %r11, 1;
+    bra Q2K_CHUNK;
+
+Q2K_CHUNK_DONE:
+    add.u32         %r8, %r8, 1;
+    bra Q2K_BLOCK;
+
+Q2K_DONE:
+    cvt.u64.u32     %rd14, %r4;
+    shl.b64         %rd15, %rd14, 2;
+    add.u64         %rd16, %rd3, %rd15;
+    st.global.f32   [%rd16], %f1;
+
+Q2K_EXIT:
+    ret;
+}
+`
+
+// GPU block: 16*f32 scales + 32 hmask + 64 qs = 160
+const matmulQ3KKernel = `
+.visible .entry matmul_vec_q3_k(
+    .param .u64 param_matrix,
+    .param .u64 param_vec,
+    .param .u64 param_out,
+    .param .u32 param_rows,
+    .param .u32 param_cols
+)
+{
+    .reg .pred      %p<8>;
+    .reg .s8        %s<1>;
+    .reg .b32       %r<32>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<10>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_rows];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra Q3K_EXIT;
+
+    ld.param.u64    %rd1, [param_matrix];
+    ld.param.u64    %rd2, [param_vec];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_cols];
+
+    shr.u32         %r7, %r6, 8;
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r8, 0;
+
+Q3K_BLOCK:
+    setp.ge.u32     %p1, %r8, %r7;
+    @%p1            bra Q3K_DONE;
+
+    mul.lo.u32      %r9, %r4, %r7;
+    add.u32         %r9, %r9, %r8;
+    mul.wide.u32    %rd4, %r9, 160;
+    add.u64         %rd5, %rd1, %rd4;
+
+    shl.b32         %r10, %r8, 8;
+    mov.u32         %r11, 0;
+
+Q3K_CHUNK:
+    setp.ge.u32     %p2, %r11, 16;
+    @%p2            bra Q3K_CHUNK_DONE;
+
+    mul.wide.u32    %rd6, %r11, 4;
+    add.u64         %rd7, %rd5, %rd6;
+    ld.global.f32   %f2, [%rd7];
+
+    shr.u32         %r12, %r11, 3;
+    shl.b32         %r12, %r12, 5;
+    and.b32         %r13, %r11, 1;
+    shl.b32         %r13, %r13, 4;
+    add.u32         %r12, %r12, %r13;
+    shr.u32         %r14, %r11, 1;
+    and.b32         %r14, %r14, 3;
+    shl.b32         %r14, %r14, 1;
+
+    cvt.u64.u32     %rd8, %r12;
+    add.u64         %rd9, %rd5, 96;
+    add.u64         %rd9, %rd9, %rd8;
+    shr.u32         %r19, %r11, 3;
+    shl.b32         %r19, %r19, 2;
+    shr.u32         %r20, %r11, 1;
+    and.b32         %r20, %r20, 3;
+    add.u32         %r19, %r19, %r20;
+    mov.u32         %r21, 1;
+    shl.b32         %r21, %r21, %r19;
+    add.u64         %rd17, %rd5, 64;
+    cvt.u64.u32     %rd18, %r13;
+    add.u64         %rd17, %rd17, %rd18;
+
+    shl.b32         %r15, %r11, 4;
+    add.u32         %r15, %r15, %r10;
+    mov.u32         %r16, 0;
+
+Q3K_INNER:
+    setp.ge.u32     %p3, %r16, 16;
+    @%p3            bra Q3K_INNER_DONE;
+
+    cvt.u64.u32     %rd10, %r16;
+    add.u64         %rd11, %rd9, %rd10;
+    ld.global.u8    %r17, [%rd11];
+    shr.u32         %r17, %r17, %r14;
+    and.b32         %r17, %r17, 3;
+    add.u64         %rd19, %rd17, %rd10;
+    ld.global.u8    %r22, [%rd19];
+    and.b32         %r22, %r22, %r21;
+    setp.eq.u32     %p4, %r22, 0;
+    @%p4            sub.s32 %r17, %r17, 4;
+    cvt.rn.f32.s32  %f4, %r17;
+    mul.f32         %f4, %f2, %f4;
+
+    add.u32         %r18, %r15, %r16;
+    mul.wide.u32    %rd12, %r18, 4;
+    add.u64         %rd13, %rd2, %rd12;
+    ld.global.f32   %f5, [%rd13];
+    fma.rn.f32      %f1, %f4, %f5, %f1;
+
+    add.u32         %r16, %r16, 1;
+    bra Q3K_INNER;
+
+Q3K_INNER_DONE:
+    add.u32         %r11, %r11, 1;
+    bra Q3K_CHUNK;
+
+Q3K_CHUNK_DONE:
+    add.u32         %r8, %r8, 1;
+    bra Q3K_BLOCK;
+
+Q3K_DONE:
+    cvt.u64.u32     %rd14, %r4;
+    shl.b64         %rd15, %rd14, 2;
+    add.u64         %rd16, %rd3, %rd15;
+    st.global.f32   [%rd16], %f1;
+
+Q3K_EXIT:
+    ret;
+}
+`
+
+// GPU block: f32 d + 256 qs = 260
+const matmulQ8KKernel = `
+.visible .entry matmul_vec_q8_k(
+    .param .u64 param_matrix,
+    .param .u64 param_vec,
+    .param .u64 param_out,
+    .param .u32 param_rows,
+    .param .u32 param_cols
+)
+{
+    .reg .pred      %p<8>;
+    .reg .s8        %s<1>;
+    .reg .b32       %r<32>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<10>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_rows];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra Q8K_EXIT;
+
+    ld.param.u64    %rd1, [param_matrix];
+    ld.param.u64    %rd2, [param_vec];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_cols];
+
+    shr.u32         %r7, %r6, 8;
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r8, 0;
+
+Q8K_BLOCK:
+    setp.ge.u32     %p1, %r8, %r7;
+    @%p1            bra Q8K_DONE;
+
+    mul.lo.u32      %r9, %r4, %r7;
+    add.u32         %r9, %r9, %r8;
+    mul.wide.u32    %rd4, %r9, 260;
+    add.u64         %rd5, %rd1, %rd4;
+
+    ld.global.f32   %f2, [%rd5];
+    add.u64         %rd6, %rd5, 4;
+    shl.b32         %r10, %r8, 8;
+    mov.u32         %r11, 0;
+
+Q8K_INNER:
+    setp.ge.u32     %p2, %r11, 256;
+    @%p2            bra Q8K_INNER_DONE;
+
+    cvt.u64.u32     %rd7, %r11;
+    add.u64         %rd8, %rd6, %rd7;
+    ld.global.s8    %s0, [%rd8];
+    cvt.s32.s8      %r12, %s0;
+    cvt.rn.f32.s32  %f3, %r12;
+    mul.f32         %f4, %f2, %f3;
+
+    add.u32         %r13, %r10, %r11;
+    mul.wide.u32    %rd9, %r13, 4;
+    add.u64         %rd10, %rd2, %rd9;
+    ld.global.f32   %f5, [%rd10];
+    fma.rn.f32      %f1, %f4, %f5, %f1;
+
+    add.u32         %r11, %r11, 1;
+    bra Q8K_INNER;
+
+Q8K_INNER_DONE:
+    add.u32         %r8, %r8, 1;
+    bra Q8K_BLOCK;
+
+Q8K_DONE:
+    cvt.u64.u32     %rd14, %r4;
+    shl.b64         %rd15, %rd14, 2;
+    add.u64         %rd16, %rd3, %rd15;
+    st.global.f32   [%rd16], %f1;
+
+Q8K_EXIT:
+    ret;
+}
+`
+
+const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel + matmulMatQ8Kernel + matmulQ4Kernel + matmulQ4KKernel + matmulQ5KKernel + matmulQ6KKernel +
+	matmulQ41Kernel + matmulQ50Kernel + matmulQ51Kernel + matmulQ2KKernel + matmulQ3KKernel + matmulQ8KKernel
 
 // opsKernelsBody - RMSNorm, RoPE, SwiGLU, attention, softmax, add.
 // Comments inside PTX must be ASCII only: ptxas rejects non-ASCII.

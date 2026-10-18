@@ -24,7 +24,7 @@ var ErrHiddenUnavailable = errors.New("device: device-resident hidden unavailabl
 // FusedQuantSupported reports whether fused paths (FFN/QKV/residual/lm_head) support this weight type natively without dequantizing the full matrix to FP32
 func FusedQuantSupported(t dtype.DType) bool {
 	switch t {
-	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K:
+	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K, dtype.Q8_K:
 		return true
 	default:
 		return false
@@ -61,6 +61,24 @@ type Backend interface {
 	// MatMulVecQ6_KCached matmul Q6_K matrix (K-quant)
 	MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
+	// MatMulVecQ4_1Cached matmul Q4_1 matrix
+	MatMulVecQ4_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
+	// MatMulVecQ5_0Cached matmul Q5_0 matrix
+	MatMulVecQ5_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
+	// MatMulVecQ5_1Cached matmul Q5_1 matrix
+	MatMulVecQ5_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
+	// MatMulVecQ2_KCached matmul Q2_K matrix
+	MatMulVecQ2_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
+	// MatMulVecQ3_KCached matmul Q3_K matrix
+	MatMulVecQ3_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
+	// MatMulVecQ8_KCached matmul Q8_K matrix
+	MatMulVecQ8_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
 	// RMSNormInto writes RMS normalization to dst (GPU or CPU)
 	RMSNormInto(dst, x, weight []float32, eps float32) error
 
@@ -91,7 +109,7 @@ type Backend interface {
 	// QKVRoPEAttentionQ8_0Cached same for Q8_0 matmul weights (norm is FP32)
 	QKVRoPEAttentionQ8_0Cached(qName, kName, vName, qNormName, kNormName string, qRaw, kRaw, vRaw []byte, qNorm, kNorm, h, cos, sin, attn, kOut, vOut []float32, embd, nHeads, nKVHeads, headDim, layer, kvPos, seqLen int, eps float32) error
 
-	// FFNSwiGLUQuantCached FFN SwiGLU for Q8_0/Q4_0/Q4_K/Q5_K/Q6_K weights
+	// FFNSwiGLUQuantCached FFN SwiGLU for fused-quant weights (see FusedQuantSupported)
 	FFNSwiGLUQuantCached(t dtype.DType, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error
 
 	// FFNGeGLUQuantCached FFN GeGLU (Gemma) for the same weight types

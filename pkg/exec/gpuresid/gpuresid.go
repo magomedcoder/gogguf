@@ -240,6 +240,18 @@ func (r *Runner) matMulQuant(t dtype.DType, name string, raw []byte, rows, cols 
 		return r.g.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
 	case dtype.Q6_K:
 		return r.g.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
+	case dtype.Q4_1:
+		return r.g.MatMulVecQ4_1Cached(name, raw, rows, cols, vec)
+	case dtype.Q5_0:
+		return r.g.MatMulVecQ5_0Cached(name, raw, rows, cols, vec)
+	case dtype.Q5_1:
+		return r.g.MatMulVecQ5_1Cached(name, raw, rows, cols, vec)
+	case dtype.Q2_K:
+		return r.g.MatMulVecQ2_KCached(name, raw, rows, cols, vec)
+	case dtype.Q3_K:
+		return r.g.MatMulVecQ3_KCached(name, raw, rows, cols, vec)
+	case dtype.Q8_K:
+		return r.g.MatMulVecQ8_KCached(name, raw, rows, cols, vec)
 	default:
 		return nil, fmt.Errorf("gpuresid: %s: type %s has no GPU matmul", name, t)
 	}

@@ -761,7 +761,7 @@ func (m *Model) matmulGPUInto(name string, rows, cols int, vec, out []float32) e
 	}
 
 	switch info.Type {
-	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K:
+	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K, dtype.Q8_K:
 		raw, err := m.weights.Raw(name)
 		if err != nil {
 			return err
@@ -826,6 +826,15 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		}
 
 		return m.dev.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
+	}
+
+	if device.FusedQuantSupported(info.Type) {
+		raw, err := m.weights.Raw(name)
+		if err != nil {
+			return nil, err
+		}
+
+		return device.MatMulVecQuantCached(m.dev, info.Type, name, raw, rows, cols, vec)
 	}
 
 	f32, err := m.weights.Floats(name)

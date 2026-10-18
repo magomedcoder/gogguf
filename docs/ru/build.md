@@ -35,7 +35,7 @@ CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
 
 Частично на GPU: F32 batch - device-offset vec launches; MoE / DeepSeek2 MLA / SWA -> `n_batch=1`; не у всех arch полный residency. Quant prefill - `MatMulMat*` (Q8_0 single-launch PTX).  
 **`gpuKVStale`:** при сбое GPU KV fused attention отключается до `ResetCache()` / новой сессии.  
-Кванты без нативных kernels (Q4_1, Q5_0/1, Q2_K, Q3_K, Q8_K) -> FP32 и residency выкл.
+Fused native: Q8_0, Q4_0/1, Q5_0/1, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K/Q8_K (`FusedQuantSupported`). Остальные (Q8_1, IQ-*) -> FP32 и residency выкл.
 
 Флаги (`-ngl`, `-dev`, Docker GPU, macOS/Windows): **[platforms.md](platforms.md)**.
 

@@ -45,6 +45,25 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 
 `--compare` prints prefill/decode tok/s. VRAM / device lines: [platforms.md](platforms.md).
 
+### vs `llama-bench`
+
+Same GGUF, same `-ngl` / prompt length / decode `-n`, and matching prefill batch (`-b` here vs `-b` / `-n_batch` in llama.cpp). Map:
+
+| GoGGUF `tools bench` | llama.cpp `llama-bench`                  |
+|----------------------|------------------------------------------|
+| prefill tok/s        | `pp` (prompt processing)                 |
+| decode tok/s         | `tg` (token generation)                  |
+| TTFT                 | first-token latency (not always printed) |
+
+Example pair (adjust paths / layer count):
+
+```bash
+./build/tools bench -m model.gguf -p "Hello" -n 128 -b 32 -ngl 999 --runs 3 --json
+./llama-bench -m model.gguf -p 512 -n 128 -ngl 999 -b 32
+```
+
+DoD targets (roadmap): prefill ≥~0.5* llama-bench `pp`, decode ≥~0.7* `tg` at `-b`≥32 on dense fused quants.
+
 ## `greedy`
 
 Greedy decode N tokens as JSON token IDs (for golden).

@@ -26,6 +26,18 @@ func QuantBytes(t dtype.DType, rows, cols int) (int, error) {
 		blk, size = quant.QK_K, quant.BlockQ5_KSize
 	case dtype.Q6_K:
 		blk, size = quant.QK_K, quant.BlockQ6_KSize
+	case dtype.Q4_1:
+		blk, size = quant.QK4_1, quant.BlockQ4_1Size
+	case dtype.Q5_0:
+		blk, size = quant.QK5_0, quant.BlockQ5_0Size
+	case dtype.Q5_1:
+		blk, size = quant.QK5_1, quant.BlockQ5_1Size
+	case dtype.Q2_K:
+		blk, size = quant.QK_K, quant.BlockQ2_KSize
+	case dtype.Q3_K:
+		blk, size = quant.QK_K, quant.BlockQ3_KSize
+	case dtype.Q8_K:
+		blk, size = quant.QK_K, quant.BlockQ8_KSize
 	default:
 		return 0, fmt.Errorf("type %s not supported", t)
 	}

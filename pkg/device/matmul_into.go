@@ -14,6 +14,12 @@ type MatMulIntoBackend interface {
 	MatMulVecQ4_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
 	MatMulVecQ5_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
 	MatMulVecQ6_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
+	MatMulVecQ4_1CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
+	MatMulVecQ5_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
+	MatMulVecQ5_1CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
+	MatMulVecQ2_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
+	MatMulVecQ3_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
+	MatMulVecQ8_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
 }
 
 // MatMulMatBackend is optionally implemented for W * X[batch] -> out[batch*rows] (GEMM / batched GEMV).
@@ -24,6 +30,12 @@ type MatMulMatBackend interface {
 	MatMulMatQ4_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
 	MatMulMatQ5_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
 	MatMulMatQ6_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ4_1CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ5_0CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ5_1CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ2_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ3_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ8_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
 }
 
 // MatMulVecCachedInto writes FP32 Cached matmul into dst.
@@ -64,6 +76,18 @@ func MatMulVecQuantCachedInto(b Backend, t dtype.DType, name string, raw []byte,
 			return ib.MatMulVecQ5_KCachedInto(name, raw, rows, cols, vec, dst)
 		case dtype.Q6_K:
 			return ib.MatMulVecQ6_KCachedInto(name, raw, rows, cols, vec, dst)
+		case dtype.Q4_1:
+			return ib.MatMulVecQ4_1CachedInto(name, raw, rows, cols, vec, dst)
+		case dtype.Q5_0:
+			return ib.MatMulVecQ5_0CachedInto(name, raw, rows, cols, vec, dst)
+		case dtype.Q5_1:
+			return ib.MatMulVecQ5_1CachedInto(name, raw, rows, cols, vec, dst)
+		case dtype.Q2_K:
+			return ib.MatMulVecQ2_KCachedInto(name, raw, rows, cols, vec, dst)
+		case dtype.Q3_K:
+			return ib.MatMulVecQ3_KCachedInto(name, raw, rows, cols, vec, dst)
+		case dtype.Q8_K:
+			return ib.MatMulVecQ8_KCachedInto(name, raw, rows, cols, vec, dst)
 		}
 	}
 
@@ -80,6 +104,18 @@ func MatMulVecQuantCachedInto(b Backend, t dtype.DType, name string, raw []byte,
 		got, err = b.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
 	case dtype.Q6_K:
 		got, err = b.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
+	case dtype.Q4_1:
+		got, err = b.MatMulVecQ4_1Cached(name, raw, rows, cols, vec)
+	case dtype.Q5_0:
+		got, err = b.MatMulVecQ5_0Cached(name, raw, rows, cols, vec)
+	case dtype.Q5_1:
+		got, err = b.MatMulVecQ5_1Cached(name, raw, rows, cols, vec)
+	case dtype.Q2_K:
+		got, err = b.MatMulVecQ2_KCached(name, raw, rows, cols, vec)
+	case dtype.Q3_K:
+		got, err = b.MatMulVecQ3_KCached(name, raw, rows, cols, vec)
+	case dtype.Q8_K:
+		got, err = b.MatMulVecQ8_KCached(name, raw, rows, cols, vec)
 	default:
 		return fmt.Errorf("device: unsupported quant %v for CachedInto", t)
 	}
@@ -115,6 +151,18 @@ func MatMulMatQuantCachedInto(b Backend, t dtype.DType, name string, raw []byte,
 			return mb.MatMulMatQ5_KCachedInto(name, raw, rows, cols, x, batch, out)
 		case dtype.Q6_K:
 			return mb.MatMulMatQ6_KCachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q4_1:
+			return mb.MatMulMatQ4_1CachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q5_0:
+			return mb.MatMulMatQ5_0CachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q5_1:
+			return mb.MatMulMatQ5_1CachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q2_K:
+			return mb.MatMulMatQ2_KCachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q3_K:
+			return mb.MatMulMatQ3_KCachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q8_K:
+			return mb.MatMulMatQ8_KCachedInto(name, raw, rows, cols, x, batch, out)
 		}
 	}
 
@@ -148,4 +196,14 @@ func MatMulMatCachedIntoFP32(b Backend, name string, matrix []float32, rows, col
 	}
 
 	return nil
+}
+
+// MatMulVecQuantCached dispatches quant Cached matmul for any FusedQuantSupported type and returns a new slice.
+func MatMulVecQuantCached(b Backend, t dtype.DType, name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := MatMulVecQuantCachedInto(b, t, name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
 }

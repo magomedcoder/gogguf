@@ -247,7 +247,7 @@ func (m *Model) matmulBatchGPU(name string, rows, cols int, x, out []float32, ba
 	}
 
 	switch info.Type {
-	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K:
+	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K, dtype.Q8_K:
 		return device.MatMulMatQuantCachedInto(m.dev, info.Type, name, raw, rows, cols, x, batch, out)
 	default:
 		f32, err := m.weights.Floats(name)

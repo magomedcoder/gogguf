@@ -48,6 +48,12 @@ typedef CUresult (*PFN_cuMemcpyDtoH_v2)(void *dst, CUdeviceptr src, size_t bytes
 
 typedef CUresult (*PFN_cuMemcpyDtoD_v2)(CUdeviceptr dst, CUdeviceptr src, size_t bytes);
 
+typedef CUresult (*PFN_cuDeviceCanAccessPeer)(int *canAccessPeer, CUdevice dev, CUdevice peerDev);
+
+typedef CUresult (*PFN_cuCtxEnablePeerAccess)(CUcontext peerContext, unsigned int flags);
+
+typedef CUresult (*PFN_cuMemcpyPeer)(CUdeviceptr dstDevice, CUcontext dstContext, CUdeviceptr srcDevice, CUcontext srcContext, size_t bytes);
+
 typedef CUresult (*PFN_cuMemcpyHtoDAsync_v2)(CUdeviceptr dst, const void *src, size_t bytes, CUstream stream);
 
 typedef CUresult (*PFN_cuMemcpyDtoHAsync_v2)(void *dst, CUdeviceptr src, size_t bytes, CUstream stream);
@@ -102,6 +108,9 @@ typedef struct {
 	PFN_cuMemcpyHtoD_v2 cuMemcpyHtoD;
 	PFN_cuMemcpyDtoH_v2 cuMemcpyDtoH;
 	PFN_cuMemcpyDtoD_v2 cuMemcpyDtoD;
+	PFN_cuDeviceCanAccessPeer cuDeviceCanAccessPeer; // optional (multi-GPU P2P)
+	PFN_cuCtxEnablePeerAccess cuCtxEnablePeerAccess; // optional
+	PFN_cuMemcpyPeer cuMemcpyPeer;                   // optional
 	PFN_cuMemcpyHtoDAsync_v2 cuMemcpyHtoDAsync;
 	PFN_cuMemcpyDtoHAsync_v2 cuMemcpyDtoHAsync;
 	PFN_cuGetErrorName cuGetErrorName;
@@ -122,6 +131,8 @@ typedef struct {
 	PFN_cuGraphLaunch cuGraphLaunch;
 	PFN_cuGraphExecDestroy cuGraphExecDestroy;
 	int has_graphs;
+	int has_peer;     // 1 = cuDeviceCanAccessPeer + cuMemcpyPeer resolved
+	CUdevice device;  // CUdevice handle of this context (for peer queries)
 	// fn_attn_flash: fused attn_flash kernel (set by Go after module load; NULL = unfused qk/softmax/v path)
 	CUfunction fn_attn_flash;
 } cuda_driver_t;
@@ -261,6 +272,42 @@ int gguf_cuda_upload_q6_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matr
 // gguf_cuda_matmul_vec_q6_k_device matmul Q6_K with weights already on GPU
 int gguf_cuda_matmul_vec_q6_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
+// gguf_cuda_upload_q4_1 uploads Q4_1 (expanded to GPU layout: fp32 d + fp32 m + 16 qs)
+int gguf_cuda_upload_q4_1(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_matmul_vec_q4_1_device matmul Q4_1 with weights already on GPU
+int gguf_cuda_matmul_vec_q4_1_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+
+// gguf_cuda_upload_q5_0 uploads Q5_0 (expanded to GPU layout: fp32 d + u32 qh + 16 qs)
+int gguf_cuda_upload_q5_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_matmul_vec_q5_0_device matmul Q5_0 with weights already on GPU
+int gguf_cuda_matmul_vec_q5_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+
+// gguf_cuda_upload_q5_1 uploads Q5_1 (expanded to GPU layout: fp32 d + fp32 m + u32 qh + 16 qs)
+int gguf_cuda_upload_q5_1(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_matmul_vec_q5_1_device matmul Q5_1 with weights already on GPU
+int gguf_cuda_matmul_vec_q5_1_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+
+// gguf_cuda_upload_q2_k uploads Q2_K (expanded to GPU layout: 16*f32 dl + 16*f32 ml + 64 qs)
+int gguf_cuda_upload_q2_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_matmul_vec_q2_k_device matmul Q2_K with weights already on GPU
+int gguf_cuda_matmul_vec_q2_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+
+// gguf_cuda_upload_q3_k uploads Q3_K (expanded to GPU layout: 16*f32 scales (d*(sc-32)) + 32 hmask + 64 qs)
+int gguf_cuda_upload_q3_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_matmul_vec_q3_k_device matmul Q3_K with weights already on GPU
+int gguf_cuda_matmul_vec_q3_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+
+// gguf_cuda_upload_q8_k uploads Q8_K (expanded to GPU layout: f32 d + 256 qs (bsums dropped))
+int gguf_cuda_upload_q8_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_matmul_vec_q8_k_device matmul Q8_K with weights already on GPU
+int gguf_cuda_matmul_vec_q8_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
+
 // gguf_cuda_matmul_mat_device: W * X[batch] via one HtoD + B device-offset vec launches + one DtoH (fn = matmul_vec_*).
 int gguf_cuda_matmul_mat_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch);
 
@@ -309,6 +356,16 @@ int gguf_cuda_logits_argmax(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, CU
 
 // gguf_cuda_hidden_download copies resident hidden state from d_resid to host
 int gguf_cuda_hidden_download(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, float *dst, int n);
+
+// gguf_cuda_peer_can_access: 1 if a and b are distinct devices that can address each other's memory (P2P), else 0
+int gguf_cuda_peer_can_access(cuda_driver_t *a, cuda_driver_t *b);
+
+// gguf_cuda_peer_enable enables peer access ctx -> peer_ctx (idempotent; ALREADY_ENABLED counts as success)
+int gguf_cuda_peer_enable(cuda_driver_t *drv, CUcontext ctx, CUcontext peer_ctx);
+
+// gguf_cuda_hidden_copy_peer copies resident hidden d_resid (n floats) src pool -> dst pool via cuMemcpyPeer (no host bounce).
+// On success dst pool holds the hidden state; the caller clears src residency. On failure src is untouched.
+int gguf_cuda_hidden_copy_peer(cuda_driver_t *src_drv, CUcontext src_ctx, gguf_matmul_pool_t *src_pool, cuda_driver_t *dst_drv, CUcontext dst_ctx, gguf_matmul_pool_t *dst_pool, int n);
 
 // gguf_cuda_logits_from_device: RMSNorm(d_resid) + lm_head matmul on GPU, DtoH only logits
 int gguf_cuda_logits_from_device(

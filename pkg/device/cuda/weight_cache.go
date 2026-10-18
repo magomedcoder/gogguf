@@ -18,7 +18,7 @@ import (
 
 // GPU weight cache: LRU bookkeeping + eviction
 //
-// Uploaded weight matrices (FP32 and Q8_0/Q4_0/Q4_K/Q5_K/Q6_K) live in per-kind maps keyed by tensor name.
+// Uploaded weight matrices (FP32 and quantized kinds) live in per-kind maps keyed by tensor name.
 // This file adds an LRU order over all of them so VRAM can be reclaimed:
 //
 //   - OOM retry: every weight upload goes through withEvict; on cuMemAlloc failure (code -1) the least recently used matrices are freed one by one and the upload retried.
@@ -67,6 +67,12 @@ const (
 	kindQ4K = "q4_k"
 	kindQ5K = "q5_k"
 	kindQ6K = "q6_k"
+	kindQ41 = "q4_1"
+	kindQ50 = "q5_0"
+	kindQ51 = "q5_1"
+	kindQ2K = "q2_k"
+	kindQ3K = "q3_k"
+	kindQ8K = "q8_k"
 )
 
 // quantKind maps a quant dtype to its weight cache kind
@@ -82,12 +88,24 @@ func quantKind(t dtype.DType) string {
 		return kindQ5K
 	case dtype.Q6_K:
 		return kindQ6K
+	case dtype.Q4_1:
+		return kindQ41
+	case dtype.Q5_0:
+		return kindQ50
+	case dtype.Q5_1:
+		return kindQ51
+	case dtype.Q2_K:
+		return kindQ2K
+	case dtype.Q3_K:
+		return kindQ3K
+	case dtype.Q8_K:
+		return kindQ8K
 	}
 
 	return ""
 }
 
-var allWeightKinds = []string{kindF32, kindQ8, kindQ4, kindQ4K, kindQ5K, kindQ6K}
+var allWeightKinds = []string{kindF32, kindQ8, kindQ4, kindQ4K, kindQ5K, kindQ6K, kindQ41, kindQ50, kindQ51, kindQ2K, kindQ3K, kindQ8K}
 
 // loadWeightCacheEnv applies optional env limits (called from OpenDevice)
 func (b *Backend) loadWeightCacheEnv() {
@@ -182,6 +200,18 @@ func (b *Backend) freeWeight(kind, name string) bool {
 			cache = b.matricesQ5K
 		case kindQ6K:
 			cache = b.matricesQ6K
+		case kindQ41:
+			cache = b.matricesQ41
+		case kindQ50:
+			cache = b.matricesQ50
+		case kindQ51:
+			cache = b.matricesQ51
+		case kindQ2K:
+			cache = b.matricesQ2K
+		case kindQ3K:
+			cache = b.matricesQ3K
+		case kindQ8K:
+			cache = b.matricesQ8K
 		}
 
 		if m, ok := cache[name]; ok {

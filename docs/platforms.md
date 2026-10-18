@@ -43,7 +43,7 @@ If the model does not fit in VRAM: smaller quant, lower `-ngl`, or a smaller mod
 CUDA_VISIBLE_DEVICES=1 ./build/gogguf run -m model.gguf -ngl 28 -p "Hi"
 ```
 
-Multi-GPU (`-dev 0,1`) is **partial**: layers are split, hidden crosses devices via host, no parallel compute across GPUs yet.
+Multi-GPU (`-dev 0,1`): layers are split; at device boundaries hidden moves with **P2P** (`cuMemcpyPeer`) when the topology allows, otherwise host bounce. Layers still run sequentially (no parallel pipeline yet). Disable P2P with `GOGGUF_CUDA_P2P=0`.
 
 `tools bench` with `-ngl` prints the device and VRAM (`VRAM: used / total MB`, or `vram_*_mb` with `--json`).
 
@@ -60,7 +60,7 @@ CPU-only Docker: [build.md](build.md).
 
 ### What runs on GPU (short)
 
-Best case: **Qwen3 dense**, `-ngl` = all layers, weights Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K - most of the transformer + logits on GPU.
+Best case: **Qwen3 dense**, `-ngl` = all layers, fused quants (Q8_0 / Q4_0/1 / Q5_0/1 / Q2_K...Q8_K) - most of the transformer + logits on GPU.
 
 Partially / weaker: MoE / DeepSeek2 MLA stay `n_batch=1`; F32 batch GEMM is still loop-B (quant GEMM is real).  
 Always CPU: tokenizer, sampling, HTTP.  
@@ -95,16 +95,19 @@ HF cache default: `~/.cache/huggingface/hub` (Unix) or `%LOCALAPPDATA%\huggingfa
 ## macOS
 
 - **CPU:** yes (`amd64` / `arm64`)  
-- **GPU (`-ngl`):** no - Metal is a stub (`-tags metal`); compute not implemented. `-ngl` is rejected.  
+- **GPU (`-ngl`):** scaffold only. Build with `-tags metal` wires `-ngl` to `OpenMetal`; while kernels are not ready, NGL>0 still errors with a clear message (CPU: `NGL=0`).  
 - **mmap:** yes (`mmap`)
 
 ```bash
 go build -o build/gogguf ./cmd/gogguf
 ./build/gogguf run -m model.gguf --chat -p "Hi"
 ./build/gogguf serve -m model.gguf --host 127.0.0.1:8000
+# later, when kernels land:
+# go build -tags metal -o build/gogguf ./cmd/gogguf
+# ./build/gogguf run -m model.gguf -ngl 999 --chat -p "Hi"
 ```
 
-Planned: Metal kernels so `-ngl` works on Apple Silicon / Intel Mac.
+Planned: Metal kernels so `-ngl` runs on Apple Silicon / Intel Mac.
 
 ## Windows
 
@@ -124,8 +127,8 @@ Ctrl+C stops `serve`. Planned: Windows CUDA.
 
 ## Planned (GPU roadmap)
 
-- macOS Metal, Windows CUDA  
-- Faster path (F32 GEMM/cuBLAS, flash-attn, full residency on all arches, batched MoE)  
-- Stronger multi-GPU  
+- macOS Metal kernels (wiring exists), Windows CUDA  
+- Parallel multi-GPU pipeline (P2P transfer already preferred)  
+- Batched MoE / remaining arch residency gaps  
 
 CLI flags: [cli.md](cli.md). Library: [library.md](library.md).

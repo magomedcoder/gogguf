@@ -5,6 +5,7 @@ package cuda
 import (
 	"encoding/binary"
 	"math"
+	"math/rand"
 	"testing"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
@@ -538,5 +539,217 @@ func TestRMSNormGPU(t *testing.T) {
 		if math.Abs(float64(dst[i]-want[i])) > 1e-4 {
 			t.Fatalf("element %d: got %v, expected %v", i, dst[i], want[i])
 		}
+	}
+}
+
+// fp16Small returns a deterministic finite fp16 bit pattern in roughly [0.01, 0.1].
+func fp16Small(rng *rand.Rand) uint16 {
+	// exponent 0x2C..0x2E (~0.0625..0.25 range scaled), random mantissa
+	return uint16(0x2800+rng.Intn(0x0400)) | uint16(rng.Intn(0x0100))
+}
+
+// fusedQuantCase describes one fused quant type for GPU vs CPU comparison
+type fusedQuantCase struct {
+	name      string
+	blockSize int // host bytes per block
+	blockVals int // values per block
+	has       func(*Backend) bool
+	fill      func(rng *rand.Rand, block []byte)
+	cpu       func(raw []byte, rows, cols int, vec []float32) ([]float32, error)
+	gpu       func(b *Backend, name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+	gpuInto   func(b *Backend, name string, raw []byte, rows, cols int, vec, dst []float32) error
+	gpuMat    func(b *Backend, name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+}
+
+func randBlock(rng *rand.Rand, block []byte, fp16Offsets ...int) {
+	rng.Read(block)
+	for _, off := range fp16Offsets {
+		binary.LittleEndian.PutUint16(block[off:off+2], fp16Small(rng))
+	}
+}
+
+func fusedQuantCases() []fusedQuantCase {
+	return []fusedQuantCase{
+		{
+			name: "Q4_1", blockSize: quant.BlockQ4_1Size, blockVals: quant.QK4_1,
+			has:  func(b *Backend) bool { return b.hasQ41 },
+			fill: func(rng *rand.Rand, blk []byte) { randBlock(rng, blk, 0, 2) },
+			cpu:  compute.MatMulVecQ4_1,
+			gpu: func(b *Backend, n string, raw []byte, r, c int, v []float32) ([]float32, error) {
+				return b.MatMulVecQ4_1Cached(n, raw, r, c, v)
+			},
+			gpuInto: func(b *Backend, n string, raw []byte, r, c int, v, d []float32) error {
+				return b.MatMulVecQ4_1CachedInto(n, raw, r, c, v, d)
+			},
+			gpuMat: func(b *Backend, n string, raw []byte, r, c int, x []float32, bt int, o []float32) error {
+				return b.MatMulMatQ4_1CachedInto(n, raw, r, c, x, bt, o)
+			},
+		},
+		{
+			name: "Q5_0", blockSize: quant.BlockQ5_0Size, blockVals: quant.QK5_0,
+			has:  func(b *Backend) bool { return b.hasQ50 },
+			fill: func(rng *rand.Rand, blk []byte) { randBlock(rng, blk, 0) },
+			cpu:  compute.MatMulVecQ5_0,
+			gpu: func(b *Backend, n string, raw []byte, r, c int, v []float32) ([]float32, error) {
+				return b.MatMulVecQ5_0Cached(n, raw, r, c, v)
+			},
+			gpuInto: func(b *Backend, n string, raw []byte, r, c int, v, d []float32) error {
+				return b.MatMulVecQ5_0CachedInto(n, raw, r, c, v, d)
+			},
+			gpuMat: func(b *Backend, n string, raw []byte, r, c int, x []float32, bt int, o []float32) error {
+				return b.MatMulMatQ5_0CachedInto(n, raw, r, c, x, bt, o)
+			},
+		},
+		{
+			name: "Q5_1", blockSize: quant.BlockQ5_1Size, blockVals: quant.QK5_1,
+			has:  func(b *Backend) bool { return b.hasQ51 },
+			fill: func(rng *rand.Rand, blk []byte) { randBlock(rng, blk, 0, 2) },
+			cpu:  compute.MatMulVecQ5_1,
+			gpu: func(b *Backend, n string, raw []byte, r, c int, v []float32) ([]float32, error) {
+				return b.MatMulVecQ5_1Cached(n, raw, r, c, v)
+			},
+			gpuInto: func(b *Backend, n string, raw []byte, r, c int, v, d []float32) error {
+				return b.MatMulVecQ5_1CachedInto(n, raw, r, c, v, d)
+			},
+			gpuMat: func(b *Backend, n string, raw []byte, r, c int, x []float32, bt int, o []float32) error {
+				return b.MatMulMatQ5_1CachedInto(n, raw, r, c, x, bt, o)
+			},
+		},
+		{
+			name: "Q2_K", blockSize: quant.BlockQ2_KSize, blockVals: quant.QK_K,
+			has:  func(b *Backend) bool { return b.hasQ2K },
+			fill: func(rng *rand.Rand, blk []byte) { randBlock(rng, blk, 80, 82) },
+			cpu:  compute.MatMulVecQ2_K,
+			gpu: func(b *Backend, n string, raw []byte, r, c int, v []float32) ([]float32, error) {
+				return b.MatMulVecQ2_KCached(n, raw, r, c, v)
+			},
+			gpuInto: func(b *Backend, n string, raw []byte, r, c int, v, d []float32) error {
+				return b.MatMulVecQ2_KCachedInto(n, raw, r, c, v, d)
+			},
+			gpuMat: func(b *Backend, n string, raw []byte, r, c int, x []float32, bt int, o []float32) error {
+				return b.MatMulMatQ2_KCachedInto(n, raw, r, c, x, bt, o)
+			},
+		},
+		{
+			name: "Q3_K", blockSize: quant.BlockQ3_KSize, blockVals: quant.QK_K,
+			has:  func(b *Backend) bool { return b.hasQ3K },
+			fill: func(rng *rand.Rand, blk []byte) { randBlock(rng, blk, 108) },
+			cpu:  compute.MatMulVecQ3_K,
+			gpu: func(b *Backend, n string, raw []byte, r, c int, v []float32) ([]float32, error) {
+				return b.MatMulVecQ3_KCached(n, raw, r, c, v)
+			},
+			gpuInto: func(b *Backend, n string, raw []byte, r, c int, v, d []float32) error {
+				return b.MatMulVecQ3_KCachedInto(n, raw, r, c, v, d)
+			},
+			gpuMat: func(b *Backend, n string, raw []byte, r, c int, x []float32, bt int, o []float32) error {
+				return b.MatMulMatQ3_KCachedInto(n, raw, r, c, x, bt, o)
+			},
+		},
+		{
+			name: "Q8_K", blockSize: quant.BlockQ8_KSize, blockVals: quant.QK_K,
+			has: func(b *Backend) bool { return b.hasQ8K },
+			fill: func(rng *rand.Rand, blk []byte) {
+				rng.Read(blk)
+				binary.LittleEndian.PutUint32(blk[0:4], math.Float32bits(0.01+rng.Float32()*0.05))
+			},
+			cpu: compute.MatMulVecQ8_K,
+			gpu: func(b *Backend, n string, raw []byte, r, c int, v []float32) ([]float32, error) {
+				return b.MatMulVecQ8_KCached(n, raw, r, c, v)
+			},
+			gpuInto: func(b *Backend, n string, raw []byte, r, c int, v, d []float32) error {
+				return b.MatMulVecQ8_KCachedInto(n, raw, r, c, v, d)
+			},
+			gpuMat: func(b *Backend, n string, raw []byte, r, c int, x []float32, bt int, o []float32) error {
+				return b.MatMulMatQ8_KCachedInto(n, raw, r, c, x, bt, o)
+			},
+		},
+	}
+}
+
+func TestMatMulVecFusedQuantsGPU(t *testing.T) {
+	b, err := Open()
+	if err != nil {
+		t.Skip("CUDA unavailable:", err)
+	}
+	defer b.Close()
+
+	for _, tc := range fusedQuantCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.has(b) {
+				t.Skipf("CUDA %s kernel unavailable", tc.name)
+			}
+
+			rng := rand.New(rand.NewSource(42))
+			rows, cols := 5, tc.blockVals*3
+			if tc.blockVals == quant.QK_K {
+				cols = quant.QK_K * 2
+			}
+
+			bpr := cols / tc.blockVals
+			raw := make([]byte, rows*bpr*tc.blockSize)
+			for i := 0; i < rows*bpr; i++ {
+				tc.fill(rng, raw[i*tc.blockSize:(i+1)*tc.blockSize])
+			}
+
+			vec := make([]float32, cols)
+			for i := range vec {
+				vec[i] = rng.Float32()*2 - 1
+			}
+
+			want, err := tc.cpu(raw, rows, cols, vec)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			tol := func(w float32) float64 { return 1e-3 + 1e-4*math.Abs(float64(w)) }
+
+			got, err := tc.gpu(b, "fq-"+tc.name, raw, rows, cols, vec)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for i := range want {
+				if math.Abs(float64(got[i]-want[i])) > tol(want[i]) {
+					t.Fatalf("row %d: got %v, expected %v", i, got[i], want[i])
+				}
+			}
+
+			// cached replay (graph path) through the Into variant
+			dst := make([]float32, rows)
+			if err := tc.gpuInto(b, "fq-"+tc.name, raw, rows, cols, vec, dst); err != nil {
+				t.Fatal(err)
+			}
+
+			for i := range want {
+				if math.Abs(float64(dst[i]-want[i])) > tol(want[i]) {
+					t.Fatalf("replay row %d: got %v, expected %v", i, dst[i], want[i])
+				}
+			}
+
+			// batched path
+			batch := 3
+			x := make([]float32, batch*cols)
+			for i := range x {
+				x[i] = rng.Float32()*2 - 1
+			}
+
+			out := make([]float32, batch*rows)
+			if err := tc.gpuMat(b, "fq-"+tc.name, raw, rows, cols, x, batch, out); err != nil {
+				t.Fatal(err)
+			}
+
+			for bi := range batch {
+				w, err := tc.cpu(raw, rows, cols, x[bi*cols:(bi+1)*cols])
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				for i := range w {
+					if math.Abs(float64(out[bi*rows+i]-w[i])) > tol(w[i]) {
+						t.Fatalf("batch %d row %d: got %v, expected %v", bi, i, out[bi*rows+i], w[i])
+					}
+				}
+			}
+		})
 	}
 }

@@ -49,6 +49,30 @@ func (CPUBackend) MatMulVecQ6_KCached(_ string, raw []byte, rows, cols int, vec 
 	return compute.MatMulVecQ6_K(raw, rows, cols, vec)
 }
 
+func (CPUBackend) MatMulVecQ4_1Cached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return compute.MatMulVecQ4_1(raw, rows, cols, vec)
+}
+
+func (CPUBackend) MatMulVecQ5_0Cached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return compute.MatMulVecQ5_0(raw, rows, cols, vec)
+}
+
+func (CPUBackend) MatMulVecQ5_1Cached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return compute.MatMulVecQ5_1(raw, rows, cols, vec)
+}
+
+func (CPUBackend) MatMulVecQ2_KCached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return compute.MatMulVecQ2_K(raw, rows, cols, vec)
+}
+
+func (CPUBackend) MatMulVecQ3_KCached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return compute.MatMulVecQ3_K(raw, rows, cols, vec)
+}
+
+func (CPUBackend) MatMulVecQ8_KCached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return compute.MatMulVecQ8_K(raw, rows, cols, vec)
+}
+
 func (CPUBackend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 	return compute.RMSNormInto(dst, x, weight, eps)
 }
@@ -235,6 +259,18 @@ func matMulQuantInto(t dtype.DType, raw []byte, rows, cols int, vec, out []float
 		return compute.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
 	case dtype.Q6_K:
 		return compute.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
+	case dtype.Q4_1:
+		return compute.MatMulVecQ4_1Into(raw, rows, cols, vec, out)
+	case dtype.Q5_0:
+		return compute.MatMulVecQ5_0Into(raw, rows, cols, vec, out)
+	case dtype.Q5_1:
+		return compute.MatMulVecQ5_1Into(raw, rows, cols, vec, out)
+	case dtype.Q2_K:
+		return compute.MatMulVecQ2_KInto(raw, rows, cols, vec, out)
+	case dtype.Q3_K:
+		return compute.MatMulVecQ3_KInto(raw, rows, cols, vec, out)
+	case dtype.Q8_K:
+		return compute.MatMulVecQ8_KInto(raw, rows, cols, vec, out)
 	default:
 		return fmt.Errorf("device: type %s not supported on fused path", t)
 	}

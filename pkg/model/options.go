@@ -1,7 +1,6 @@
 package model
 
 import (
-	"fmt"
 	"runtime"
 
 	"github.com/magomedcoder/gogguf/pkg/device"
@@ -67,8 +66,16 @@ func (o *Options) Normalize() error {
 		return nil
 	}
 
+	// macOS has no CUDA: offload goes through Metal. Without -tags metal (or while Metal kernels are scaffold) openMetalGPU rejects NGL>0.
 	if runtime.GOOS == "darwin" {
-		return fmt.Errorf("model: GPU offload (NGL>0) on macOS requires Metal kernels (not implemented); use NGL=0 for CPU")
+		g, err := openMetalGPU()
+		if err != nil {
+			return err
+		}
+
+		o.GPU = g
+
+		return nil
 	}
 
 	g, err := device.OpenCUDADevicesSplit(o.Devices(), o.TensorSplit)

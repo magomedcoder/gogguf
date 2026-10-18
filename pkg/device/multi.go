@@ -12,13 +12,18 @@ import (
 )
 
 // MultiBackend distributes transformer layers across multiple devices: layers 0..n1-1 on first GPU, n1..n2-1 on second, etc.
-// At device boundaries hidden state moves via host (HiddenDownload + HiddenUpload); within one device's range residual stays resident.
+// At device boundaries the resident hidden state moves device-to-device when the pair supports P2P (CUDA cuMemcpyPeer, see PeerHiddenFunc); otherwise via host (HiddenDownload + HiddenUpload). Within one device's range residual stays resident.
 //
 // Limitation: each device's weights and KV are cached independently, so total VRAM is sum per device, not shared.
-// Layers run sequentially (pipeline parallelism without parallel execution).
+// Layers run sequentially: a boundary peer copy replaces the host bounce but does not overlap with compute on the other device (a token's layers form a strict dependency chain; real overlap would need micro-batch pipelining across tokens/sequences).
 type MultiBackend struct {
 	devs  []Backend
 	split []float64
+
+	peer       PeerHiddenFunc  // nil = host bounce only
+	peerBroken map[[2]int]bool // pairs whose peer copy failed once: host bounce from then on
+	peerCopies int             // boundary moves done over P2P
+	hostCopies int             // boundary moves done via host
 
 	mu        sync.Mutex
 	bounds    []int // bounds[i] - first layer of device i, len = len(devs)+1
@@ -29,6 +34,30 @@ type MultiBackend struct {
 }
 
 var _ Backend = (*MultiBackend)(nil)
+
+// PeerHiddenFunc copies the resident hidden state (n floats) from src to dst without touching host memory.
+// Returns nil when src's residency moved to dst (src residency cleared, dst active). Any error means "not moved": src still holds the hidden state and MultiBackend falls back to HiddenDownload + HiddenUpload.
+type PeerHiddenFunc func(src, dst Backend, n int) error
+
+// defaultPeerHidden is set by build-tagged files (cuda_open.go) when a peer-capable backend exists
+var defaultPeerHidden PeerHiddenFunc
+
+// SetPeerHidden overrides the device-to-device hidden mover (nil disables P2P: host bounce only)
+func (m *MultiBackend) SetPeerHidden(f PeerHiddenFunc) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.peer = f
+	m.peerBroken = nil
+}
+
+// TransferStats reports how many hidden-state moves between devices used P2P vs the host bounce
+func (m *MultiBackend) TransferStats() (peer, host int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.peerCopies, m.hostCopies
+}
 
 // NewMultiBackend combines devices into one Backend with layer split.
 // split sets layer proportions per device (like -tensor-split); nil = even
@@ -47,7 +76,7 @@ func NewMultiBackend(devs []Backend, split []float64) (*MultiBackend, error) {
 		return nil, fmt.Errorf("device: multi: tensor-split has %d values for %d devices", len(split), len(devs))
 	}
 
-	return &MultiBackend{devs: devs, split: split}, nil
+	return &MultiBackend{devs: devs, split: split, peer: defaultPeerHidden}, nil
 }
 
 // LayerSplitBounds splits layers across n devices.
@@ -207,10 +236,18 @@ func (m *MultiBackend) route(layer int) (Backend, int, error) {
 	return m.devs[idx], m.localLayer(idx, layer), nil
 }
 
-// moveHiddenLocked transfers resident hidden state from current device to dst
+// moveHiddenLocked transfers resident hidden state from current device to dst.
+// Prefers a device-to-device copy (P2P); falls back to the host bounce when peers are unsupported or the copy fails.
 func (m *MultiBackend) moveHiddenLocked(dst int) error {
 	src := m.devs[m.cur]
 	if m.hiddenLen > 0 && src.HiddenActive() {
+		if m.tryPeerLocked(m.cur, dst) {
+			m.peerCopies++
+			m.cur = dst
+
+			return nil
+		}
+
 		if cap(m.hidden) < m.hiddenLen {
 			m.hidden = make([]float32, m.hiddenLen)
 		}
@@ -223,11 +260,34 @@ func (m *MultiBackend) moveHiddenLocked(dst int) error {
 		if err := m.devs[dst].HiddenUpload(buf); err != nil {
 			return fmt.Errorf("device: multi: hidden host -> %s: %w", m.devs[dst].Name(), err)
 		}
+
+		m.hostCopies++
 	}
 
 	m.cur = dst
 
 	return nil
+}
+
+// tryPeerLocked attempts the P2P hidden move src -> dst; false = caller must use the host path (src residency untouched)
+func (m *MultiBackend) tryPeerLocked(src, dst int) bool {
+	if m.peer == nil || m.peerBroken[[2]int{src, dst}] {
+		return false
+	}
+
+	if err := m.peer(m.devs[src], m.devs[dst], m.hiddenLen); err != nil {
+		if m.peerBroken == nil {
+			m.peerBroken = make(map[[2]int]bool)
+		}
+
+		// Remember both directions: topology/driver limits are symmetric, don't retry (and re-probe) every token
+		m.peerBroken[[2]int{src, dst}] = true
+		m.peerBroken[[2]int{dst, src}] = true
+
+		return false
+	}
+
+	return true
 }
 
 // current returns the device holding the current hidden state
@@ -264,6 +324,30 @@ func (m *MultiBackend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols i
 
 func (m *MultiBackend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	return m.current().MatMulVecQ6_KCached(name, raw, rows, cols, vec)
+}
+
+func (m *MultiBackend) MatMulVecQ4_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return m.current().MatMulVecQ4_1Cached(name, raw, rows, cols, vec)
+}
+
+func (m *MultiBackend) MatMulVecQ5_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return m.current().MatMulVecQ5_0Cached(name, raw, rows, cols, vec)
+}
+
+func (m *MultiBackend) MatMulVecQ5_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return m.current().MatMulVecQ5_1Cached(name, raw, rows, cols, vec)
+}
+
+func (m *MultiBackend) MatMulVecQ2_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return m.current().MatMulVecQ2_KCached(name, raw, rows, cols, vec)
+}
+
+func (m *MultiBackend) MatMulVecQ3_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return m.current().MatMulVecQ3_KCached(name, raw, rows, cols, vec)
+}
+
+func (m *MultiBackend) MatMulVecQ8_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return m.current().MatMulVecQ8_KCached(name, raw, rows, cols, vec)
 }
 
 func (m *MultiBackend) RMSNormInto(dst, x, weight []float32, eps float32) error {

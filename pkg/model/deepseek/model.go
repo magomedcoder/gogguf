@@ -561,6 +561,15 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		return m.dev.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
 	}
 
+	if device.FusedQuantSupported(info.Type) {
+		raw, err := m.weights.Raw(name)
+		if err != nil {
+			return nil, err
+		}
+
+		return device.MatMulVecQuantCached(m.dev, info.Type, name, raw, rows, cols, vec)
+	}
+
 	f32, err := m.weights.Floats(name)
 	if err != nil {
 		return nil, err

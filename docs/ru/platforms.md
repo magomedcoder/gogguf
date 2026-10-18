@@ -43,7 +43,7 @@ Residency: по умолчанию вкл.; выкл. только через `L
 CUDA_VISIBLE_DEVICES=1 ./build/gogguf run -m model.gguf -ngl 28 -p "Hi"
 ```
 
-Multi-GPU (`-dev 0,1`) - **частично**: слои делятся, hidden между GPU через host, параллельного compute между картами пока нет.
+Multi-GPU (`-dev 0,1`): слои делятся; на границах устройств hidden идёт через **P2P** (`cuMemcpyPeer`), иначе host bounce. Слои по-прежнему последовательно. Отключить P2P: `GOGGUF_CUDA_P2P=0`.
 
 `tools bench` с `-ngl` пишет устройство и VRAM (`VRAM: used / total MB`, или `vram_*_mb` при `--json`).
 
@@ -60,7 +60,7 @@ Docker только CPU: [build.md](build.md).
 
 ### Что считается на GPU (кратко)
 
-Лучший случай: **Qwen3 dense**, `-ngl` = все слои, веса Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K - почти весь transformer + logits на GPU.
+Лучший случай: **Qwen3 dense**, `-ngl` = все слои, fused-кванты (Q8_0 / Q4_0/1 / Q5_0/1 / Q2_K...Q8_K) - почти весь transformer + logits на GPU.
 
 Слабее / частично: MoE / DeepSeek2 MLA остаются `n_batch=1`; F32 batch GEMM ещё loop-B (quant GEMM есть).  
 Всегда CPU: tokenizer, sampling, HTTP.  
@@ -95,7 +95,7 @@ HF cache: `~/.cache/huggingface/hub` (Unix) или `%LOCALAPPDATA%\huggingface\h
 ## macOS
 
 - **CPU:** да (`amd64` / `arm64`)  
-- **GPU (`-ngl`):** нет - Metal только заглушка (`-tags metal`); compute не реализован. `-ngl` отклоняется.  
+- **GPU (`-ngl`):** scaffold. Сборка `-tags metal` подключает `-ngl` к `OpenMetal`; пока kernels не готовы, NGL>0 даёт понятную ошибку (CPU: `NGL=0`).  
 - **mmap:** да (`mmap`)
 
 ```bash
@@ -124,8 +124,8 @@ Ctrl+C останавливает `serve`. В планах: CUDA на Windows.
 
 ## Планируется (GPU)
 
-- Metal (macOS), CUDA (Windows)  
-- Более быстрый путь (true batched GEMM, flash-attn, residency на всех arch)  
-- Более сильный multi-GPU  
+- Metal kernels (wiring `-tags metal` есть), CUDA (Windows)  
+- Параллельный multi-GPU pipeline (P2P уже предпочтителен)  
+- Batched MoE / оставшиеся gaps residency  
 
 Флаги CLI: [cli.md](cli.md). Библиотека: [library.md](library.md).

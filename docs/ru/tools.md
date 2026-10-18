@@ -45,6 +45,10 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 
 `--compare` печатает prefill/decode tok/s. Устройство / VRAM: [platforms.md](platforms.md).
 
+### vs `llama-bench`
+
+Тот же GGUF, те же `-ngl` / длина промпта / decode `-n`, совпадающий prefill batch (`-b`). Соответствие метрик: prefill -> `pp`, decode -> `tg`. См. английский [tools.md](../tools.md).
+
 ## `greedy`
 
 Greedy decode N токенов в JSON (token IDs) для сверки с golden.

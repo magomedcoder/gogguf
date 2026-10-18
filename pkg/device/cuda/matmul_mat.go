@@ -240,3 +240,63 @@ func (b *Backend) MatMulMatQ6_KCachedInto(name string, raw []byte, rows, cols in
 		return C.gguf_cuda_upload_q6_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	})
 }
+
+func (b *Backend) MatMulMatQ4_1CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	if err := validateQ41MatMul(raw, rows, cols, x[:cols]); err != nil {
+		return err
+	}
+
+	return b.matMulMatQuantCachedInto(name, raw, rows, cols, batch, x, out, b.hasQ41, "q4_1", b.matricesQ41, b.fnQ41, func(ptr *C.CUdeviceptr) C.int {
+		return C.gguf_cuda_upload_q4_1(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	})
+}
+
+func (b *Backend) MatMulMatQ5_0CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	if err := validateQ50MatMul(raw, rows, cols, x[:cols]); err != nil {
+		return err
+	}
+
+	return b.matMulMatQuantCachedInto(name, raw, rows, cols, batch, x, out, b.hasQ50, "q5_0", b.matricesQ50, b.fnQ50, func(ptr *C.CUdeviceptr) C.int {
+		return C.gguf_cuda_upload_q5_0(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	})
+}
+
+func (b *Backend) MatMulMatQ5_1CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	if err := validateQ51MatMul(raw, rows, cols, x[:cols]); err != nil {
+		return err
+	}
+
+	return b.matMulMatQuantCachedInto(name, raw, rows, cols, batch, x, out, b.hasQ51, "q5_1", b.matricesQ51, b.fnQ51, func(ptr *C.CUdeviceptr) C.int {
+		return C.gguf_cuda_upload_q5_1(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	})
+}
+
+func (b *Backend) MatMulMatQ2_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	if err := validateQ2KMatMul(raw, rows, cols, x[:cols]); err != nil {
+		return err
+	}
+
+	return b.matMulMatQuantCachedInto(name, raw, rows, cols, batch, x, out, b.hasQ2K, "q2_k", b.matricesQ2K, b.fnQ2K, func(ptr *C.CUdeviceptr) C.int {
+		return C.gguf_cuda_upload_q2_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	})
+}
+
+func (b *Backend) MatMulMatQ3_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	if err := validateQ3KMatMul(raw, rows, cols, x[:cols]); err != nil {
+		return err
+	}
+
+	return b.matMulMatQuantCachedInto(name, raw, rows, cols, batch, x, out, b.hasQ3K, "q3_k", b.matricesQ3K, b.fnQ3K, func(ptr *C.CUdeviceptr) C.int {
+		return C.gguf_cuda_upload_q3_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	})
+}
+
+func (b *Backend) MatMulMatQ8_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	if err := validateQ8KMatMul(raw, rows, cols, x[:cols]); err != nil {
+		return err
+	}
+
+	return b.matMulMatQuantCachedInto(name, raw, rows, cols, batch, x, out, b.hasQ8K, "q8_k", b.matricesQ8K, b.fnQ8K, func(ptr *C.CUdeviceptr) C.int {
+		return C.gguf_cuda_upload_q8_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	})
+}

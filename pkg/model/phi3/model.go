@@ -429,6 +429,8 @@ func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32
 		return m.dev.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
 	case dtype.Q6_K:
 		return m.dev.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
+	case dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q8_K:
+		return device.MatMulVecQuantCached(m.dev, info.Type, name, raw, rows, cols, vec)
 	default:
 		f32, err := m.weights.Floats(name)
 		if err != nil {

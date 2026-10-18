@@ -17,7 +17,7 @@ func runServe(args []string) error {
 	fs.StringVar(&hfRepo, "hf", "", "Hugging Face repo[:quant], e.g. Qwen/Qwen3-4B-GGUF:Q8_0")
 	fs.StringVar(&hfRepo, "hf-repo", "", "alias for -hf")
 	host := fs.String("host", "127.0.0.1:8000", "HTTP server address")
-	ngl := fs.Int("ngl", 0, "GPU layers (CUDA, -tags cuda); on macOS unsupported until Metal kernels (see docs/platforms.md)")
+	ngl := fs.Int("ngl", 0, nglUsage)
 	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense batch/GEMM; MoE/MLA/SWA serial")
 	fs.IntVar(nBatch, "n-batch", 32, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")

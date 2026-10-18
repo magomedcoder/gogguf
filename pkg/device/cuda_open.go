@@ -16,6 +16,25 @@ var (
 	_ KVBatchAttentionBackend = (*MultiBackend)(nil)
 )
 
+func init() {
+	defaultPeerHidden = cudaPeerHidden
+}
+
+// cudaPeerHidden moves resident hidden between two CUDA devices over P2P (cuMemcpyPeer); error = not moved (host fallback)
+func cudaPeerHidden(src, dst Backend, n int) error {
+	s, ok := src.(*cuda.Backend)
+	if !ok {
+		return fmt.Errorf("device: peer: %T is not a CUDA backend", src)
+	}
+
+	d, ok := dst.(*cuda.Backend)
+	if !ok {
+		return fmt.Errorf("device: peer: %T is not a CUDA backend", dst)
+	}
+
+	return s.PeerCopyResidTo(d, n)
+}
+
 // OpenCUDA initializes CUDA via Driver API (libcuda) on device 0
 func OpenCUDA() (Backend, error) {
 	return cuda.Open()

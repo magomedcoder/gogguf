@@ -60,6 +60,12 @@ type Backend struct {
 	fnQ4K           C.CUfunction
 	fnQ5K           C.CUfunction
 	fnQ6K           C.CUfunction
+	fnQ41           C.CUfunction
+	fnQ50           C.CUfunction
+	fnQ51           C.CUfunction
+	fnQ2K           C.CUfunction
+	fnQ3K           C.CUfunction
+	fnQ8K           C.CUfunction
 	hasMatQ8        bool
 	fnRMS           C.CUfunction
 	fnRoPE          C.CUfunction
@@ -89,6 +95,12 @@ type Backend struct {
 	hasQ4K          bool
 	hasQ5K          bool
 	hasQ6K          bool
+	hasQ41          bool
+	hasQ50          bool
+	hasQ51          bool
+	hasQ2K          bool
+	hasQ3K          bool
+	hasQ8K          bool
 	hasEmbedGather  bool
 	hasLogitsArgmax bool
 
@@ -99,6 +111,12 @@ type Backend struct {
 	matricesQ4K map[string]gpuQ8Matrix
 	matricesQ5K map[string]gpuQ8Matrix
 	matricesQ6K map[string]gpuQ8Matrix
+	matricesQ41 map[string]gpuQ8Matrix
+	matricesQ50 map[string]gpuQ8Matrix
+	matricesQ51 map[string]gpuQ8Matrix
+	matricesQ2K map[string]gpuQ8Matrix
+	matricesQ3K map[string]gpuQ8Matrix
+	matricesQ8K map[string]gpuQ8Matrix
 	kvCache     C.gguf_kv_cache_t
 	kvReady     bool
 	mlaCache    C.gguf_mla_cache_t
@@ -111,6 +129,9 @@ type Backend struct {
 
 	// hiddenResident: hidden state lives in matmulPool.d_resid between layers
 	hiddenResident bool
+
+	// peers caches P2P probe results per other device (see peer.go); guarded by mu
+	peers map[*Backend]bool
 }
 
 // Open initializes first visible device (GPU 0) and loads kernels
@@ -133,6 +154,12 @@ func OpenDevice(device int) (*Backend, error) {
 		matricesQ4K: make(map[string]gpuQ8Matrix),
 		matricesQ5K: make(map[string]gpuQ8Matrix),
 		matricesQ6K: make(map[string]gpuQ8Matrix),
+		matricesQ41: make(map[string]gpuQ8Matrix),
+		matricesQ50: make(map[string]gpuQ8Matrix),
+		matricesQ51: make(map[string]gpuQ8Matrix),
+		matricesQ2K: make(map[string]gpuQ8Matrix),
+		matricesQ3K: make(map[string]gpuQ8Matrix),
+		matricesQ8K: make(map[string]gpuQ8Matrix),
 	}
 
 	b.loadWeightCacheEnv()
@@ -210,6 +237,42 @@ func (b *Backend) loadMatmulModule(gpuCC int, errBuf *[4096]C.char) error {
 				b.hasQ6K = true
 			}
 			C.free(unsafe.Pointer(cQ6K))
+
+			cQ41 := C.CString("matmul_vec_q4_1")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cQ41, &b.fnQ41) == 0 {
+				b.hasQ41 = true
+			}
+			C.free(unsafe.Pointer(cQ41))
+
+			cQ50 := C.CString("matmul_vec_q5_0")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cQ50, &b.fnQ50) == 0 {
+				b.hasQ50 = true
+			}
+			C.free(unsafe.Pointer(cQ50))
+
+			cQ51 := C.CString("matmul_vec_q5_1")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cQ51, &b.fnQ51) == 0 {
+				b.hasQ51 = true
+			}
+			C.free(unsafe.Pointer(cQ51))
+
+			cQ2K := C.CString("matmul_vec_q2_k")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cQ2K, &b.fnQ2K) == 0 {
+				b.hasQ2K = true
+			}
+			C.free(unsafe.Pointer(cQ2K))
+
+			cQ3K := C.CString("matmul_vec_q3_k")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cQ3K, &b.fnQ3K) == 0 {
+				b.hasQ3K = true
+			}
+			C.free(unsafe.Pointer(cQ3K))
+
+			cQ8K := C.CString("matmul_vec_q8_k")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cQ8K, &b.fnQ8K) == 0 {
+				b.hasQ8K = true
+			}
+			C.free(unsafe.Pointer(cQ8K))
 
 			return nil
 		}
@@ -363,7 +426,41 @@ func (b *Backend) Close() error {
 	}
 	b.matricesQ6K = nil
 
+	for _, m := range b.matricesQ41 {
+		C.gguf_cuda_free(&b.drv, m.ptr)
+	}
+	b.matricesQ41 = nil
+
+	for _, m := range b.matricesQ50 {
+		C.gguf_cuda_free(&b.drv, m.ptr)
+	}
+	b.matricesQ50 = nil
+
+	for _, m := range b.matricesQ51 {
+		C.gguf_cuda_free(&b.drv, m.ptr)
+	}
+	b.matricesQ51 = nil
+
+	for _, m := range b.matricesQ2K {
+		C.gguf_cuda_free(&b.drv, m.ptr)
+	}
+	b.matricesQ2K = nil
+
+	for _, m := range b.matricesQ3K {
+		C.gguf_cuda_free(&b.drv, m.ptr)
+	}
+	b.matricesQ3K = nil
+
+	for _, m := range b.matricesQ8K {
+		C.gguf_cuda_free(&b.drv, m.ptr)
+	}
+	b.matricesQ8K = nil
+
 	C.gguf_cuda_shutdown(&b.drv, b.ctx)
+	b.ctx = nil
+	b.hiddenResident = false
+	b.peers = nil
+
 	return nil
 }
 
@@ -847,6 +944,474 @@ func (b *Backend) MatMulVecQ6_KCachedInto(name string, raw []byte, rows, cols in
 	return nil
 }
 
+func (b *Backend) MatMulVecQ4_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ4_1CachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+func (b *Backend) MatMulVecQ4_1CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	if !b.hasQ41 {
+		return fmt.Errorf("cuda: q4_1 matmul kernel unavailable")
+	}
+
+	if err := validateQ41MatMul(raw, rows, cols, vec); err != nil {
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ4_1CachedInto dst too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gm, ok := b.matricesQ41[name]
+	if ok {
+		b.touchWeight(kindQ41, name)
+	}
+
+	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
+		if ok {
+			b.freeWeight(kindQ41, name)
+		}
+
+		var ptr C.CUdeviceptr
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q4_1(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
+		if rc != 0 {
+			return uploadFail("q4_1", name, rc)
+		}
+
+		gm = gpuQ8Matrix{
+			ptr:   ptr,
+			rows:  rows,
+			cols:  cols,
+			bytes: len(raw),
+		}
+		b.matricesQ41[name] = gm
+		b.trackWeight(kindQ41, name, gm.bytes)
+	}
+
+	b.prepareVecUpload(vec)
+	rc := C.gguf_cuda_matmul_vec_q4_1_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ41,
+		&b.matmulPool,
+		gm.ptr,
+		(*C.float)(unsafe.Pointer(&vec[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(rows),
+		C.int(cols),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: matmul_vec_q4_1 %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) MatMulVecQ5_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ5_0CachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+func (b *Backend) MatMulVecQ5_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	if !b.hasQ50 {
+		return fmt.Errorf("cuda: q5_0 matmul kernel unavailable")
+	}
+
+	if err := validateQ50MatMul(raw, rows, cols, vec); err != nil {
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ5_0CachedInto dst too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gm, ok := b.matricesQ50[name]
+	if ok {
+		b.touchWeight(kindQ50, name)
+	}
+
+	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
+		if ok {
+			b.freeWeight(kindQ50, name)
+		}
+
+		var ptr C.CUdeviceptr
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q5_0(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
+		if rc != 0 {
+			return uploadFail("q5_0", name, rc)
+		}
+
+		gm = gpuQ8Matrix{
+			ptr:   ptr,
+			rows:  rows,
+			cols:  cols,
+			bytes: len(raw),
+		}
+		b.matricesQ50[name] = gm
+		b.trackWeight(kindQ50, name, gm.bytes)
+	}
+
+	b.prepareVecUpload(vec)
+	rc := C.gguf_cuda_matmul_vec_q5_0_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ50,
+		&b.matmulPool,
+		gm.ptr,
+		(*C.float)(unsafe.Pointer(&vec[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(rows),
+		C.int(cols),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: matmul_vec_q5_0 %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) MatMulVecQ5_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ5_1CachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+func (b *Backend) MatMulVecQ5_1CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	if !b.hasQ51 {
+		return fmt.Errorf("cuda: q5_1 matmul kernel unavailable")
+	}
+
+	if err := validateQ51MatMul(raw, rows, cols, vec); err != nil {
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ5_1CachedInto dst too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gm, ok := b.matricesQ51[name]
+	if ok {
+		b.touchWeight(kindQ51, name)
+	}
+
+	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
+		if ok {
+			b.freeWeight(kindQ51, name)
+		}
+
+		var ptr C.CUdeviceptr
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q5_1(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
+		if rc != 0 {
+			return uploadFail("q5_1", name, rc)
+		}
+
+		gm = gpuQ8Matrix{
+			ptr:   ptr,
+			rows:  rows,
+			cols:  cols,
+			bytes: len(raw),
+		}
+		b.matricesQ51[name] = gm
+		b.trackWeight(kindQ51, name, gm.bytes)
+	}
+
+	b.prepareVecUpload(vec)
+	rc := C.gguf_cuda_matmul_vec_q5_1_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ51,
+		&b.matmulPool,
+		gm.ptr,
+		(*C.float)(unsafe.Pointer(&vec[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(rows),
+		C.int(cols),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: matmul_vec_q5_1 %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) MatMulVecQ2_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ2_KCachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+func (b *Backend) MatMulVecQ2_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	if !b.hasQ2K {
+		return fmt.Errorf("cuda: q2_k matmul kernel unavailable")
+	}
+
+	if err := validateQ2KMatMul(raw, rows, cols, vec); err != nil {
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ2_KCachedInto dst too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gm, ok := b.matricesQ2K[name]
+	if ok {
+		b.touchWeight(kindQ2K, name)
+	}
+
+	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
+		if ok {
+			b.freeWeight(kindQ2K, name)
+		}
+
+		var ptr C.CUdeviceptr
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q2_k(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
+		if rc != 0 {
+			return uploadFail("q2_k", name, rc)
+		}
+
+		gm = gpuQ8Matrix{
+			ptr:   ptr,
+			rows:  rows,
+			cols:  cols,
+			bytes: len(raw),
+		}
+		b.matricesQ2K[name] = gm
+		b.trackWeight(kindQ2K, name, gm.bytes)
+	}
+
+	b.prepareVecUpload(vec)
+	rc := C.gguf_cuda_matmul_vec_q2_k_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ2K,
+		&b.matmulPool,
+		gm.ptr,
+		(*C.float)(unsafe.Pointer(&vec[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(rows),
+		C.int(cols),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: matmul_vec_q2_k %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) MatMulVecQ3_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ3_KCachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+func (b *Backend) MatMulVecQ3_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	if !b.hasQ3K {
+		return fmt.Errorf("cuda: q3_k matmul kernel unavailable")
+	}
+
+	if err := validateQ3KMatMul(raw, rows, cols, vec); err != nil {
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ3_KCachedInto dst too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gm, ok := b.matricesQ3K[name]
+	if ok {
+		b.touchWeight(kindQ3K, name)
+	}
+
+	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
+		if ok {
+			b.freeWeight(kindQ3K, name)
+		}
+
+		var ptr C.CUdeviceptr
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q3_k(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
+		if rc != 0 {
+			return uploadFail("q3_k", name, rc)
+		}
+
+		gm = gpuQ8Matrix{
+			ptr:   ptr,
+			rows:  rows,
+			cols:  cols,
+			bytes: len(raw),
+		}
+		b.matricesQ3K[name] = gm
+		b.trackWeight(kindQ3K, name, gm.bytes)
+	}
+
+	b.prepareVecUpload(vec)
+	rc := C.gguf_cuda_matmul_vec_q3_k_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ3K,
+		&b.matmulPool,
+		gm.ptr,
+		(*C.float)(unsafe.Pointer(&vec[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(rows),
+		C.int(cols),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: matmul_vec_q3_k %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+func (b *Backend) MatMulVecQ8_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ8_KCachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+func (b *Backend) MatMulVecQ8_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	if !b.hasQ8K {
+		return fmt.Errorf("cuda: q8_k matmul kernel unavailable")
+	}
+
+	if err := validateQ8KMatMul(raw, rows, cols, vec); err != nil {
+		return err
+	}
+
+	if len(dst) < rows {
+		return fmt.Errorf("cuda: MatMulVecQ8_KCachedInto dst too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gm, ok := b.matricesQ8K[name]
+	if ok {
+		b.touchWeight(kindQ8K, name)
+	}
+
+	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
+		if ok {
+			b.freeWeight(kindQ8K, name)
+		}
+
+		var ptr C.CUdeviceptr
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q8_k(
+				&b.drv,
+				b.ctx,
+				&ptr,
+				unsafe.Pointer(&raw[0]),
+				C.size_t(len(raw)),
+			)
+		})
+		if rc != 0 {
+			return uploadFail("q8_k", name, rc)
+		}
+
+		gm = gpuQ8Matrix{
+			ptr:   ptr,
+			rows:  rows,
+			cols:  cols,
+			bytes: len(raw),
+		}
+		b.matricesQ8K[name] = gm
+		b.trackWeight(kindQ8K, name, gm.bytes)
+	}
+
+	b.prepareVecUpload(vec)
+	rc := C.gguf_cuda_matmul_vec_q8_k_device(
+		&b.drv,
+		b.ctx,
+		b.fnQ8K,
+		&b.matmulPool,
+		gm.ptr,
+		(*C.float)(unsafe.Pointer(&vec[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(rows),
+		C.int(cols),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: matmul_vec_q8_k %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
 // ropeModeNeoX / ropeModeNorm - graph cache key for selected RoPE kernel
 const (
 	ropeModeNeoX = 0
@@ -949,6 +1514,36 @@ func (b *Backend) quantCache(t dtype.DType) (map[string]gpuQ8Matrix, C.CUfunctio
 			return nil, nil, fmt.Errorf("cuda: q6_k kernel unavailable")
 		}
 		return b.matricesQ6K, b.fnQ6K, nil
+	case dtype.Q4_1:
+		if !b.hasQ41 {
+			return nil, nil, fmt.Errorf("cuda: q4_1 kernel unavailable")
+		}
+		return b.matricesQ41, b.fnQ41, nil
+	case dtype.Q5_0:
+		if !b.hasQ50 {
+			return nil, nil, fmt.Errorf("cuda: q5_0 kernel unavailable")
+		}
+		return b.matricesQ50, b.fnQ50, nil
+	case dtype.Q5_1:
+		if !b.hasQ51 {
+			return nil, nil, fmt.Errorf("cuda: q5_1 kernel unavailable")
+		}
+		return b.matricesQ51, b.fnQ51, nil
+	case dtype.Q2_K:
+		if !b.hasQ2K {
+			return nil, nil, fmt.Errorf("cuda: q2_k kernel unavailable")
+		}
+		return b.matricesQ2K, b.fnQ2K, nil
+	case dtype.Q3_K:
+		if !b.hasQ3K {
+			return nil, nil, fmt.Errorf("cuda: q3_k kernel unavailable")
+		}
+		return b.matricesQ3K, b.fnQ3K, nil
+	case dtype.Q8_K:
+		if !b.hasQ8K {
+			return nil, nil, fmt.Errorf("cuda: q8_k kernel unavailable")
+		}
+		return b.matricesQ8K, b.fnQ8K, nil
 	default:
 		return nil, nil, fmt.Errorf("cuda: type %s not supported on fused path", t)
 	}
@@ -966,6 +1561,18 @@ func (b *Backend) uploadQuant(t dtype.DType, ptr *C.CUdeviceptr, raw []byte) C.i
 		return C.gguf_cuda_upload_q5_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	case dtype.Q6_K:
 		return C.gguf_cuda_upload_q6_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case dtype.Q4_1:
+		return C.gguf_cuda_upload_q4_1(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case dtype.Q5_0:
+		return C.gguf_cuda_upload_q5_0(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case dtype.Q5_1:
+		return C.gguf_cuda_upload_q5_1(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case dtype.Q2_K:
+		return C.gguf_cuda_upload_q2_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case dtype.Q3_K:
+		return C.gguf_cuda_upload_q3_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case dtype.Q8_K:
+		return C.gguf_cuda_upload_q8_k(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	default:
 		return -1
 	}
@@ -983,6 +1590,18 @@ func validateQuantMatMul(t dtype.DType, raw []byte, rows, cols int, vec []float3
 		return validateQ5KMatMul(raw, rows, cols, vec)
 	case dtype.Q6_K:
 		return validateQ6KMatMul(raw, rows, cols, vec)
+	case dtype.Q4_1:
+		return validateQ41MatMul(raw, rows, cols, vec)
+	case dtype.Q5_0:
+		return validateQ50MatMul(raw, rows, cols, vec)
+	case dtype.Q5_1:
+		return validateQ51MatMul(raw, rows, cols, vec)
+	case dtype.Q2_K:
+		return validateQ2KMatMul(raw, rows, cols, vec)
+	case dtype.Q3_K:
+		return validateQ3KMatMul(raw, rows, cols, vec)
+	case dtype.Q8_K:
+		return validateQ8KMatMul(raw, rows, cols, vec)
 	default:
 		return fmt.Errorf("cuda: type %s not supported on fused path", t)
 	}
@@ -2434,6 +3053,138 @@ func validateQ6KMatMul(raw []byte, rows, cols int, vec []float32) error {
 	want := rows * blocksPerRow * quant.BlockQ6_KSize
 	if len(raw) < want {
 		return fmt.Errorf("cuda: Q6_K matrix too short")
+	}
+
+	return nil
+}
+
+func validateQ41MatMul(raw []byte, rows, cols int, vec []float32) error {
+	if rows <= 0 || cols <= 0 {
+		return fmt.Errorf("cuda: rows=%d cols=%d", rows, cols)
+	}
+
+	if cols%quant.QK4_1 != 0 {
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK4_1)
+	}
+
+	if len(vec) != cols {
+		return fmt.Errorf("cuda: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	blocksPerRow := cols / quant.QK4_1
+	want := rows * blocksPerRow * quant.BlockQ4_1Size
+	if len(raw) < want {
+		return fmt.Errorf("cuda: Q4_1 matrix too short")
+	}
+
+	return nil
+}
+
+func validateQ50MatMul(raw []byte, rows, cols int, vec []float32) error {
+	if rows <= 0 || cols <= 0 {
+		return fmt.Errorf("cuda: rows=%d cols=%d", rows, cols)
+	}
+
+	if cols%quant.QK5_0 != 0 {
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK5_0)
+	}
+
+	if len(vec) != cols {
+		return fmt.Errorf("cuda: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	blocksPerRow := cols / quant.QK5_0
+	want := rows * blocksPerRow * quant.BlockQ5_0Size
+	if len(raw) < want {
+		return fmt.Errorf("cuda: Q5_0 matrix too short")
+	}
+
+	return nil
+}
+
+func validateQ51MatMul(raw []byte, rows, cols int, vec []float32) error {
+	if rows <= 0 || cols <= 0 {
+		return fmt.Errorf("cuda: rows=%d cols=%d", rows, cols)
+	}
+
+	if cols%quant.QK5_1 != 0 {
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK5_1)
+	}
+
+	if len(vec) != cols {
+		return fmt.Errorf("cuda: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	blocksPerRow := cols / quant.QK5_1
+	want := rows * blocksPerRow * quant.BlockQ5_1Size
+	if len(raw) < want {
+		return fmt.Errorf("cuda: Q5_1 matrix too short")
+	}
+
+	return nil
+}
+
+func validateQ2KMatMul(raw []byte, rows, cols int, vec []float32) error {
+	if rows <= 0 || cols <= 0 {
+		return fmt.Errorf("cuda: rows=%d cols=%d", rows, cols)
+	}
+
+	if cols%quant.QK_K != 0 {
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK_K)
+	}
+
+	if len(vec) != cols {
+		return fmt.Errorf("cuda: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	blocksPerRow := cols / quant.QK_K
+	want := rows * blocksPerRow * quant.BlockQ2_KSize
+	if len(raw) < want {
+		return fmt.Errorf("cuda: Q2_K matrix too short")
+	}
+
+	return nil
+}
+
+func validateQ3KMatMul(raw []byte, rows, cols int, vec []float32) error {
+	if rows <= 0 || cols <= 0 {
+		return fmt.Errorf("cuda: rows=%d cols=%d", rows, cols)
+	}
+
+	if cols%quant.QK_K != 0 {
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK_K)
+	}
+
+	if len(vec) != cols {
+		return fmt.Errorf("cuda: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	blocksPerRow := cols / quant.QK_K
+	want := rows * blocksPerRow * quant.BlockQ3_KSize
+	if len(raw) < want {
+		return fmt.Errorf("cuda: Q3_K matrix too short")
+	}
+
+	return nil
+}
+
+func validateQ8KMatMul(raw []byte, rows, cols int, vec []float32) error {
+	if rows <= 0 || cols <= 0 {
+		return fmt.Errorf("cuda: rows=%d cols=%d", rows, cols)
+	}
+
+	if cols%quant.QK_K != 0 {
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK_K)
+	}
+
+	if len(vec) != cols {
+		return fmt.Errorf("cuda: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	blocksPerRow := cols / quant.QK_K
+	want := rows * blocksPerRow * quant.BlockQ8_KSize
+	if len(raw) < want {
+		return fmt.Errorf("cuda: Q8_K matrix too short")
 	}
 
 	return nil

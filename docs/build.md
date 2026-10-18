@@ -35,7 +35,7 @@ For **Qwen3 dense** with `-ngl` = all layers (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K w
 
 Partly on GPU: F32 batch still device-offset vec launches; MoE / DeepSeek2 MLA / SWA force `n_batch=1`; other arches may lack full residency. Quant prefill uses `MatMulMat*` (Q8_0 single-launch PTX).  
 **`gpuKVStale`:** if GPU KV append fails, fused GPU attention is skipped until `ResetCache()` / a new session.  
-Quants without native kernels (Q4_1, Q5_0/1, Q2_K, Q3_K, Q8_K) fall back to FP32 and disable residency.
+Fused native: Q8_0, Q4_0/1, Q5_0/1, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K/Q8_K (`FusedQuantSupported`). Other types (e.g. Q8_1, IQ-*) fall back to FP32 and disable residency.
 
 Flags (`-ngl`, `-dev`, Docker GPU, macOS/Windows): **[platforms.md](platforms.md)**.
 
