@@ -24,7 +24,7 @@ type completionsRequest struct {
 	PresencePenalty  *float64        `json:"presence_penalty,omitempty"` // stub
 	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"`
 	User             string          `json:"user,omitempty"` // stub
-	Seed             *int64          `json:"seed,omitempty"` // stub
+	Seed             *int64          `json:"seed,omitempty"`
 	LogitBias        json.RawMessage `json:"logit_bias,omitempty"`
 	Logprobs         *int            `json:"logprobs,omitempty"` // stub
 	Echo             bool            `json:"echo"`
@@ -106,6 +106,10 @@ func (req *completionsRequest) samplerConfig() sampler.Config {
 		cfg.Temp = float32(*req.Temperature)
 	}
 
+	if req.Seed != nil {
+		cfg.Seed = uint64(*req.Seed)
+	}
+
 	return cfg
 }
 
@@ -132,7 +136,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stubs: presence_penalty, seed, user, logit_bias, logprobs, suffix are accepted and ignored.
+	// Stubs: presence_penalty, user, logit_bias, logprobs, suffix are accepted and ignored.
 
 	stops := parseStop(req.Stop)
 	modelName := s.resolveModelID()
@@ -196,7 +200,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 			Index:        0,
 			Text:         text,
 			Logprobs:     nil,
-			FinishReason: "stop",
+			FinishReason: sess.StopReason(),
 		}},
 		Usage: chatCompletionUsage{
 			PromptTokens:     sess.PromptTokenCount(),
@@ -263,7 +267,7 @@ func (s *Server) serveCompletionsStream(w http.ResponseWriter, conv *runtime.Con
 
 	conv.Commit(sess)
 
-	finish := "stop"
+	finish := sess.StopReason()
 	writeChunk("", &finish)
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()

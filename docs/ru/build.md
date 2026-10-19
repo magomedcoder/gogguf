@@ -12,7 +12,7 @@ go build -o build/gogguf ./cmd/gogguf
 
 ## Сборка CUDA (опционально)
 
-Только **Linux + NVIDIA** (подробности: [platforms.md](platforms.md)):
+**Linux + NVIDIA** и **Windows** (`nvcuda.dll`; подробности: [platforms.md](platforms.md)):
 
 ```bash
 CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
@@ -21,7 +21,7 @@ CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
 
 ### Что реально считается на GPU
 
-Для **Qwen3 dense** при `-ngl` = все слои (веса Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K) residual stream живёт на устройстве:
+Для **Qwen3 dense** при `-ngl` = все слои и fused-квантах (Q8_0 / Q4_0/1 / Q5_0/1 / Q2_K...Q8_K) residual stream живёт на устройстве:
 
 | Этап                                                       | Где                      | Примечание                                     |
 |------------------------------------------------------------|--------------------------|------------------------------------------------|

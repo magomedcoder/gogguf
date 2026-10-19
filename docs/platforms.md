@@ -2,11 +2,11 @@
 
 Where you can run GoGGUF, and how to use a GPU.
 
-|                  | Works now               | Planned                   |
-|------------------|-------------------------|---------------------------|
-| **CPU**          | Linux, macOS, Windows   | -                         |
-| **GPU (`-ngl`)** | **Linux + NVIDIA** only | macOS Metal, Windows CUDA |
-| **Other GPUs**   | -                       | AMD / Intel               |
+|                  | Works now                                                               | Planned             |
+|------------------|-------------------------------------------------------------------------|---------------------|
+| **CPU**          | Linux, macOS, Windows                                                   | -                   |
+| **GPU (`-ngl`)** | **Linux + NVIDIA**; Windows driver load (`nvcuda.dll`, needs CGO + GPU) | macOS Metal kernels |
+| **Other GPUs**   | -                                                                       | AMD / Intel         |
 
 Tested on **GTX 1050 Ti (4 GB)**, **RTX 5060 Ti (16 GB)**, **Quadro RTX 6000 (24 GB)**.
 
@@ -112,10 +112,18 @@ Planned: Metal kernels so `-ngl` runs on Apple Silicon / Intel Mac.
 ## Windows
 
 - **CPU:** yes (`amd64` / `arm64`)  
-- **GPU (`-ngl`):** no - CUDA loader uses Linux `libcuda.so`; Windows driver path not wired.  
+- **GPU (`-ngl`):** driver load is wired (`nvcuda.dll` via `LoadLibrary`, no `-ldl`). Build with a C compiler (MinGW or MSVC via CGO) and an NVIDIA driver:
+
+```powershell
+$env:CGO_ENABLED = "1"
+go build -tags cuda -o build/gogguf.exe ./cmd/gogguf
+.\build\gogguf.exe run -m model.gguf --chat -ngl 999 -p "Hi"
+```
+
+CUDA Toolkit is not required. Without a GPU the binary still builds; `-ngl > 0` fails at runtime if `nvcuda.dll` or a device is missing.  
 - **mmap:** yes (`CreateFileMapping` / `MapViewOfFile`)
 
-PowerShell:
+PowerShell (CPU):
 
 ```powershell
 go build -o build/gogguf.exe ./cmd/gogguf
@@ -123,11 +131,11 @@ go build -o build/gogguf.exe ./cmd/gogguf
 .\build\gogguf.exe serve -m model.gguf --host 127.0.0.1:8000
 ```
 
-Ctrl+C stops `serve`. Planned: Windows CUDA.
+Ctrl+C stops `serve`.
 
 ## Planned (GPU roadmap)
 
-- macOS Metal kernels (wiring exists), Windows CUDA  
+- macOS Metal kernels (wiring exists); Windows CUDA needs a real-GPU smoke  
 - Parallel multi-GPU pipeline (P2P transfer already preferred)  
 - Batched MoE / remaining arch residency gaps  
 

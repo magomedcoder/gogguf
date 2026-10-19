@@ -1,5 +1,7 @@
 # CLI
 
+Examples use a Unix shell. On Windows the binary is `build\gogguf.exe` and the same flags apply in PowerShell (`.\build\gogguf.exe info -m .\models\....gguf`). macOS matches the Unix examples. GPU / OS: [platforms.md](platforms.md).
+
 ## `gogguf info`
 
 Short model summary: GGUF version, architecture, name, tensor count, weight size, context length.

@@ -3,7 +3,7 @@
 package cuda
 
 /*
-#cgo LDFLAGS: -ldl -lm
+#cgo !windows LDFLAGS: -ldl -lm
 #include "driver.h"
 #include <stdlib.h>
 */

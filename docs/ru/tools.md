@@ -47,7 +47,20 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 
 ### vs `llama-bench`
 
-Тот же GGUF, те же `-ngl` / длина промпта / decode `-n`, совпадающий prefill batch (`-b`). Соответствие метрик: prefill -> `pp`, decode -> `tg`. См. английский [tools.md](../tools.md).
+Тот же GGUF, те же `-ngl` / длина промпта / decode `-n` и тот же prefill batch (`-b` здесь и `-b` / `-n_batch` в llama.cpp).
+
+| GoGGUF `tools bench` | llama.cpp `llama-bench`                        |
+|----------------------|------------------------------------------------|
+| prefill tok/s        | `pp` (prompt processing)                       |
+| decode tok/s         | `tg` (token generation)                        |
+| TTFT                 | задержка первого токена (не всегда печатается) |
+
+```bash
+./build/tools bench -m model.gguf -p "Hello" -n 128 -b 32 -ngl 999 --runs 3 --json
+./llama-bench -m model.gguf -p 512 -n 128 -ngl 999 -b 32
+```
+
+Ориентир из roadmap: prefill ≥~0.5* `pp`, decode ≥~0.7* `tg` при `-b`≥32 на dense fused-квантах.
 
 ## `greedy`
 

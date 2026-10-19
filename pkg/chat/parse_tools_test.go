@@ -58,6 +58,34 @@ func TestParseAssistantOutputNoTools(t *testing.T) {
 	}
 }
 
+func TestParseAssistantOutputLlamaJSON(t *testing.T) {
+	text := `<|python_tag|>{"name":"get_weather","parameters":{"location":"Moscow"}}`
+	got := ParseAssistantOutput(text)
+	if !got.HasToolCalls() || got.ToolCalls[0].Function.Name != "get_weather" {
+		t.Fatalf("parsed = %+v", got)
+	}
+
+	if !strings.Contains(got.ToolCalls[0].Function.Arguments, "Moscow") {
+		t.Fatalf("arguments = %q", got.ToolCalls[0].Function.Arguments)
+	}
+
+	if got.Content != "" {
+		t.Fatalf("content = %q", got.Content)
+	}
+}
+
+func TestParseAssistantOutputLlamaJSONWithProse(t *testing.T) {
+	text := "Calling now.\n[{\"name\":\"echo\",\"arguments\":{\"x\":1}}]"
+	got := ParseAssistantOutput(text)
+	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Function.Name != "echo" {
+		t.Fatalf("parsed = %+v", got)
+	}
+
+	if got.Content != "Calling now." {
+		t.Fatalf("content = %q", got.Content)
+	}
+}
+
 func TestParseAssistantOutputArgumentsAsString(t *testing.T) {
 	text := `<tool_call>
 {"name":"echo","arguments":"{\"x\":1}"}

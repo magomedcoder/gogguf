@@ -10,6 +10,20 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/runtime"
 )
 
+func TestOpenAIFinishReason(t *testing.T) {
+	if got := openaiFinishReason(true, "length"); got != "tool_calls" {
+		t.Fatalf("tools: %q", got)
+	}
+
+	if got := openaiFinishReason(false, "length"); got != "length" {
+		t.Fatalf("length: %q", got)
+	}
+
+	if got := openaiFinishReason(false, "stop"); got != "stop" {
+		t.Fatalf("stop: %q", got)
+	}
+}
+
 func TestSessionIDFromRequest(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set(SessionIDHeader, "abc")

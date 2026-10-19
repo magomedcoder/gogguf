@@ -2,11 +2,11 @@
 
 Где можно запускать GoGGUF и как включить GPU.
 
-|                  | Сейчас                    | Планируется                     |
-|------------------|---------------------------|---------------------------------|
-| **CPU**          | Linux, macOS, Windows     | -                               |
-| **GPU (`-ngl`)** | **только Linux + NVIDIA** | Metal на macOS, CUDA на Windows |
-| **Другие GPU**   | -                         | AMD / Intel                     |
+|                  | Сейчас                                                                         | Планируется            |
+|------------------|--------------------------------------------------------------------------------|------------------------|
+| **CPU**          | Linux, macOS, Windows                                                          | -                      |
+| **GPU (`-ngl`)** | **Linux + NVIDIA**; Windows: загрузка драйвера (`nvcuda.dll`, нужны CGO и GPU) | Metal kernels на macOS |
+| **Другие GPU**   | -                                                                              | AMD / Intel            |
 
 Тестировалось на **GTX 1050 Ti (4 GB)**, **RTX 5060 Ti (16 GB)**, **Quadro RTX 6000 (24 GB)**.
 
@@ -102,17 +102,28 @@ HF cache: `~/.cache/huggingface/hub` (Unix) или `%LOCALAPPDATA%\huggingface\h
 go build -o build/gogguf ./cmd/gogguf
 ./build/gogguf run -m model.gguf --chat -p "Hi"
 ./build/gogguf serve -m model.gguf --host 127.0.0.1:8000
+# когда появятся kernels:
+# go build -tags metal -o build/gogguf ./cmd/gogguf
+# ./build/gogguf run -m model.gguf -ngl 999 --chat -p "Hi"
 ```
 
-В планах: Metal kernels для `-ngl` на Apple Silicon / Intel Mac.
+В планах: Metal kernels, чтобы `-ngl` считал на Apple Silicon / Intel Mac.
 
 ## Windows
 
 - **CPU:** да (`amd64` / `arm64`)  
-- **GPU (`-ngl`):** нет - загрузчик CUDA рассчитан на Linux `libcuda.so`; путь Windows-драйвера не подключён.  
+- **GPU (`-ngl`):** загрузчик драйвера подключён (`nvcuda.dll` через `LoadLibrary`, без `-ldl`). Нужны C-компилятор (MinGW или MSVC через CGO) и драйвер NVIDIA:
+
+```powershell
+$env:CGO_ENABLED = "1"
+go build -tags cuda -o build/gogguf.exe ./cmd/gogguf
+.\build\gogguf.exe run -m model.gguf --chat -ngl 999 -p "Hi"
+```
+
+CUDA Toolkit не нужен. Без GPU бинарник всё равно собирается; `-ngl > 0` падает в рантайме, если нет `nvcuda.dll` или устройства.  
 - **mmap:** да (`CreateFileMapping` / `MapViewOfFile`)
 
-PowerShell:
+PowerShell (CPU):
 
 ```powershell
 go build -o build/gogguf.exe ./cmd/gogguf
@@ -120,11 +131,11 @@ go build -o build/gogguf.exe ./cmd/gogguf
 .\build\gogguf.exe serve -m model.gguf --host 127.0.0.1:8000
 ```
 
-Ctrl+C останавливает `serve`. В планах: CUDA на Windows.
+Ctrl+C останавливает `serve`.
 
 ## Планируется (GPU)
 
-- Metal kernels (wiring `-tags metal` есть), CUDA (Windows)  
+- Metal kernels (wiring `-tags metal` есть); smoke CUDA на реальной Windows-машине  
 - Параллельный multi-GPU pipeline (P2P уже предпочтителен)  
 - Batched MoE / оставшиеся gaps residency  
 

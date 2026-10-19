@@ -41,6 +41,10 @@ func ParseAssistantOutput(text string) ParsedAssistant {
 
 	matches := toolCallBlockRe.FindAllStringSubmatchIndex(text, -1)
 	if len(matches) == 0 {
+		if calls, content, ok := parseLooseJSONToolCalls(text); ok {
+			return ParsedAssistant{Content: content, ToolCalls: calls}
+		}
+
 		return ParsedAssistant{
 			Content: text,
 		}
@@ -105,6 +109,63 @@ func parseToolCallJSON(raw string, index int) (ToolCall, bool) {
 			Arguments: args,
 		},
 	}, true
+}
+
+// parseLooseJSONToolCalls accepts Llama-style calls: optional <|python_tag|> plus a JSON object or array with name and arguments/parameters.
+// Surrounding prose stays in content.
+func parseLooseJSONToolCalls(text string) ([]ToolCall, string, bool) {
+	body := strings.TrimSpace(text)
+	body = strings.TrimPrefix(body, "<|python_tag|>")
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil, "", false
+	}
+
+	startObj := strings.IndexByte(body, '{')
+	startArr := strings.IndexByte(body, '[')
+	start := -1
+	if startObj >= 0 && (startArr < 0 || startObj < startArr) {
+		start = startObj
+	} else if startArr >= 0 {
+		start = startArr
+	}
+
+	if start < 0 {
+		return nil, "", false
+	}
+
+	raw := strings.TrimSpace(body[start:])
+	var calls []ToolCall
+	if raw[0] == '[' {
+		var items []json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &items); err != nil || len(items) == 0 {
+			return nil, "", false
+		}
+
+		for i, item := range items {
+			tc, ok := parseToolCallJSON(string(item), i)
+			if !ok {
+				return nil, "", false
+			}
+
+			calls = append(calls, tc)
+		}
+	} else {
+		dec := json.NewDecoder(strings.NewReader(raw))
+		var obj json.RawMessage
+		if err := dec.Decode(&obj); err != nil {
+			return nil, "", false
+		}
+
+		tc, ok := parseToolCallJSON(string(obj), 0)
+		if !ok {
+			return nil, "", false
+		}
+		calls = []ToolCall{tc}
+	}
+
+	content := stripThinkBlocks(strings.TrimSpace(body[:start]))
+	return calls, content, true
 }
 
 func stripThinkBlocks(s string) string {

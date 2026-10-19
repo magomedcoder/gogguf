@@ -1,5 +1,7 @@
 # CLI
 
+Примеры - Unix-shell. На Windows бинарник `build\gogguf.exe`, те же флаги в PowerShell (`.\build\gogguf.exe info -m .\models\....gguf`). macOS совпадает с Unix-примерами. GPU / ОС: [platforms.md](platforms.md).
+
 ## `gogguf info`
 
 Краткая сводка о модели: версия GGUF, архитектура, имя, число тензоров, размер весов, длина контекста.

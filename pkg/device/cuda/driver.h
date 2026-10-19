@@ -205,7 +205,7 @@ typedef struct {
 	int resid_len; // length of valid residual in d_resid
 } gguf_matmul_pool_t;
 
-// gguf_cuda_init loads libcuda.so and creates context on GPU with ordinal device (numbering after CUDA_VISIBLE_DEVICES; 0 = first visible device)
+// gguf_cuda_init loads the CUDA driver (libcuda.so / nvcuda.dll) and creates a context on GPU ordinal (after CUDA_VISIBLE_DEVICES; 0 = first visible device)
 // cc_out: compute capability (major*10+minor), e.g. 120 for sm_120
 int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int device, char *name, size_t name_len, char *errbuf, size_t errbuf_len, int *cc_out);
 

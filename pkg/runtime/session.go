@@ -16,6 +16,7 @@ type GenerationSession struct {
 	logitsBuf    []float32 // reused for penalty copy
 	historyBuf   []int     // reused prompt+generated for repeat penalty
 	stopBuf      strings.Builder
+	stopReason   string // "stop" or "length"; empty until GenerateSteps
 }
 
 // StartGeneration encodes the prompt, runs prefill, and returns a decode session.
@@ -148,6 +149,15 @@ func (s *GenerationSession) DecodeToken(id int) string {
 	return s.ctx.DecodeToken(id)
 }
 
+// StopReason is why GenerateSteps returned: "stop" (EOS, stop string, or callback) or "length" (max tokens).
+func (s *GenerationSession) StopReason() string {
+	if s.stopReason == "" {
+		return "stop"
+	}
+
+	return s.stopReason
+}
+
 // GenerateSteps runs up to maxTokens decode steps.
 func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 	maxTokens := params.MaxTokens
@@ -156,6 +166,7 @@ func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 	}
 
 	s.stopBuf.Reset()
+	s.stopReason = "stop"
 	for i := 0; i < maxTokens; i++ {
 		id, err := s.DecodeStepWith(params)
 		if err != nil {
@@ -174,6 +185,8 @@ func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 			return nil
 		}
 	}
+
+	s.stopReason = "length"
 
 	return nil
 }

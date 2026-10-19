@@ -1,8 +1,8 @@
 # GoGGUF
 
-**GoGGUF** is a lightweight way to run GGUF models in Go without llama.cpp.
+**GoGGUF** is a lightweight way to run GGUF models in Go.
 
-> **Actively developed.** GPU offload (CUDA) is still early and evolving.
+> **GPU is under active development.**
 
 Use it as a **library** (inference from Go code) or as an **HTTP server** (`gguf serve` or the `server` package).
 
@@ -48,6 +48,16 @@ go build -o build/gogguf ./cmd/gogguf
 # or start the HTTP API (OpenAI-compatible)
 ./build/gogguf serve -m ./models/Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000
 ```
+
+macOS uses the same commands (`darwin/arm64` or `amd64`). Windows (PowerShell):
+
+```powershell
+go build -o build/gogguf.exe ./cmd/gogguf
+.\build\gogguf.exe run -m .\models\Qwen3-4B-Q8_0.gguf --chat -p "Hello" -n 64
+.\build\gogguf.exe serve -m .\models\Qwen3-4B-Q8_0.gguf --host 127.0.0.1:8000
+```
+
+GPU flags (`-ngl`, Windows `nvcuda.dll`, macOS Metal): [docs/platforms.md](docs/platforms.md).
 
 Optional simple chat UI ([web-ui](web-ui/)): keep `serve` running, then in another terminal:
 

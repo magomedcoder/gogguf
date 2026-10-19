@@ -1,22 +1,56 @@
 #include "driver.h"
 
-#include <dlfcn.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+
+static void *open_lib(const char *name) {
+	return (void *)LoadLibraryA(name);
+}
+
+static void *load_sym(void *lib, const char *name) {
+	return (void *)GetProcAddress((HMODULE)lib, name);
+}
+
+static void close_lib(void *lib) {
+	if (lib) {
+		FreeLibrary((HMODULE)lib);
+	}
+}
+
+static void *open_cuda_driver(void) {
+	return open_lib("nvcuda.dll");
+}
+#else
+#include <dlfcn.h>
+
 static void *load_sym(void *lib, const char *name) {
 	return dlsym(lib, name);
 }
 
-static int load_driver(cuda_driver_t *drv, void **lib_out) {
+static void close_lib(void *lib) {
+	if (lib) {
+		dlclose(lib);
+	}
+}
+
+static void *open_cuda_driver(void) {
 	void *lib = dlopen("libcuda.so.1", RTLD_LAZY | RTLD_LOCAL);
 	if (!lib) {
 		lib = dlopen("libcuda.so", RTLD_LAZY | RTLD_LOCAL);
 	}
 
+	return lib;
+}
+#endif
+
+static int load_driver(cuda_driver_t *drv, void **lib_out) {
+	void *lib = open_cuda_driver();
 	if (!lib) {
 		return -1;
 	}
@@ -64,7 +98,7 @@ static int load_driver(cuda_driver_t *drv, void **lib_out) {
 	drv->cuGraphExecDestroy = (PFN_cuGraphExecDestroy)load_sym(lib, "cuGraphExecDestroy");
 
 	if (!drv->cuInit || !drv->cuDeviceGetCount || !drv->cuDeviceGet || !drv->cuDeviceGetName || !drv->cuCtxCreate || !drv->cuCtxDestroy || !drv->cuMemAlloc || !drv->cuMemFree || !drv->cuMemcpyHtoD || !drv->cuMemcpyDtoH || !drv->cuModuleLoadData || !drv->cuModuleGetFunction || !drv->cuLaunchKernel) {
-		dlclose(lib);
+		close_lib(lib);
 		return -2;
 	}
 
@@ -86,14 +120,14 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 
 	if (load_driver(drv, &lib) != 0) {
 		if (errbuf && errbuf_len > 0) {
-			snprintf(errbuf, errbuf_len, "libcuda.so not found");
+			snprintf(errbuf, errbuf_len, "CUDA driver not found (libcuda.so or nvcuda.dll)");
 		}
 
 		return -1;
 	}
 
 	if (drv->cuInit(0) != CUDA_SUCCESS) {
-		dlclose(lib);
+		close_lib(lib);
 		if (errbuf && errbuf_len > 0) {
 			snprintf(errbuf, errbuf_len, "cuInit failed");
 		}
@@ -103,7 +137,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 
 	int count = 0;
 	if (drv->cuDeviceGetCount(&count) != CUDA_SUCCESS || count <= 0) {
-		dlclose(lib);
+		close_lib(lib);
 		if (errbuf && errbuf_len > 0) {
 			snprintf(errbuf, errbuf_len, "no GPU found");
 		}
@@ -113,7 +147,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 
 	// device - ordinal after CUDA_VISIBLE_DEVICES filter
 	if (device < 0 || device >= count) {
-		dlclose(lib);
+		close_lib(lib);
 		if (errbuf && errbuf_len > 0) {
 			snprintf(errbuf, errbuf_len, "device %d unavailable: %d visible GPU(s) (check -dev and CUDA_VISIBLE_DEVICES)", device, count);
 		}
@@ -123,7 +157,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 
 	CUdevice dev = 0;
 	if (drv->cuDeviceGet(&dev, device) != CUDA_SUCCESS) {
-		dlclose(lib);
+		close_lib(lib);
 		if (errbuf && errbuf_len > 0) {
 			snprintf(errbuf, errbuf_len, "cuDeviceGet(%d) failed", device);
 		}
@@ -142,7 +176,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 
 	int cc = cc_major * 10 + cc_minor;
 	if (cc > 0 && cc < GGUF_CUDA_MIN_CC) {
-		dlclose(lib);
+		close_lib(lib);
 		if (name && name_len > 0) {
 			snprintf(name, name_len, "GPU sm_%d.%d", cc_major, cc_minor);
 		}
@@ -168,7 +202,7 @@ int gguf_cuda_init(cuda_driver_t *drv, void **lib_out, CUcontext *ctx, int devic
 	}
 
 	if (drv->cuCtxCreate(ctx, 0, dev) != CUDA_SUCCESS) {
-		dlclose(lib);
+		close_lib(lib);
 		if (errbuf && errbuf_len > 0) {
 			snprintf(errbuf, errbuf_len, "cuCtxCreate failed");
 		}

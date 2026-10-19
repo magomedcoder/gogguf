@@ -26,8 +26,8 @@ type chatCompletionRequest struct {
 	StreamOptions       *streamOptions  `json:"stream_options,omitempty"`
 	PresencePenalty     *float64        `json:"presence_penalty,omitempty"` // stub
 	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"`
-	Seed                *int64          `json:"seed,omitempty"`       // stub
-	User                string          `json:"user,omitempty"`       // stub
+	Seed                *int64          `json:"seed,omitempty"`
+	User                string          `json:"user,omitempty"`       // session key when X-Session-Id is absent
 	LogitBias           json.RawMessage `json:"logit_bias,omitempty"` // stub
 	Logprobs            *bool           `json:"logprobs,omitempty"`   // stub
 	TopLogprobs         *int            `json:"top_logprobs,omitempty"`
@@ -93,8 +93,21 @@ type chatStreamChoice struct {
 }
 
 type chatStreamDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role      string               `json:"role,omitempty"`
+	Content   string               `json:"content,omitempty"`
+	ToolCalls []chatStreamToolCall `json:"tool_calls,omitempty"`
+}
+
+type chatStreamToolCall struct {
+	Index    int                    `json:"index"`
+	ID       string                 `json:"id,omitempty"`
+	Type     string                 `json:"type,omitempty"`
+	Function chatStreamToolFunction `json:"function,omitempty"`
+}
+
+type chatStreamToolFunction struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 func parseChatMessageContent(raw json.RawMessage) string {
@@ -191,7 +204,24 @@ func (req *chatCompletionRequest) samplerConfig() sampler.Config {
 		cfg.Temp = float32(*req.Temperature)
 	}
 
+	if req.Seed != nil {
+		cfg.Seed = uint64(*req.Seed)
+	}
+
 	return cfg
+}
+
+// openaiFinishReason maps a parsed reply and the generation stop onto OpenAI finish_reason.
+func openaiFinishReason(hasToolCalls bool, genStop string) string {
+	if hasToolCalls {
+		return "tool_calls"
+	}
+
+	if genStop == "length" {
+		return "length"
+	}
+
+	return "stop"
 }
 
 // frequencyPenaltyToRepeat maps OpenAI frequency_penalty (-2..2) to repeat_penalty (>=1).
@@ -230,7 +260,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stubs: presence_penalty, seed, user, logit_bias, logprobs, response_format are accepted and ignored.
+	// Stubs: presence_penalty, logit_bias, logprobs, response_format are accepted and ignored.
 
 	stops := parseStop(req.Stop)
 	msgs := make([]chat.Message, 0, len(req.Messages))
@@ -285,7 +315,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	if req.Stream {
 		includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
-		s.serveChatStream(w, conv, prompt, modelName, genParams, includeUsage)
+		s.serveChatStream(w, conv, prompt, modelName, genParams, includeUsage, len(req.Tools) > 0, stops)
 		return
 	}
 
@@ -318,7 +348,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				Content:   parsed.Content,
 				ToolCalls: parsed.ToolCalls,
 			},
-			FinishReason: parsed.FinishReason(),
+			FinishReason: openaiFinishReason(parsed.HasToolCalls(), sess.StopReason()),
 			Logprobs:     nil,
 		}},
 		Usage: chatCompletionUsage{
@@ -340,7 +370,7 @@ func trimStopSuffix(text string, stops []string) string {
 	return text
 }
 
-func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams, includeUsage bool) {
+func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams, includeUsage, hasTools bool, stops []string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "streaming is not supported", "server_error")
@@ -382,6 +412,10 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	writeChunk(chatStreamDelta{Role: "assistant"}, nil, nil)
 
 	params.OnToken = func(tokenID int) bool {
+		if hasTools {
+			return true
+		}
+
 		writeChunk(chatStreamDelta{Content: sess.DecodeToken(tokenID)}, nil, nil)
 		return true
 	}
@@ -396,7 +430,33 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 
 	conv.Commit(sess)
 
-	finish := "stop"
+	text := trimStopSuffix(sess.GeneratedText(), stops)
+	parsed := chat.ParseAssistantOutput(text)
+	if parsed.HasToolCalls() {
+		if parsed.Content != "" {
+			writeChunk(chatStreamDelta{
+				Content: parsed.Content,
+			}, nil, nil)
+		}
+
+		for i, tc := range parsed.ToolCalls {
+			writeChunk(chatStreamDelta{ToolCalls: []chatStreamToolCall{{
+				Index: i,
+				ID:    tc.ID,
+				Type:  tc.Type,
+				Function: chatStreamToolFunction{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			}}}, nil, nil)
+		}
+	} else if hasTools && text != "" {
+		writeChunk(chatStreamDelta{
+			Content: text,
+		}, nil, nil)
+	}
+
+	finish := openaiFinishReason(parsed.HasToolCalls(), sess.StopReason())
 	var usage *chatCompletionUsage
 	if includeUsage {
 		usage = &chatCompletionUsage{
