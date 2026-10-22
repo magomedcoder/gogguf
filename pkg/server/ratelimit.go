@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -41,8 +42,14 @@ func newRateLimiter(perMinute int) *rateLimiter {
 }
 
 func (rl *rateLimiter) allow(key string) bool {
+	_, ok := rl.allowWithRemaining(key)
+	return ok
+}
+
+// allowWithRemaining consumes one token when available and returns remaining whole tokens
+func (rl *rateLimiter) allowWithRemaining(key string) (remaining int, ok bool) {
 	if rl == nil {
-		return true
+		return 0, true
 	}
 
 	now := time.Now()
@@ -56,13 +63,19 @@ func (rl *rateLimiter) allow(key string) bool {
 
 	b := rl.clients[key]
 	if b == nil {
+		tokens := rl.burst - 1
 		rl.clients[key] = &bucket{
-			tokens:   rl.burst - 1,
+			tokens:   tokens,
 			last:     now,
 			lastSeen: now,
 		}
-		return true
+		if tokens < 0 {
+			tokens = 0
+		}
+
+		return int(tokens), true
 	}
+
 	elapsed := now.Sub(b.last).Seconds()
 	b.tokens += elapsed * rl.rate
 	if b.tokens > rl.burst {
@@ -72,12 +85,16 @@ func (rl *rateLimiter) allow(key string) bool {
 	b.last = now
 	b.lastSeen = now
 	if b.tokens < 1 {
-		return false
+		return 0, false
 	}
 
 	b.tokens--
+	rem := int(b.tokens)
+	if rem < 0 {
+		rem = 0
+	}
 
-	return true
+	return rem, true
 }
 
 func (rl *rateLimiter) sweepLocked(now time.Time) {
@@ -94,7 +111,12 @@ func withRateLimit(next http.Handler, rl *rateLimiter) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !rl.allow(clientIP(r)) {
+		limit := int(rl.burst + 0.5)
+		w.Header().Set("X-RateLimit-Limit-Requests", strconv.Itoa(limit))
+		remaining, ok := rl.allowWithRemaining(clientIP(r))
+		w.Header().Set("X-RateLimit-Remaining-Requests", strconv.Itoa(remaining))
+		w.Header().Set("X-RateLimit-Reset-Requests", "1")
+		if !ok {
 			w.Header().Set("Retry-After", "1")
 			writeAPIError(w, http.StatusTooManyRequests, "rate limit exceeded", "rate_limit_error")
 			return

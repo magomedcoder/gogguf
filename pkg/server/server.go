@@ -65,6 +65,8 @@ func (s *Server) Handler() http.Handler {
 	var h http.Handler = mux
 	h = withRateLimit(h, s.limiter)
 	h = withAPIKey(h, s.apiKey)
+	h = withRequestID(h)
+
 	return h
 }
 

@@ -24,14 +24,14 @@ type chatCompletionRequest struct {
 	Stop                json.RawMessage `json:"stop,omitempty"`
 	Stream              bool            `json:"stream"`
 	StreamOptions       *streamOptions  `json:"stream_options,omitempty"`
-	PresencePenalty     *float64        `json:"presence_penalty,omitempty"` // stub
+	PresencePenalty     *float64        `json:"presence_penalty,omitempty"`
 	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"`
 	Seed                *int64          `json:"seed,omitempty"`
-	User                string          `json:"user,omitempty"`       // session key when X-Session-Id is absent
-	LogitBias           json.RawMessage `json:"logit_bias,omitempty"` // stub
-	Logprobs            *bool           `json:"logprobs,omitempty"`   // stub
+	User                string          `json:"user,omitempty"` // session key when X-Session-Id is absent
+	LogitBias           json.RawMessage `json:"logit_bias,omitempty"`
+	Logprobs            *bool           `json:"logprobs,omitempty"` // stub
 	TopLogprobs         *int            `json:"top_logprobs,omitempty"`
-	ResponseFormat      json.RawMessage `json:"response_format,omitempty"` // stub
+	ResponseFormat      json.RawMessage `json:"response_format,omitempty"`
 	Tools               []chat.Tool     `json:"tools,omitempty"`
 	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
 	ParallelToolCalls   bool            `json:"parallel_tool_calls,omitempty"`
@@ -50,12 +50,13 @@ type chatMessage struct {
 }
 
 type chatCompletionResponse struct {
-	ID      string                 `json:"id"`
-	Object  string                 `json:"object"`
-	Created int64                  `json:"created"`
-	Model   string                 `json:"model"`
-	Choices []chatCompletionChoice `json:"choices"`
-	Usage   chatCompletionUsage    `json:"usage"`
+	ID                string                 `json:"id"`
+	Object            string                 `json:"object"`
+	Created           int64                  `json:"created"`
+	Model             string                 `json:"model"`
+	SystemFingerprint string                 `json:"system_fingerprint,omitempty"`
+	Choices           []chatCompletionChoice `json:"choices"`
+	Usage             chatCompletionUsage    `json:"usage"`
 }
 
 type chatCompletionChoice struct {
@@ -78,12 +79,13 @@ type chatCompletionUsage struct {
 }
 
 type chatStreamChunk struct {
-	ID      string               `json:"id"`
-	Object  string               `json:"object"`
-	Created int64                `json:"created"`
-	Model   string               `json:"model"`
-	Choices []chatStreamChoice   `json:"choices"`
-	Usage   *chatCompletionUsage `json:"usage,omitempty"`
+	ID                string               `json:"id"`
+	Object            string               `json:"object"`
+	Created           int64                `json:"created"`
+	Model             string               `json:"model"`
+	SystemFingerprint string               `json:"system_fingerprint,omitempty"`
+	Choices           []chatStreamChoice   `json:"choices"`
+	Usage             *chatCompletionUsage `json:"usage,omitempty"`
 }
 
 type chatStreamChoice struct {
@@ -260,11 +262,28 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stubs: presence_penalty, logit_bias, logprobs, response_format are accepted and ignored.
+	// Stub: logprobs / top_logprobs accepted and ignored.
+
+	respFmt, err := parseResponseFormat(req.ResponseFormat)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
+		return
+	}
+
+	bias, err := parseLogitBias(req.LogitBias)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
+		return
+	}
 
 	stops := parseStop(req.Stop)
 	msgs := make([]chat.Message, 0, len(req.Messages))
 	for _, m := range req.Messages {
+		if contentHasMultimodal(m.Content) {
+			writeAPIError(w, http.StatusBadRequest, "multimodal message content is not supported (text only)", "invalid_request_error")
+			return
+		}
+
 		content := parseChatMessageContent(m.Content)
 		msgs = append(msgs, chat.Message{
 			Role:       m.Role,
@@ -286,6 +305,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if respFmt == "json_object" {
+		prompt += "\n\nRespond with a single valid JSON object or array only, no markdown fences."
+	}
+
 	modelName := s.resolveModelID()
 	if req.Model != "" {
 		modelName = req.Model
@@ -298,11 +321,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	genParams := runtime.GenerateParams{
-		MaxTokens:     req.maxNewTokens(),
-		Sampler:       sampler.New(req.samplerConfig()),
-		RepeatPenalty: frequencyPenaltyToRepeat(req.FrequencyPenalty),
-		RepeatLastN:   64,
-		Stop:          stops,
+		MaxTokens:       req.maxNewTokens(),
+		Sampler:         sampler.New(req.samplerConfig()),
+		RepeatPenalty:   frequencyPenaltyToRepeat(req.FrequencyPenalty),
+		RepeatLastN:     64,
+		PresencePenalty: presencePenaltyValue(req.PresencePenalty),
+		LogitBias:       bias,
+		Stop:            stops,
 	}
 
 	s.inferMu.Lock()
@@ -313,9 +338,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fp := systemFingerprint(modelName)
 	if req.Stream {
 		includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
-		s.serveChatStream(w, conv, prompt, modelName, genParams, includeUsage, len(req.Tools) > 0, stops)
+		s.serveChatStream(w, conv, prompt, modelName, genParams, includeUsage, len(req.Tools) > 0 || respFmt == "json_object", stops, respFmt, fp)
 		return
 	}
 
@@ -336,11 +362,19 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	text := trimStopSuffix(sess.GeneratedText(), stops)
 	parsed := chat.ParseAssistantOutput(text)
+	if respFmt == "json_object" && !parsed.HasToolCalls() {
+		if err := ensureJSONObjectOutput(parsed.Content); err != nil {
+			writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
+			return
+		}
+	}
+
 	writeJSON(w, chatCompletionResponse{
-		ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
-		Object:  "chat.completion",
-		Created: time.Now().Unix(),
-		Model:   modelName,
+		ID:                fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
+		Object:            "chat.completion",
+		Created:           time.Now().Unix(),
+		Model:             modelName,
+		SystemFingerprint: fp,
 		Choices: []chatCompletionChoice{{
 			Index: 0,
 			Message: chatMessagePlain{
@@ -370,7 +404,7 @@ func trimStopSuffix(text string, stops []string) string {
 	return text
 }
 
-func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams, includeUsage, hasTools bool, stops []string) {
+func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversation, prompt, model string, params runtime.GenerateParams, includeUsage, bufferOutput bool, stops []string, respFmt, fingerprint string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "streaming is not supported", "server_error")
@@ -393,10 +427,11 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 
 	writeChunk := func(delta chatStreamDelta, finish *string, usage *chatCompletionUsage) {
 		chunk := chatStreamChunk{
-			ID:      id,
-			Object:  "chat.completion.chunk",
-			Created: created,
-			Model:   model,
+			ID:                id,
+			Object:            "chat.completion.chunk",
+			Created:           created,
+			Model:             model,
+			SystemFingerprint: fingerprint,
 			Choices: []chatStreamChoice{{
 				Index:        0,
 				Delta:        delta,
@@ -412,7 +447,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	writeChunk(chatStreamDelta{Role: "assistant"}, nil, nil)
 
 	params.OnToken = func(tokenID int) bool {
-		if hasTools {
+		if bufferOutput {
 			return true
 		}
 
@@ -432,13 +467,18 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 
 	text := trimStopSuffix(sess.GeneratedText(), stops)
 	parsed := chat.ParseAssistantOutput(text)
+	if respFmt == "json_object" && !parsed.HasToolCalls() {
+		if err := ensureJSONObjectOutput(parsed.Content); err != nil {
+			fmt.Fprintf(w, "data: {\"error\":{\"message\":%q,\"type\":\"invalid_request_error\"}}\n\n", err.Error())
+			flusher.Flush()
+			return
+		}
+	}
+
 	if parsed.HasToolCalls() {
 		if parsed.Content != "" {
-			writeChunk(chatStreamDelta{
-				Content: parsed.Content,
-			}, nil, nil)
+			writeChunk(chatStreamDelta{Content: parsed.Content}, nil, nil)
 		}
-
 		for i, tc := range parsed.ToolCalls {
 			writeChunk(chatStreamDelta{ToolCalls: []chatStreamToolCall{{
 				Index: i,
@@ -450,10 +490,8 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 				},
 			}}}, nil, nil)
 		}
-	} else if hasTools && text != "" {
-		writeChunk(chatStreamDelta{
-			Content: text,
-		}, nil, nil)
+	} else if bufferOutput && text != "" {
+		writeChunk(chatStreamDelta{Content: parsed.Content}, nil, nil)
 	}
 
 	finish := openaiFinishReason(parsed.HasToolCalls(), sess.StopReason())

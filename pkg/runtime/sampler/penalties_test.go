@@ -2,6 +2,30 @@ package sampler
 
 import "testing"
 
+func TestApplyPresencePenalty(t *testing.T) {
+	logits := []float32{2, 1, 3}
+	ApplyPresencePenalty(logits, []int{2, 2}, 0.5)
+	if logits[2] != 2.5 {
+		t.Fatalf("presence: logits[2]=%v, want 2.5", logits[2])
+	}
+
+	if logits[0] != 2 || logits[1] != 1 {
+		t.Fatalf("other tokens: %v", logits)
+	}
+}
+
+func TestApplyLogitBias(t *testing.T) {
+	logits := []float32{0, 1, 2}
+	ApplyLogitBias(logits, map[int]float32{1: 5, 9: 1})
+	if logits[1] != 6 {
+		t.Fatalf("bias: logits[1]=%v, want 6", logits[1])
+	}
+
+	if logits[0] != 0 || logits[2] != 2 {
+		t.Fatalf("other: %v", logits)
+	}
+}
+
 func TestApplyRepeatPenalty(t *testing.T) {
 	logits := []float32{2, 1, 3}
 	history := []int{2}

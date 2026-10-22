@@ -18,6 +18,8 @@ curl -s 127.0.0.1:8000/v1/models -H "X-API-Key: secret"
 
 При ошибке: `401` (`authentication_error`) или `429` (`rate_limit_error`) с телом `{"error":{"message":"...","type":"..."}}`.
 
+В каждом ответе есть `X-Request-Id` (эхо заголовка запроса или сгенерированный id). При `--rate-limit` также: `X-RateLimit-Limit-Requests`, `X-RateLimit-Remaining-Requests`, `X-RateLimit-Reset-Requests`.
+
 ## Сессии и конкурентность
 
 У модели один общий KV-cache; параллельная генерация сериализуется. Для multi-turn истории:
@@ -64,26 +66,30 @@ Embeddings не делают `Reset()` чужого chat KV: после embeddin
 
 `Content-Type: application/json`
 
-| Поле                                                            | Тип           | По умолчанию | Описание                                                                      |
-|-----------------------------------------------------------------|---------------|--------------|-------------------------------------------------------------------------------|
-| `messages`                                                      | array         | -            | `{role, content}` (обязательно)                                               |
-| `model`                                                         | string        | имя из GGUF  | идентификатор модели                                                          |
-| `max_tokens`                                                    | int           | `128`        | максимум новых токенов                                                        |
-| `max_completion_tokens`                                         | int           | -            | алиас `max_tokens` (предпочтителен в OpenAI)                                  |
-| `temperature`                                                   | float         | `0`          | `0` = greedy                                                                  |
-| `top_p`                                                         | float         | `1`          | nucleus sampling                                                              |
-| `frequency_penalty`                                             | float         | `0`          | при `> 0` мапится во внутренний repeat penalty                                |
-| `presence_penalty`                                              | float         | `0`          | **заглушка** (принимается, игнорируется)                                      |
-| `n`                                                             | int           | `1`          | поддерживается только `1`                                                     |
-| `stop`                                                          | string/array  | -            | стоп-последовательности                                                       |
-| `stream`                                                        | bool          | `false`      | SSE (`data: [DONE]` в конце)                                                  |
-| `stream_options`                                                | object        | -            | `{ "include_usage": true }` - usage в stream                                  |
-| `seed` / `user` / `logit_bias` / `logprobs` / `response_format` | -             | -            | **заглушки** (принимаются, игнорируются); `user` ещё и ключ сессии - см. выше |
-| `tools`                                                         | array         | -            | описания инструментов (OpenAI-стиль)                                          |
-| `tool_choice`                                                   | string/object | `auto`       | `auto` / `none` / `required` / по имени                                       |
-| `parallel_tool_calls`                                           | bool          | `false`      | несколько tool_calls за один ход                                              |
+| Поле                    | Тип           | По умолчанию | Описание                                       |
+|-------------------------|---------------|--------------|------------------------------------------------|
+| `messages`              | array         | -            | `{role, content}` (обязательно)                |
+| `model`                 | string        | имя из GGUF  | идентификатор модели                           |
+| `max_tokens`            | int           | `128`        | максимум новых токенов                         |
+| `max_completion_tokens` | int           | -            | алиас `max_tokens` (предпочтителен в OpenAI)   |
+| `temperature`           | float         | `0`          | `0` = greedy                                   |
+| `top_p`                 | float         | `1`          | nucleus sampling                               |
+| `frequency_penalty`     | float         | `0`          | при `> 0` мапится во внутренний repeat penalty |
+| `presence_penalty`      | float         | `0`          | OpenAI presence penalty (−2...2)               |
+| `n`                     | int           | `1`          | только `1` (`n > 1` -> 400)                    |
+| `stop`                  | string/array  | -            | стоп-последовательности                        |
+| `stream`                | bool          | `false`      | SSE (`data: [DONE]` в конце)                   |
+| `stream_options`        | object        | -            | `{ "include_usage": true }`                    |
+| `seed`                  | int           | -            | seed sampler RNG                               |
+| `user`                  | string        | -            | ключ сессии без `X-Session-Id`                 |
+| `logit_bias`            | object        | -            | `{"token_id": bias, ...}`                      |
+| `response_format`       | object        | -            | `text` / `json_object` (`json_schema` -> 400)  |
+| `logprobs`              | -             | -            | **заглушка**                                   |
+| `tools`                 | array         | -            | описания инструментов                          |
+| `tool_choice`           | string/object | `auto`       | `auto` / `none` / `required` / по имени        |
+| `parallel_tool_calls`   | bool          | `false`      | несколько tool_calls за один ход               |
 
-`content` - строка или массив частей `{type:"text", text:"..."}`.
+`content` - строка или массив `{type:"text", text:"..."}`. Не-text части (например `image_url`) -> **400**.
 
 В messages поддерживаются `tool_calls` (assistant) и `tool_call_id` / `name` (role `tool`).
 

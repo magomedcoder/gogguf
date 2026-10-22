@@ -88,8 +88,10 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 }
 
 func (s *GenerationSession) prepareLogits(params GenerateParams) []float32 {
-	needPenalty := params.RepeatPenalty > 0 && params.RepeatPenalty != 1
-	if !needPenalty {
+	needRepeat := params.RepeatPenalty > 0 && params.RepeatPenalty != 1
+	needPresence := params.PresencePenalty != 0
+	needBias := len(params.LogitBias) > 0
+	if !needRepeat && !needPresence && !needBias {
 		return s.logits
 	}
 
@@ -100,11 +102,22 @@ func (s *GenerationSession) prepareLogits(params GenerateParams) []float32 {
 	}
 	copy(s.logitsBuf, s.logits)
 
-	lastN := params.RepeatLastN
-	if lastN == 0 {
-		lastN = 64
+	hist := s.tokenHistoryView()
+	if needPresence {
+		sampler.ApplyPresencePenalty(s.logitsBuf, hist, params.PresencePenalty)
 	}
-	sampler.ApplyRepeatPenalty(s.logitsBuf, s.tokenHistoryView(), params.RepeatPenalty, lastN)
+
+	if needRepeat {
+		lastN := params.RepeatLastN
+		if lastN == 0 {
+			lastN = 64
+		}
+		sampler.ApplyRepeatPenalty(s.logitsBuf, hist, params.RepeatPenalty, lastN)
+	}
+
+	if needBias {
+		sampler.ApplyLogitBias(s.logitsBuf, params.LogitBias)
+	}
 
 	return s.logitsBuf
 }

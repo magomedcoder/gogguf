@@ -21,9 +21,9 @@ type completionsRequest struct {
 	N                int             `json:"n"`
 	Stream           bool            `json:"stream"`
 	Stop             json.RawMessage `json:"stop,omitempty"`
-	PresencePenalty  *float64        `json:"presence_penalty,omitempty"` // stub
+	PresencePenalty  *float64        `json:"presence_penalty,omitempty"`
 	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"`
-	User             string          `json:"user,omitempty"` // stub
+	User             string          `json:"user,omitempty"`
 	Seed             *int64          `json:"seed,omitempty"`
 	LogitBias        json.RawMessage `json:"logit_bias,omitempty"`
 	Logprobs         *int            `json:"logprobs,omitempty"` // stub
@@ -32,12 +32,13 @@ type completionsRequest struct {
 }
 
 type completionsResponse struct {
-	ID      string              `json:"id"`
-	Object  string              `json:"object"`
-	Created int64               `json:"created"`
-	Model   string              `json:"model"`
-	Choices []completionsChoice `json:"choices"`
-	Usage   chatCompletionUsage `json:"usage"`
+	ID                string              `json:"id"`
+	Object            string              `json:"object"`
+	Created           int64               `json:"created"`
+	Model             string              `json:"model"`
+	SystemFingerprint string              `json:"system_fingerprint,omitempty"`
+	Choices           []completionsChoice `json:"choices"`
+	Usage             chatCompletionUsage `json:"usage"`
 }
 
 type completionsChoice struct {
@@ -136,7 +137,13 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stubs: presence_penalty, user, logit_bias, logprobs, suffix are accepted and ignored.
+	// Stubs: logprobs, suffix are accepted and ignored.
+
+	bias, err := parseLogitBias(req.LogitBias)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
+		return
+	}
 
 	stops := parseStop(req.Stop)
 	modelName := s.resolveModelID()
@@ -151,11 +158,13 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	genParams := runtime.GenerateParams{
-		MaxTokens:     req.maxNewTokens(),
-		Sampler:       sampler.New(req.samplerConfig()),
-		RepeatPenalty: frequencyPenaltyToRepeat(req.FrequencyPenalty),
-		RepeatLastN:   64,
-		Stop:          stops,
+		MaxTokens:       req.maxNewTokens(),
+		Sampler:         sampler.New(req.samplerConfig()),
+		RepeatPenalty:   frequencyPenaltyToRepeat(req.FrequencyPenalty),
+		RepeatLastN:     64,
+		PresencePenalty: presencePenaltyValue(req.PresencePenalty),
+		LogitBias:       bias,
+		Stop:            stops,
 	}
 
 	s.inferMu.Lock()
@@ -192,10 +201,11 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, completionsResponse{
-		ID:      fmt.Sprintf("cmpl-%d", time.Now().UnixNano()),
-		Object:  "text_completion",
-		Created: time.Now().Unix(),
-		Model:   modelName,
+		ID:                fmt.Sprintf("cmpl-%d", time.Now().UnixNano()),
+		Object:            "text_completion",
+		Created:           time.Now().Unix(),
+		Model:             modelName,
+		SystemFingerprint: systemFingerprint(modelName),
 		Choices: []completionsChoice{{
 			Index:        0,
 			Text:         text,

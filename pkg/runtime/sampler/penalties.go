@@ -1,5 +1,42 @@
 package sampler
 
+// ApplyPresencePenalty subtracts penalty from logits of tokens that already appear in history (OpenAI presence_penalty).
+// penalty == 0 - no change; positive values discourage repeats of any prior token.
+func ApplyPresencePenalty(logits []float32, history []int, penalty float32) {
+	if penalty == 0 || len(logits) == 0 || len(history) == 0 {
+		return
+	}
+
+	seen := make(map[int]struct{}, len(history))
+	for _, id := range history {
+		if id < 0 || id >= len(logits) {
+			continue
+		}
+
+		if _, ok := seen[id]; ok {
+			continue
+		}
+
+		seen[id] = struct{}{}
+		logits[id] -= penalty
+	}
+}
+
+// ApplyLogitBias adds OpenAI-style logit_bias offsets (token id -> delta).
+func ApplyLogitBias(logits []float32, bias map[int]float32) {
+	if len(bias) == 0 || len(logits) == 0 {
+		return
+	}
+
+	for id, delta := range bias {
+		if id < 0 || id >= len(logits) || delta == 0 {
+			continue
+		}
+
+		logits[id] += delta
+	}
+}
+
 // ApplyRepeatPenalty reduces logits of repeated tokens (like llama.cpp)
 // penalty == 1 - no change; > 1 - penalty for repeat
 func ApplyRepeatPenalty(logits []float32, history []int, penalty float32, lastN int) {

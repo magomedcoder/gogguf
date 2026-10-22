@@ -11,12 +11,14 @@ import (
 
 // GenerateParams holds generation parameters.
 type GenerateParams struct {
-	MaxTokens     int
-	Sampler       sampler.Func
-	RepeatPenalty float32 // 1.0 = disabled
-	RepeatLastN   int     // history window for penalty (0 = 64)
-	Stop          []string
-	OnToken       func(tokenID int) bool
+	MaxTokens       int
+	Sampler         sampler.Func
+	RepeatPenalty   float32 // 1.0 = disabled
+	RepeatLastN     int     // history window for penalty (0 = 64)
+	PresencePenalty float32 // OpenAI presence_penalty; 0 = disabled
+	LogitBias       map[int]float32
+	Stop            []string
+	OnToken         func(tokenID int) bool
 }
 
 // Context runs prefill and autoregressive decode.
