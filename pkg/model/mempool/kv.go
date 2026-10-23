@@ -108,6 +108,44 @@ func (c *KV) VLayer(layer int) []float32 {
 	return l.v[:l.n*c.kvDim]
 }
 
+// DropOldest removes the oldest n tokens from every layer (sliding-window reclaim).
+// Callers that use absolute RoPE positions must keep that contract themselves.
+func (c *KV) DropOldest(n int) {
+	if n < 1 {
+		return
+	}
+
+	for i := range c.layers {
+		l := &c.layers[i]
+		if l.n == 0 {
+			continue
+		}
+
+		drop := n
+		if drop > l.n {
+			drop = l.n
+		}
+
+		keep := l.n - drop
+		if keep > 0 {
+			copy(l.k[:keep*c.kvDim], l.k[drop*c.kvDim:l.n*c.kvDim])
+			copy(l.v[:keep*c.kvDim], l.v[drop*c.kvDim:l.n*c.kvDim])
+		}
+		l.n = keep
+	}
+
+	if c.length > n {
+		c.length -= n
+	} else {
+		c.length = 0
+	}
+}
+
+// MaxSeq returns the allocated token capacity per layer.
+func (c *KV) MaxSeq() int {
+	return c.maxSeq
+}
+
 // Reset clears length and layer counters.
 func (c *KV) Reset() {
 	c.length = 0

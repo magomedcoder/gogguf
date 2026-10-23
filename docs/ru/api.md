@@ -146,7 +146,11 @@ curl -s 127.0.0.1:8000/v1/completions \
 
 Hidden state последнего токена после output norm (до lm_head). Это генеративные GGUF-модели - не отдельные embedding-модели.
 
-`input`: строка, массив строк, token ids (`[]int`) или батчи (`[][]int`).
+| Поле              | Тип    | По умолчанию | Описание                                    |
+|-------------------|--------|--------------|---------------------------------------------|
+| `input`           | any    | -            | строка, `[]string`, `[]int` или `[][]int`   |
+| `model`           | string | GGUF         | id модели                                   |
+| `encoding_format` | string | `float`      | `float` (JSON-массив) или `base64` (LE f32) |
 
 ```bash
 curl 127.0.0.1:8000/v1/embeddings \

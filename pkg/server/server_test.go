@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -109,6 +110,35 @@ func TestEmbeddingsBadRequest(t *testing.T) {
 	srv.handleEmbeddings(rec, httptest.NewRequest(http.MethodPost, "/v1/embeddings", body))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, expected 400", rec.Code)
+	}
+}
+
+func TestParseEncodingFormat(t *testing.T) {
+	got, err := parseEncodingFormat("")
+	if err != nil || got != "float" {
+		t.Fatalf("default: %q %v", got, err)
+	}
+
+	got, err = parseEncodingFormat("base64")
+	if err != nil || got != "base64" {
+		t.Fatalf("base64: %q %v", got, err)
+	}
+
+	if _, err := parseEncodingFormat("uint8"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestEncodeEmbeddingBase64(t *testing.T) {
+	vec := []float32{1, -2}
+	s := encodeEmbeddingBase64(vec)
+	if s == "" {
+		t.Fatal("empty")
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(s)
+	if err != nil || len(raw) != 8 {
+		t.Fatalf("decode: len=%d err=%v", len(raw), err)
 	}
 }
 

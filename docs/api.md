@@ -147,10 +147,18 @@ curl -s 127.0.0.1:8000/v1/completions \
 
 Last-token hidden state after output norm (before lm_head). Generative GGUF models - not dedicated embedding models.
 
-Request `input`: string, array of strings, token ids (`[]int`), or batches (`[][]int`).
+| Field             | Type   | Default | Description                                      |
+|-------------------|--------|---------|--------------------------------------------------|
+| `input`           | any    | -       | string, `[]string`, `[]int`, or `[][]int`        |
+| `model`           | string | GGUF    | model id                                         |
+| `encoding_format` | string | `float` | `float` (JSON array) or `base64` (LE float32)    |
 
 ```bash
 curl 127.0.0.1:8000/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"input":"Hello world"}'
+
+curl 127.0.0.1:8000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"Hello","encoding_format":"base64"}'
 ```

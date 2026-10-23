@@ -40,6 +40,8 @@ CI (`.github/workflows/ci.yml`):
 | `integration-mistral` | `-tags=integration -run TestMistral`                              | Mistral-7B (separate job: larger download / RAM)   |
 | `cuda`                | `-tags=cuda` device/model packages + CPU<->GPU integration        | Qwen3-1.7B; **skips** without NVIDIA GPU           |
 
+Release (`.github/workflows/release.yml`): on `v*` tags, cross-builds CPU `gogguf`/`tools` for linux/darwin/windows * amd64/arm64 and attaches them to a GitHub Release.
+
 CUDA locally (Linux + NVIDIA) - see [platforms.md](platforms.md):
 
 ```bash

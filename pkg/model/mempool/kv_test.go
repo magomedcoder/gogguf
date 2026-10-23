@@ -72,6 +72,34 @@ func TestKVAppendAdvance(t *testing.T) {
 	}
 }
 
+func TestKVDropOldest(t *testing.T) {
+	kvDim := 2
+	c := NewKV(1, 4, kvDim, nil)
+	for i := range 3 {
+		k := []float32{float32(i), float32(i) + 0.5}
+		v := []float32{float32(i) * 10, float32(i)*10 + 1}
+		if err := c.Append(0, k, v); err != nil {
+			t.Fatal(err)
+		}
+		c.Advance()
+	}
+
+	c.DropOldest(1)
+	if c.Len() != 2 {
+		t.Fatalf("Len=%d", c.Len())
+	}
+
+	got := c.KLayer(0)
+	if len(got) != 4 || got[0] != 1 || got[2] != 2 {
+		t.Fatalf("K after drop = %v", got)
+	}
+
+	c.DropOldest(10)
+	if c.Len() != 0 || len(c.KLayer(0)) != 0 {
+		t.Fatal("drop all")
+	}
+}
+
 func TestKVFromArena(t *testing.T) {
 	kvDim := 2
 	a := NewArena(2 * 2 * 4 * kvDim)

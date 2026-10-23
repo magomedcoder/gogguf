@@ -1,15 +1,20 @@
 package server
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strings"
 )
 
 type embeddingsRequest struct {
-	Model string          `json:"model"`
-	Input json.RawMessage `json:"input"`
+	Model          string          `json:"model"`
+	Input          json.RawMessage `json:"input"`
+	EncodingFormat string          `json:"encoding_format,omitempty"` // "float" (default) or "base64"
 }
 
 type embeddingsResponse struct {
@@ -20,9 +25,9 @@ type embeddingsResponse struct {
 }
 
 type embeddingItem struct {
-	Object    string    `json:"object"`
-	Embedding []float32 `json:"embedding"`
-	Index     int       `json:"index"`
+	Object    string `json:"object"`
+	Embedding any    `json:"embedding"` // []float32 or base64 string
+	Index     int    `json:"index"`
 }
 
 type embeddingsUsage struct {
@@ -32,7 +37,7 @@ type embeddingsUsage struct {
 
 func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error")
 		return
 	}
 
@@ -45,6 +50,12 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	var req embeddingsRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid JSON", "invalid_request_error")
+		return
+	}
+
+	encFmt, err := parseEncodingFormat(req.EncodingFormat)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
 
@@ -94,11 +105,18 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		totalTokens += nTok
-		data = append(data, embeddingItem{
-			Object:    "embedding",
-			Embedding: vec,
-			Index:     i,
-		})
+		item := embeddingItem{
+			Object: "embedding",
+			Index:  i,
+		}
+
+		if encFmt == "base64" {
+			item.Embedding = encodeEmbeddingBase64(vec)
+		} else {
+			item.Embedding = vec
+		}
+
+		data = append(data, item)
 	}
 
 	writeJSON(w, embeddingsResponse{
@@ -110,6 +128,27 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 			TotalTokens:  totalTokens,
 		},
 	})
+}
+
+func parseEncodingFormat(s string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "float":
+		return "float", nil
+	case "base64":
+		return "base64", nil
+	default:
+		return "", fmt.Errorf("encoding_format must be \"float\" or \"base64\"")
+	}
+}
+
+// encodeEmbeddingBase64 encodes float32 little-endian bytes as OpenAI-style base64 embeddings
+func encodeEmbeddingBase64(vec []float32) string {
+	buf := make([]byte, 4*len(vec))
+	for i, v := range vec {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(v))
+	}
+
+	return base64.StdEncoding.EncodeToString(buf)
 }
 
 type embedInput struct {
