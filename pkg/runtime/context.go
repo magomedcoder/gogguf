@@ -19,6 +19,15 @@ type GenerateParams struct {
 	LogitBias       map[int]float32
 	Stop            []string
 	OnToken         func(tokenID int) bool
+	Logprobs        bool // record per-token logprobs during GenerateSteps
+	TopLogprobs     int  // 0..20; number of alternatives per token when Logprobs
+}
+
+// TokenLogprob is OpenAI-style logprob info for one generated token.
+type TokenLogprob struct {
+	TokenID int
+	Logprob float64
+	Top     []sampler.TopToken
 }
 
 // Context runs prefill and autoregressive decode.

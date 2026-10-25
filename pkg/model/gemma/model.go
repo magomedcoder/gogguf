@@ -93,6 +93,24 @@ func load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int, parse 
 	return m, nil
 }
 
+// prepareSWAAppend reclaims oldest KV on sliding-window layers so Append fits the window.
+func (m *Model) prepareSWAAppend(layer, n int) {
+	if !m.cfg.IsSWALayer(layer) || m.cfg.SlidingWindow <= 0 || n < 1 {
+		return
+	}
+
+	w := m.cfg.SlidingWindow
+	have := m.cache.LayerLen(layer)
+	if have+n <= w {
+		return
+	}
+
+	m.cache.DropOldestLayer(layer, have+n-w)
+	if m.dev != nil {
+		m.gpuKVStale = true
+	}
+}
+
 func (m *Model) initGPUKVCache() error {
 	if m.dev == nil || m.ngl <= 0 {
 		return nil
@@ -271,6 +289,8 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	onGPU := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 	usedQKVResidency := false
 
+	m.prepareSWAAppend(layer, 1)
+
 	// Gemma 1 only (m.residency): fused QKV+RoPE+attention reads the GPU KV-cache, so it must be complete
 	if m.residency && onGPU && !m.gpuKVStale {
 		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
@@ -374,12 +394,22 @@ func (m *Model) attentionKV(layer, seqLen int) (k, v []float32, attnSeq int) {
 		return k, v, attnSeq
 	}
 
+	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
+	stored := 0
+	if kvDim > 0 {
+		stored = len(k) / kvDim
+	}
+
+	// After DropOldestLayer reclaim, stored tokens are already the window.
+	if stored > 0 && stored <= m.cfg.SlidingWindow {
+		return k, v, stored
+	}
+
 	w := m.cfg.SlidingWindow
 	if w <= 0 || seqLen <= w {
 		return k, v, attnSeq
 	}
 
-	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
 	skip := (seqLen - 1 - w) * kvDim
 	if skip <= 0 || skip >= len(k) {
 		return k, v, attnSeq

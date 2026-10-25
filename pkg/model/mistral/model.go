@@ -123,13 +123,24 @@ func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch i
 	return m, nil
 }
 
+// ensureKVRoom reclaims oldest KV when the sliding-window cache is full.
+func (m *Model) ensureKVRoom(n int) {
+	if m.cfg.SlidingWindow <= 0 {
+		return
+	}
+
+	if dropped := m.cache.EnsureRoom(n); dropped > 0 && m.dev != nil {
+		m.gpuKVStale = true
+	}
+}
+
 func (m *Model) initGPUKVCache() error {
 	if m.dev == nil || m.ngl <= 0 {
 		return nil
 	}
 
 	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
-	maxSeq := device.CapMaxSeq(m.cfg.ContextLength, m.gpuMaxSeq)
+	maxSeq := device.CapMaxSeq(kvMaxSeq(m.cfg), m.gpuMaxSeq)
 
 	return m.dev.KVCacheInit(m.ngl, maxSeq, kvDim, m.cfg.NumHeads, m.cfg.HeadDim)
 }
@@ -240,6 +251,8 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 }
 
 func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
+	m.ensureKVRoom(1)
+
 	if err := m.embedToken(tokenID); err != nil {
 		return err
 	}

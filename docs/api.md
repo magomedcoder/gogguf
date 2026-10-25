@@ -52,11 +52,16 @@ Embeddings do not `Reset()` another session’s chat KV; the next chat/completio
       "id": "Qwen3-4B",
       "object": "model",
       "created": 1710000000,
-      "owned_by": "gogguf"
+      "owned_by": "gogguf",
+      "architecture": "qwen3",
+      "context_length": 40960,
+      "embedding_length": 2560
     }
   ]
 }
 ```
+
+Extra fields come from GGUF metadata when present (`architecture`, `context_length`, `embedding_length`).
 
 ## `GET /v1/models/{model}`
 
@@ -84,7 +89,8 @@ Same object as in the list, or `404` if the id does not match the loaded model.
 | `user`                  | string        | -         | session key when `X-Session-Id` is absent                                  |
 | `logit_bias`            | object        | -         | `{"token_id": bias, ...}` added to logits                                  |
 | `response_format`       | object        | -         | `{ "type": "text" }` or `{ "type": "json_object" }` (`json_schema` -> 400) |
-| `logprobs`              | -             | -         | **stub** (accepted, ignored)                                               |
+| `logprobs`              | bool          | `false`   | non-stream: per-token logprobs in `choices[0].logprobs`                    |
+| `top_logprobs`          | int           | `0`       | `0..20` alternatives per token (requires `logprobs=true`)                  |
 | `tools`                 | array         | -         | OpenAI-style tool definitions                                              |
 | `tool_choice`           | string/object | `auto`    | `auto` / `none` / `required` / named                                       |
 | `parallel_tool_calls`   | bool          | `false`   | allow multiple tool calls in one turn                                      |

@@ -17,6 +17,7 @@ type GenerationSession struct {
 	historyBuf   []int     // reused prompt+generated for repeat penalty
 	stopBuf      strings.Builder
 	stopReason   string // "stop" or "length"; empty until GenerateSteps
+	logprobs     []TokenLogprob
 }
 
 // StartGeneration encodes the prompt, runs prefill, and returns a decode session.
@@ -66,6 +67,10 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 	eos := s.ctx.tok.EOS()
 	if eos >= 0 && next == eos {
 		return -1, nil
+	}
+
+	if params.Logprobs {
+		s.recordLogprob(next, logits, params.TopLogprobs)
 	}
 
 	s.generated = append(s.generated, next)
@@ -171,6 +176,24 @@ func (s *GenerationSession) StopReason() string {
 	return s.stopReason
 }
 
+// Logprobs returns per-generated-token logprobs when GenerateParams.Logprobs was set.
+func (s *GenerationSession) Logprobs() []TokenLogprob {
+	return s.logprobs
+}
+
+func (s *GenerationSession) recordLogprob(id int, logits []float32, topK int) {
+	entry := TokenLogprob{
+		TokenID: id,
+		Logprob: sampler.SoftmaxLogprob(logits, id),
+	}
+
+	if topK > 0 {
+		entry.Top = sampler.TopLogprobs(logits, topK)
+	}
+
+	s.logprobs = append(s.logprobs, entry)
+}
+
 // GenerateSteps runs up to maxTokens decode steps.
 func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 	maxTokens := params.MaxTokens
@@ -180,6 +203,9 @@ func (s *GenerationSession) GenerateSteps(params GenerateParams) error {
 
 	s.stopBuf.Reset()
 	s.stopReason = "stop"
+	if params.Logprobs {
+		s.logprobs = s.logprobs[:0]
+	}
 	for i := 0; i < maxTokens; i++ {
 		id, err := s.DecodeStepWith(params)
 		if err != nil {

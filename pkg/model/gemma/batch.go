@@ -84,6 +84,8 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 		compute.ApplyRoPEHeads(k[i*kvDim:(i+1)*kvDim], m.cfg.NumKVHeads, m.cfg.HeadDim, pos, base)
 	}
 
+	m.prepareSWAAppend(layer, batch)
+
 	pastLen := m.cache.Len()
 	if err := m.cache.AppendN(layer, k, v, batch); err != nil {
 		return err

@@ -52,11 +52,16 @@ Embeddings не делают `Reset()` чужого chat KV: после embeddin
       "id": "Qwen3-4B",
       "object": "model",
       "created": 1710000000,
-      "owned_by": "gogguf"
+      "owned_by": "gogguf",
+      "architecture": "qwen3",
+      "context_length": 40960,
+      "embedding_length": 2560
     }
   ]
 }
 ```
+
+Доп. поля из GGUF metadata при наличии: `architecture`, `context_length`, `embedding_length`.
 
 ## `GET /v1/models/{model}`
 
@@ -84,7 +89,8 @@ Embeddings не делают `Reset()` чужого chat KV: после embeddin
 | `user`                  | string        | -            | ключ сессии без `X-Session-Id`                 |
 | `logit_bias`            | object        | -            | `{"token_id": bias, ...}`                      |
 | `response_format`       | object        | -            | `text` / `json_object` (`json_schema` -> 400)  |
-| `logprobs`              | -             | -            | **заглушка**                                   |
+| `logprobs`              | bool          | `false`      | non-stream: logprobs в `choices[0].logprobs`   |
+| `top_logprobs`          | int           | `0`          | `0..20` альтернатив (нужен `logprobs=true`)    |
 | `tools`                 | array         | -            | описания инструментов                          |
 | `tool_choice`           | string/object | `auto`       | `auto` / `none` / `required` / по имени        |
 | `parallel_tool_calls`   | bool          | `false`      | несколько tool_calls за один ход               |

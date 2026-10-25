@@ -25,6 +25,8 @@ func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) erro
 		return fmt.Errorf("mistral: batch=%d > n_batch=%d", b, m.nBatch)
 	}
 
+	m.ensureKVRoom(b)
+
 	embd := m.cfg.EmbeddingDim
 	for i, tok := range tokenIDs {
 		if err := dispatch.EmbedTokenInto(m.weights, m.scratch.bx[i*embd:(i+1)*embd], embd, tok); err != nil {

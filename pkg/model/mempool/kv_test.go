@@ -100,6 +100,48 @@ func TestKVDropOldest(t *testing.T) {
 	}
 }
 
+func TestKVEnsureRoom(t *testing.T) {
+	c := NewKV(1, 3, 2, nil)
+	for i := range 3 {
+		if err := c.Append(0, []float32{float32(i), 0}, []float32{0, 0}); err != nil {
+			t.Fatal(err)
+		}
+
+		c.Advance()
+	}
+
+	if dropped := c.EnsureRoom(1); dropped != 1 {
+		t.Fatalf("EnsureRoom dropped=%d", dropped)
+	}
+
+	if c.TokensStored() != 2 || c.Len() != 2 {
+		t.Fatalf("stored=%d len=%d", c.TokensStored(), c.Len())
+	}
+
+	if err := c.Append(0, []float32{9, 9}, []float32{0, 0}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestKVDropOldestLayer(t *testing.T) {
+	c := NewKV(2, 4, 2, nil)
+	for i := range 3 {
+		k := []float32{float32(i), 0}
+		_ = c.Append(0, k, k)
+		_ = c.Append(1, k, k)
+		c.Advance()
+	}
+
+	c.DropOldestLayer(0, 1)
+	if c.LayerLen(0) != 2 || c.LayerLen(1) != 3 || c.Len() != 3 {
+		t.Fatalf("layer0=%d layer1=%d len=%d", c.LayerLen(0), c.LayerLen(1), c.Len())
+	}
+
+	if got := c.KLayer(0); got[0] != 1 {
+		t.Fatalf("K0=%v", got)
+	}
+}
+
 func TestKVFromArena(t *testing.T) {
 	kvDim := 2
 	a := NewArena(2 * 2 * 4 * kvDim)

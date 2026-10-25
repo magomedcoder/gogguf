@@ -29,7 +29,7 @@ type chatCompletionRequest struct {
 	Seed                *int64          `json:"seed,omitempty"`
 	User                string          `json:"user,omitempty"` // session key when X-Session-Id is absent
 	LogitBias           json.RawMessage `json:"logit_bias,omitempty"`
-	Logprobs            *bool           `json:"logprobs,omitempty"` // stub
+	Logprobs            *bool           `json:"logprobs,omitempty"`
 	TopLogprobs         *int            `json:"top_logprobs,omitempty"`
 	ResponseFormat      json.RawMessage `json:"response_format,omitempty"`
 	Tools               []chat.Tool     `json:"tools,omitempty"`
@@ -60,10 +60,27 @@ type chatCompletionResponse struct {
 }
 
 type chatCompletionChoice struct {
-	Index        int              `json:"index"`
-	Message      chatMessagePlain `json:"message"`
-	FinishReason string           `json:"finish_reason"`
-	Logprobs     *struct{}        `json:"logprobs"` // OpenAI: null when unused
+	Index        int                 `json:"index"`
+	Message      chatMessagePlain    `json:"message"`
+	FinishReason string              `json:"finish_reason"`
+	Logprobs     *chatChoiceLogprobs `json:"logprobs"` // OpenAI: null when unused
+}
+
+type chatChoiceLogprobs struct {
+	Content []chatTokenLogprob `json:"content"`
+}
+
+type chatTokenLogprob struct {
+	Token       string           `json:"token"`
+	Logprob     float64          `json:"logprob"`
+	Bytes       []byte           `json:"bytes"`
+	TopLogprobs []chatTopLogprob `json:"top_logprobs"`
+}
+
+type chatTopLogprob struct {
+	Token   string  `json:"token"`
+	Logprob float64 `json:"logprob"`
+	Bytes   []byte  `json:"bytes"`
 }
 
 type chatMessagePlain struct {
@@ -262,7 +279,20 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stub: logprobs / top_logprobs accepted and ignored.
+	wantLogprobs := req.Logprobs != nil && *req.Logprobs
+	topLogprobs := 0
+	if req.TopLogprobs != nil {
+		topLogprobs = *req.TopLogprobs
+	}
+	if wantLogprobs {
+		if topLogprobs < 0 || topLogprobs > 20 {
+			writeAPIError(w, http.StatusBadRequest, "top_logprobs must be between 0 and 20", "invalid_request_error")
+			return
+		}
+	} else if req.TopLogprobs != nil && topLogprobs != 0 {
+		writeAPIError(w, http.StatusBadRequest, "top_logprobs requires logprobs=true", "invalid_request_error")
+		return
+	}
 
 	respFmt, err := parseResponseFormat(req.ResponseFormat)
 	if err != nil {
@@ -328,6 +358,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		PresencePenalty: presencePenaltyValue(req.PresencePenalty),
 		LogitBias:       bias,
 		Stop:            stops,
+		Logprobs:        wantLogprobs,
+		TopLogprobs:     topLogprobs,
 	}
 
 	s.inferMu.Lock()
@@ -340,6 +372,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	fp := systemFingerprint(modelName)
 	if req.Stream {
+		genParams.Logprobs = false // stream logprobs not wired yet
 		includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
 		s.serveChatStream(w, conv, prompt, modelName, genParams, includeUsage, len(req.Tools) > 0 || respFmt == "json_object", stops, respFmt, fp)
 		return
@@ -383,7 +416,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				ToolCalls: parsed.ToolCalls,
 			},
 			FinishReason: openaiFinishReason(parsed.HasToolCalls(), sess.StopReason()),
-			Logprobs:     nil,
+			Logprobs:     buildChatLogprobs(sess),
 		}},
 		Usage: chatCompletionUsage{
 			PromptTokens:     sess.PromptTokenCount(),
@@ -391,6 +424,43 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			TotalTokens:      sess.PromptTokenCount() + sess.GeneratedCount(),
 		},
 	})
+}
+
+func buildChatLogprobs(sess *runtime.GenerationSession) *chatChoiceLogprobs {
+	entries := sess.Logprobs()
+	if len(entries) == 0 {
+		return nil
+	}
+
+	content := make([]chatTokenLogprob, 0, len(entries))
+	for _, e := range entries {
+		tok := sess.DecodeToken(e.TokenID)
+		item := chatTokenLogprob{
+			Token:   tok,
+			Logprob: e.Logprob,
+			Bytes:   []byte(tok),
+		}
+
+		if len(e.Top) > 0 {
+			item.TopLogprobs = make([]chatTopLogprob, 0, len(e.Top))
+			for _, t := range e.Top {
+				tt := sess.DecodeToken(t.ID)
+				item.TopLogprobs = append(item.TopLogprobs, chatTopLogprob{
+					Token:   tt,
+					Logprob: t.Logprob,
+					Bytes:   []byte(tt),
+				})
+			}
+		} else {
+			item.TopLogprobs = []chatTopLogprob{}
+		}
+
+		content = append(content, item)
+	}
+
+	return &chatChoiceLogprobs{
+		Content: content,
+	}
 }
 
 func trimStopSuffix(text string, stops []string) string {

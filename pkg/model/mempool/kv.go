@@ -116,22 +116,7 @@ func (c *KV) DropOldest(n int) {
 	}
 
 	for i := range c.layers {
-		l := &c.layers[i]
-		if l.n == 0 {
-			continue
-		}
-
-		drop := n
-		if drop > l.n {
-			drop = l.n
-		}
-
-		keep := l.n - drop
-		if keep > 0 {
-			copy(l.k[:keep*c.kvDim], l.k[drop*c.kvDim:l.n*c.kvDim])
-			copy(l.v[:keep*c.kvDim], l.v[drop*c.kvDim:l.n*c.kvDim])
-		}
-		l.n = keep
+		c.dropOldestLayer(i, n)
 	}
 
 	if c.length > n {
@@ -139,6 +124,74 @@ func (c *KV) DropOldest(n int) {
 	} else {
 		c.length = 0
 	}
+}
+
+// DropOldestLayer removes the oldest n tokens from one layer without changing Len().
+// Used for hybrid SWA (e.g. Gemma2) where only some layers reclaim.
+func (c *KV) DropOldestLayer(layer, n int) {
+	if n < 1 || layer < 0 || layer >= len(c.layers) {
+		return
+	}
+
+	c.dropOldestLayer(layer, n)
+}
+
+func (c *KV) dropOldestLayer(layer, n int) {
+	l := &c.layers[layer]
+	if l.n == 0 {
+		return
+	}
+
+	drop := n
+	if drop > l.n {
+		drop = l.n
+	}
+
+	keep := l.n - drop
+	if keep > 0 {
+		copy(l.k[:keep*c.kvDim], l.k[drop*c.kvDim:l.n*c.kvDim])
+		copy(l.v[:keep*c.kvDim], l.v[drop*c.kvDim:l.n*c.kvDim])
+	}
+	l.n = keep
+}
+
+// LayerLen returns how many tokens are stored in one layer.
+func (c *KV) LayerLen(layer int) int {
+	if layer < 0 || layer >= len(c.layers) {
+		return 0
+	}
+
+	return c.layers[layer].n
+}
+
+// TokensStored returns the max per-layer token count (occupancy before Advance sync).
+func (c *KV) TokensStored() int {
+	max := 0
+	for i := range c.layers {
+		if c.layers[i].n > max {
+			max = c.layers[i].n
+		}
+	}
+
+	return max
+}
+
+// EnsureRoom drops oldest tokens across all layers so TokensStored()+n fits in MaxSeq.
+// Returns how many tokens were dropped (0 if already enough room).
+func (c *KV) EnsureRoom(n int) int {
+	if n < 1 {
+		return 0
+	}
+
+	have := c.TokensStored()
+	if have+n <= c.maxSeq {
+		return 0
+	}
+
+	drop := have + n - c.maxSeq
+	c.DropOldest(drop)
+
+	return drop
 }
 
 // MaxSeq returns the allocated token capacity per layer.

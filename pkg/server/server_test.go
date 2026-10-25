@@ -59,6 +59,9 @@ func TestModelsFormat(t *testing.T) {
 	if len(resp.Data) != 1 || resp.Data[0].ID == "" {
 		t.Fatalf("expected one model with id, got %+v", resp)
 	}
+	if resp.Data[0].Object != "model" || resp.Data[0].OwnedBy != "gogguf" {
+		t.Fatalf("model card: %+v", resp.Data[0])
+	}
 }
 
 // TestOpenAIAPI smoke-checks the registered /v1 surface without a loaded model

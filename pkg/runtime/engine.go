@@ -150,14 +150,42 @@ func (e *Engine) Tokenizer() *tokenizer.Tokenizer {
 	return e.tok
 }
 
+// Architecture returns general.architecture from metadata (empty if unknown).
+func (e *Engine) Architecture() string {
+	if e == nil || e.meta == nil {
+		return ""
+	}
+
+	arch, err := e.meta.String("general.architecture")
+	if err != nil {
+		return ""
+	}
+
+	return arch
+}
+
 // ContextLength returns max context length from metadata (0 if unknown).
 func (e *Engine) ContextLength() int {
-	arch, err := e.meta.String("general.architecture")
-	if err != nil || arch == "" {
+	arch := e.Architecture()
+	if arch == "" {
 		return 0
 	}
 
 	return e.meta.IntOptional(arch+".context_length", 0)
+}
+
+// EmbeddingLength returns embedding/hidden size from metadata (0 if unknown).
+func (e *Engine) EmbeddingLength() int {
+	arch := e.Architecture()
+	if arch == "" {
+		return 0
+	}
+
+	if n := e.meta.IntOptional(arch+".embedding_length", 0); n > 0 {
+		return n
+	}
+
+	return e.meta.IntOptional(arch+".hidden_size", 0)
 }
 
 // ForwardTokenIDs runs a forward pass for token IDs.

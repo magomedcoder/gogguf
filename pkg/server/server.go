@@ -109,10 +109,13 @@ type modelsResponse struct {
 }
 
 type modelRef struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
+	ID              string `json:"id"`
+	Object          string `json:"object"`
+	Created         int64  `json:"created"`
+	OwnedBy         string `json:"owned_by"`
+	Architecture    string `json:"architecture,omitempty"`
+	ContextLength   int    `json:"context_length,omitempty"`
+	EmbeddingLength int    `json:"embedding_length,omitempty"`
 }
 
 func (s *Server) resolveModelID() string {
@@ -135,12 +138,19 @@ func (s *Server) resolveModelID() string {
 }
 
 func (s *Server) modelRef() modelRef {
-	return modelRef{
+	ref := modelRef{
 		ID:      s.resolveModelID(),
 		Object:  "model",
 		Created: s.created,
 		OwnedBy: "gogguf",
 	}
+	if s.engine != nil {
+		ref.Architecture = s.engine.Architecture()
+		ref.ContextLength = s.engine.ContextLength()
+		ref.EmbeddingLength = s.engine.EmbeddingLength()
+	}
+
+	return ref
 }
 
 func sessionIDFromRequest(r *http.Request, user string) string {
