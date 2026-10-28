@@ -156,10 +156,7 @@ func (c *KV) dropOldestLayer(layer, n int) {
 		return
 	}
 
-	drop := n
-	if drop > l.n {
-		drop = l.n
-	}
+	drop := min(n, l.n)
 
 	keep := l.n - drop
 	if keep > 0 {

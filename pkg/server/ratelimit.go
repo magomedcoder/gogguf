@@ -89,10 +89,7 @@ func (rl *rateLimiter) allowWithRemaining(key string) (remaining int, ok bool) {
 	}
 
 	b.tokens--
-	rem := int(b.tokens)
-	if rem < 0 {
-		rem = 0
-	}
+	rem := max(int(b.tokens), 0)
 
 	return rem, true
 }

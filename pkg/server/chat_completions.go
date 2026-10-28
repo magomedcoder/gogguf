@@ -121,7 +121,7 @@ type chatStreamToolCall struct {
 	Index    int                    `json:"index"`
 	ID       string                 `json:"id,omitempty"`
 	Type     string                 `json:"type,omitempty"`
-	Function chatStreamToolFunction `json:"function,omitempty"`
+	Function chatStreamToolFunction `json:"function"`
 }
 
 type chatStreamToolFunction struct {

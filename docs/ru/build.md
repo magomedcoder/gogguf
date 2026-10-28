@@ -2,7 +2,7 @@
 
 ## Локально
 
-Нужен **Go 1.26+**.
+Нужен **Go 1.27+**.
 
 ```bash
 go build -o build/gogguf ./cmd/gogguf

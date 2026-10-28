@@ -2,7 +2,7 @@
 
 ## Local build
 
-Requires **Go 1.26+**.
+Requires **Go 1.27+**.
 
 ```bash
 go build -o build/gogguf ./cmd/gogguf

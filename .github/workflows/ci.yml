@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache-dependency-path: go.sum
 
       - name: Vet
@@ -49,7 +49,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache-dependency-path: go.sum
 
       - name: Cross-build CPU targets
@@ -67,7 +67,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache-dependency-path: go.sum
 
       - name: Download test models
@@ -91,7 +91,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache-dependency-path: go.sum
 
       - name: Download Mistral test model
@@ -110,7 +110,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "1.27.x"
           cache-dependency-path: go.sum
 
       - name: Download Qwen3 test model

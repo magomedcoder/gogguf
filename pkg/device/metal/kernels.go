@@ -1,5 +1,7 @@
 package metal
 
+import "slices"
+
 // KernelsImplemented is false until Metal Shading Language kernels back Backend.
 // pkg/model.Options.Normalize uses Backend.Ready (this flag) to decide whether darwin -ngl may offload.
 const KernelsImplemented = false
@@ -39,10 +41,8 @@ var PlannedKernels = []KernelPlan{
 // plannedKernelFor returns the first planned kernel dispatched by a Backend entry point ("" when none is named)
 func plannedKernelFor(entry string) string {
 	for _, k := range PlannedKernels {
-		for _, e := range k.Entries {
-			if e == entry {
-				return k.Name
-			}
+		if slices.Contains(k.Entries, entry) {
+			return k.Name
 		}
 	}
 
