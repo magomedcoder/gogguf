@@ -2,12 +2,8 @@
 
 package vec
 
-func init() {
-	if HasAVX2() {
-		DotStride = dotStrideAVX2
-		DotStrideBlock = dotStrideBlockAVX2
-	}
-}
+// AVX2 DotStride / DotStrideBlock kernels are retained for benches.
+// They are not wired into the hot path: fixtures and golden logits were recorded with the pure DotStride loop (pre-SIMD), and the block kernel's FMA order drifts past abs 1e-4.
 
 func dotStrideAVX2(weights []float32, v []float32, vOff, vStride, n int) float32 {
 	if n <= 0 || n > len(weights) {

@@ -80,6 +80,40 @@ func TestParseConfigQwen2Defaults(t *testing.T) {
 	if cfg.VocabSize != 152064 {
 		t.Fatalf("VocabSize=%d", cfg.VocabSize)
 	}
+
+	if cfg.SlidingWindow != 0 {
+		t.Fatalf("Qwen2 SlidingWindow=%d, want 0", cfg.SlidingWindow)
+	}
+}
+
+func TestParseConfigLlamaTheBlokeDefaultSWA(t *testing.T) {
+	// TheBloke Mistral GGUFs often omit llama.attention.sliding_window.
+	r := &format.Reader{
+		Metadata: format.Metadata{
+			"llama.context_length":          int32(32768),
+			"llama.embedding_length":        int32(4096),
+			"llama.feed_forward_length":     int32(14336),
+			"llama.block_count":             int32(32),
+			"llama.attention.head_count":    int32(32),
+			"llama.attention.head_count_kv": int32(8),
+			"llama.rope.freq_base":          float32(1000000),
+		},
+		Tensors: []format.TensorInfo{
+			{
+				Name:       "token_embd.weight",
+				Dimensions: []uint64{4096, 32000},
+			},
+		},
+	}
+
+	cfg, err := mistral.ParseConfigLlama(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.SlidingWindow != 4096 {
+		t.Fatalf("SlidingWindow=%d, want default 4096", cfg.SlidingWindow)
+	}
 }
 
 func TestParseConfigLlamaMixtralMoE(t *testing.T) {
@@ -113,6 +147,10 @@ func TestParseConfigLlamaMixtralMoE(t *testing.T) {
 
 	if !cfg.MoENormWeights {
 		t.Fatal("Mixtral MoE must renorm weights")
+	}
+
+	if cfg.SlidingWindow != 4096 {
+		t.Fatalf("Mixtral SlidingWindow=%d, want default 4096", cfg.SlidingWindow)
 	}
 }
 

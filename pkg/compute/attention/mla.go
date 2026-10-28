@@ -69,7 +69,9 @@ func AttentionMLAAbsorbedInto(dst, q, k, v, scores, wvB []float32, seqLen, nHead
 
 		SoftmaxInPlace(headScores)
 
-		vec.DotStrideBlock(ctx, headScores, v, 0, kvLora, seqLen)
+		for i := range kvLora {
+			ctx[i] = vec.DotStride(headScores, v, i, kvLora, seqLen)
+		}
 
 		// wv_b[h]: out[v] = Σ_k W[k + kvLora*v + kvLora*vHead*h] * ctx[k]
 		base := h * kvLora * vHead

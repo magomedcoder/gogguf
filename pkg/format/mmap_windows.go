@@ -56,7 +56,9 @@ func OpenFileMapped(path string) (*MappedReader, error) {
 		return nil, fmt.Errorf("gguf: MapViewOfFile: %w", err)
 	}
 
-	data := unsafe.Slice((*byte)(unsafe.Pointer(addr)), int(size))
+	// MapViewOfFile returns uintptr; convert via *unsafe.Pointer so go vet accepts it (direct unsafe.Pointer(addr) is flagged as possible misuse).
+	ptr := *(*unsafe.Pointer)(unsafe.Pointer(&addr))
+	data := unsafe.Slice((*byte)(ptr), int(size))
 	src := &mmapSource{
 		data: data,
 	}

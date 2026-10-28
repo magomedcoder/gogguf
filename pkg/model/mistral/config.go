@@ -28,24 +28,27 @@ type Config struct {
 	SharedExpertGate  bool // Qwen2MoE: silu(gate_inp)/gate_inp on shared FFN
 }
 
+// defaultMistralSWA is the Mistral 7B / Mixtral sliding window when GGUF omits the key (common for TheBloke llama.*-prefixed exports).
+const defaultMistralSWA = 4096
+
 // ParseConfig reads config from GGUF metadata (mistral. prefix)
 func ParseConfig(r *format.Reader) (Config, error) {
-	return parseConfigWithPrefix(r, "mistral.", 1e-5, 1000000)
+	return parseConfigWithPrefix(r, "mistral.", 1e-5, 1000000, defaultMistralSWA)
 }
 
 // ParseConfigLlama reads Mistral model config with llama.* prefix (TheBloke and convert.py)
 func ParseConfigLlama(r *format.Reader) (Config, error) {
-	return parseConfigWithPrefix(r, "llama.", 1e-5, 1000000)
+	return parseConfigWithPrefix(r, "llama.", 1e-5, 1000000, defaultMistralSWA)
 }
 
 // ParseConfigQwen2 reads qwen2.* (DeepSeek distill, etc.)
 func ParseConfigQwen2(r *format.Reader) (Config, error) {
-	return parseConfigWithPrefix(r, "qwen2.", 1e-6, 10000)
+	return parseConfigWithPrefix(r, "qwen2.", 1e-6, 10000, 0)
 }
 
 // ParseConfigQwen2MoE reads qwen2moe.* (MoE + gated shared expert)
 func ParseConfigQwen2MoE(r *format.Reader) (Config, error) {
-	cfg, err := parseConfigWithPrefix(r, "qwen2moe.", 1e-6, 10000)
+	cfg, err := parseConfigWithPrefix(r, "qwen2moe.", 1e-6, 10000, 0)
 	if err != nil {
 		return Config{}, err
 	}
@@ -67,7 +70,7 @@ func ParseConfigQwen2MoE(r *format.Reader) (Config, error) {
 	return cfg, nil
 }
 
-func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultRope float32) (Config, error) {
+func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultRope float32, defaultSlidingWindow int) (Config, error) {
 	getInt := func(key string) (int, error) {
 		return r.Metadata.Int(prefix + key)
 	}
@@ -121,7 +124,7 @@ func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultR
 		headDim = v
 	}
 
-	slidingWindow := 0
+	slidingWindow := defaultSlidingWindow
 	if v, err := getInt("attention.sliding_window"); err == nil && v > 0 {
 		slidingWindow = v
 	}

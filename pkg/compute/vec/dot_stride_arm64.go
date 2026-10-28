@@ -2,9 +2,7 @@
 
 package vec
 
-func init() {
-	DotStrideBlock = dotStrideBlockNEON
-}
+// NEON DotStrideBlock kept for benches; not wired - same fixture drift as amd64 AVX2.
 
 func dotStrideBlockNEON(dst, weights, v []float32, vOff, vStride, n int) {
 	d := len(dst)

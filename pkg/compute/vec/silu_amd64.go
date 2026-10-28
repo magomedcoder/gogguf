@@ -4,12 +4,8 @@ package vec
 
 import "math"
 
-func init() {
-	if HasAVX2() {
-		SiLUInPlaceFn = siluInPlaceAVX2
-	}
-}
-
+// AVX2 SiLU (siluInPlaceAVX2 / siluInPlaceAVX2Asm) is kept for benches but not wired into SiLUInPlaceFn: the Cephes-style expf (~1e-7 rel) drifts past golden/fixture abs tol 1e-4 across many FFN layers (and can flip early lm_head greedy).
+// Re-enable once the asm matches math.Exp closely enough.
 func siluInPlaceAVX2(x []float32) {
 	n := len(x)
 	i := 0
