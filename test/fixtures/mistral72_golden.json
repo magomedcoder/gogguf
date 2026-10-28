@@ -11,70 +11,70 @@
     {
       "name": "raw_hello_greedy",
       "input": "Hello",
-      "greedy_next": 8817,
+      "greedy_next": 28725,
       "top_logits": [
         {
-          "id": 8817,
-          "logit": 161.13416
+          "id": 28725,
+          "logit": 12.133604
         },
         {
-          "id": 6588,
-          "logit": 160.36752
+          "id": 3376,
+          "logit": 11.49569
         },
         {
-          "id": 1987,
-          "logit": 144.7228
+          "id": 28808,
+          "logit": 11.090069
         },
         {
-          "id": 4595,
-          "logit": 142.11826
+          "id": 304,
+          "logit": 10.954804
         },
         {
-          "id": 5104,
-          "logit": 141.75104
+          "id": 544,
+          "logit": 10.859601
         }
       ]
     },
     {
       "name": "chat_hello_greedy",
       "chat_user": "Hello",
-      "greedy_next": 6588,
+      "greedy_next": 28747,
       "top_logits": [
         {
-          "id": 6588,
-          "logit": 160.77608
+          "id": 28747,
+          "logit": 14.968689
         },
         {
-          "id": 8817,
-          "logit": 160.34186
+          "id": 315,
+          "logit": 7.0314193
         },
         {
-          "id": 1987,
-          "logit": 148.14601
+          "id": 7281,
+          "logit": 6.1005926
         },
         {
-          "id": 4623,
-          "logit": 137.89551
+          "id": 26735,
+          "logit": 5.3725243
         },
         {
-          "id": 3814,
-          "logit": 137.73872
+          "id": 4049,
+          "logit": 5.262087
         }
       ]
     },
     {
       "name": "chat_greedy_8",
       "chat_user": "Hello",
+      "max_tokens": 7,
       "greedy_tokens": [
-        6588,
-        6588,
-        6588,
-        6588,
-        6588,
-        6588,
-        6588
-      ],
-      "max_tokens": 7
+        28747,
+        21558,
+        28747,
+        28731,
+        315,
+        28742,
+        28719
+      ]
     }
   ]
 }
