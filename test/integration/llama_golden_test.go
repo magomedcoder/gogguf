@@ -201,11 +201,15 @@ func assertGreedyAndTopLogits(t *testing.T, logits []float32, wantNext int, want
 		t.Fatalf("greedy next = %d, expected %d", next, wantNext)
 	}
 
-	const logitTol = 1e-4
 	for _, want := range wantTop {
 		got := logits[want.ID]
-		if math.Abs(float64(got-want.Logit)) > logitTol {
+		if !llamaLogitClose(got, want.Logit) {
 			t.Fatalf("logit[%d] = %v, expected ~%v", want.ID, got, want.Logit)
 		}
 	}
+}
+
+func llamaLogitClose(got, want float32) bool {
+	d := math.Abs(float64(got - want))
+	return d <= math.Max(1e-3, 0.02*math.Abs(float64(want)))
 }

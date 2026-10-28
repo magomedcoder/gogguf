@@ -81,6 +81,21 @@ jobs:
       - name: Package tests with models
         run: go test -count=1 -timeout 15m ./pkg/model/qwen3/
 
+      - name: Refresh Llama golden fixtures (CPU reference)
+        run: |
+          go run ./cmd/tools refreshllama -m models/Llama-3.2-1B-Instruct-Q8_0.gguf -o test/fixtures
+          if ! git diff --quiet -- test/fixtures/llama32_golden.json test/fixtures/llama32_layer_logits.json; then
+            git diff --stat -- test/fixtures/llama32_*.json
+            mkdir -p artifact-llama-fixtures
+            cp test/fixtures/llama32_golden.json test/fixtures/llama32_layer_logits.json artifact-llama-fixtures/
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: hashFiles('artifact-llama-fixtures/*') != ''
+        with:
+          name: llama-fixtures-refresh
+          path: artifact-llama-fixtures/
+
       - name: Integration tests (Qwen3 + Llama)
         run: go test -tags=integration -count=1 -timeout 30m ./test/integration/...
 

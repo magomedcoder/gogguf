@@ -18,6 +18,7 @@ Usage:
   tools comparelogits -a dump -b dump        compare two dumps (or -m CPU vs GPU)
   tools dumplayers -m file.gguf -p "..."     embed+hidden per layer -> .bin/.json
   tools comparelayers -a dump -b dump        compare hidden (or -m CPU vs GPU)
+  tools refreshllama -m file.gguf -o dir     rewrite llama32_* fixtures from CPU forward
 `
 
 func main() {
@@ -48,6 +49,8 @@ func main() {
 		err = runDumpLayers(os.Args[2:])
 	case "comparelayers":
 		err = runCompareLayers(os.Args[2:])
+	case "refreshllama":
+		err = runRefreshLlama(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %q\n\n", os.Args[1])
 		fmt.Print(usage)
