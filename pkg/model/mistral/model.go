@@ -39,6 +39,7 @@ type Model struct {
 	residDevice bool // hidden state is on device; host buffer x is stale
 	logitsOnGPU bool // out_norm + lm_head computed on GPU
 	gpuKVStale  bool // GPU KV-cache incomplete: attention on CPU only
+	cpuKVHollow bool // CPU KV slots bumped without K/V data (residency decode)
 }
 
 // Load creates Mistral from weights (mistral.* prefix)
@@ -155,6 +156,7 @@ func (m *Model) ResetCache() {
 	m.cache.Reset()
 	m.residDevice = false
 	m.gpuKVStale = false
+	m.cpuKVHollow = false
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -342,9 +344,14 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 	// entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals
 	if m.residDevice {
-		err := m.forwardBlockDevice(layer, pos, ln, m.scratch.k, m.scratch.v, m.scratch.attn)
+		err := m.forwardBlockDevice(layer, pos, ln)
 		if err == nil {
 			return nil
+		}
+
+		if m.cpuKVHollow {
+			m.ResetCache()
+			return fmt.Errorf("mistral: layer %d residency failed without CPU KV mirror: %w", layer, err)
 		}
 
 		if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {

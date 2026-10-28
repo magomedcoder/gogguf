@@ -35,6 +35,7 @@ type Model struct {
 	residDevice bool          // hidden state is on device; host buffer x is stale
 	logitsOnGPU bool          // out_norm + lm_head computed on GPU
 	gpuKVStale  bool          // GPU KV-cache incomplete: attention on CPU only
+	cpuKVHollow bool          // CPU KV slots bumped without K/V data (residency decode)
 
 	fused     *gpuresid.Runner   // fused GPU layer paths
 	fusedDims gpuresid.Dims      // dimensions for fused paths
@@ -223,6 +224,7 @@ func (m *Model) ResetCache() {
 	m.cache.Reset()
 	m.residDevice = false
 	m.gpuKVStale = false
+	m.cpuKVHollow = false
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -403,9 +405,15 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	// entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals.
 	// host x is not read or updated.
 	if m.residDevice {
-		err := m.forwardBlockDevice(layer, pos, ln, k, v, attn)
+		err := m.forwardBlockDevice(layer, pos, ln)
 		if err == nil {
 			return nil
+		}
+
+		// Hollow CPU mirror: cannot fall back to host attention; reset and fail.
+		if m.cpuKVHollow {
+			m.ResetCache()
+			return fmt.Errorf("qwen3: layer %d residency failed without CPU KV mirror: %w", layer, err)
 		}
 
 		// Device KV append failure (-6): mark stale and try rebuild from CPU mirror.
@@ -527,22 +535,23 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 }
 
 // forwardBlockDevice runs the layer on GPU over resident hidden state.
-// k/v copied to host only for CPU KV-cache mirror (needed for fallback paths).
-func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []float32) error {
-	if err := m.qkvAttnGPU(layer, pos, ln, nil, k, v, attn); err != nil {
+// Skips host k/v/attn mirrors (GPU KV + d_vec are source of truth) to cut decode PCIe.
+func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
+	if err := m.qkvAttnGPU(layer, pos, ln, nil, nil, nil, nil); err != nil {
 		return err
 	}
 
-	if err := m.cache.Append(layer, k, v); err != nil {
+	if err := m.cache.Bump(layer, 1); err != nil {
 		return err
 	}
+	m.cpuKVHollow = true
 
-	return m.attnFFNGPU(layer, ln, nil, attn)
+	return m.attnFFNGPU(layer, ln, nil, nil)
 }
 
 // tryRecoverGPUKV rebuilds device KV from the CPU mirror without ResetCache (session stays).
 func (m *Model) tryRecoverGPUKV() bool {
-	if m.dev == nil || !m.gpuKVStale {
+	if m.dev == nil || !m.gpuKVStale || m.cpuKVHollow {
 		return false
 	}
 

@@ -105,17 +105,19 @@ func (m *Model) uploadHidden() {
 	m.residDevice = true
 }
 
-// forwardBlockDevice runs the layer on GPU over resident hidden state
-func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms, k, v, attn []float32) error {
-	if err := m.qkvAttnGPU(layer, pos, ln, nil, k, v, attn); err != nil {
+// forwardBlockDevice runs the layer on GPU over resident hidden state.
+// Skips host k/v/attn mirrors (GPU KV + d_vec are source of truth) to cut decode PCIe.
+func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
+	if err := m.qkvAttnGPU(layer, pos, ln, nil, nil, nil, nil); err != nil {
 		return err
 	}
 
-	if err := m.cache.Append(layer, k, v); err != nil {
+	if err := m.cache.Bump(layer, 1); err != nil {
 		return err
 	}
+	m.cpuKVHollow = true
 
-	return m.attnFFNGPU(layer, ln, nil, attn)
+	return m.attnFFNGPU(layer, ln, nil, nil)
 }
 
 // qkvAttnGPU: QKV + RoPE + KV append + attention on GPU.

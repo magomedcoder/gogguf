@@ -2581,8 +2581,8 @@ int gguf_cuda_qkv_rope_attn_device(
 	float *attn_out, float *k_out, float *v_out,
 	int embd, int n_heads, int n_kv_heads, int head_dim,
 	int layer, int kv_pos, int seq_len, int rope_mode, float eps) {
-	// attn_out may be NULL when resid path keeps attn on device (skip DtoH); k/v still mirrored for CPU cache.
-	if (!mpool || !apool || !kv || !fn_matmul || !fn_rope || !fn_qk || !fn_v || !cos_tbl || !sin_tbl || !k_out || !v_out) {
+	// attn_out / k_out / v_out may be NULL on full residency decode (skip host mirror DtoH).
+	if (!mpool || !apool || !kv || !fn_matmul || !fn_rope || !fn_qk || !fn_v || !cos_tbl || !sin_tbl) {
 		return -20;
 	}
 
@@ -2764,19 +2764,23 @@ int gguf_cuda_qkv_rope_attn_device(
 
 	mpool->skip_attn_htod = 1;
 
-	// Skip attn DtoH on residency decode: AttnFFN reads d_vec; host attn unused.
+	// Host mirrors optional: residency decode keeps attn in d_vec and K/V only on device KV.
 	if (attn_out != NULL) {
 		if (drv->cuMemcpyDtoH(attn_out, apool->d_dst, q_bytes) != CUDA_SUCCESS) {
 			return -3;
 		}
 	}
 
-	if (drv->cuMemcpyDtoH(k_out, apool->d_k_tok, kv_bytes) != CUDA_SUCCESS) {
-		return -3;
+	if (k_out != NULL) {
+		if (drv->cuMemcpyDtoH(k_out, apool->d_k_tok, kv_bytes) != CUDA_SUCCESS) {
+			return -3;
+		}
 	}
 
-	if (drv->cuMemcpyDtoH(v_out, apool->d_v_tok, kv_bytes) != CUDA_SUCCESS) {
-		return -3;
+	if (v_out != NULL) {
+		if (drv->cuMemcpyDtoH(v_out, apool->d_v_tok, kv_bytes) != CUDA_SUCCESS) {
+			return -3;
+		}
 	}
 
 	return 0;
@@ -3354,6 +3358,63 @@ int gguf_cuda_matmul_mat_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn
 		if (drv->cuLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
 			return -3;
 		}
+	}
+
+	if (stream && drv->cuStreamSynchronize) {
+		if (drv->cuStreamSynchronize(stream) != CUDA_SUCCESS) {
+			return -5;
+		}
+	}
+
+	if (drv->cuMemcpyDtoH(out, pool->d_out, out_bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	return 0;
+}
+
+int gguf_cuda_matmul_mat_f32_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_mat, CUfunction fn_vec, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch) {
+	if (!pool || !x || !out || rows <= 0 || cols <= 0 || batch < 1) {
+		return -20;
+	}
+
+	if (batch == 1 || !fn_mat) {
+		return gguf_cuda_matmul_run_pooled(drv, ctx, fn_vec, pool, d_matrix, x, out, rows, cols, 0, 0);
+	}
+
+	if (gguf_cuda_set_context(drv, ctx) != 0) {
+		return -10;
+	}
+
+	int rc = gguf_cuda_matmul_pool_ensure(drv, pool, rows * batch, cols * batch);
+	if (rc != 0) {
+		return rc;
+	}
+
+	size_t x_bytes = (size_t)batch * (size_t)cols * sizeof(float);
+	size_t out_bytes = (size_t)batch * (size_t)rows * sizeof(float);
+	memcpy(pool->h_vec, x, x_bytes);
+	if (drv->cuMemcpyHtoD(pool->d_vec, pool->h_vec, x_bytes) != CUDA_SUCCESS) {
+		return -3;
+	}
+
+	CUdeviceptr d_matrix_p = d_matrix;
+	CUdeviceptr d_x = pool->d_vec;
+	CUdeviceptr d_out = pool->d_out;
+	int n = rows * batch;
+	void *params[6];
+	params[0] = &d_matrix_p;
+	params[1] = &d_x;
+	params[2] = &d_out;
+	params[3] = &rows;
+	params[4] = &cols;
+	params[5] = &batch;
+
+	unsigned int block = 256;
+	unsigned int grid = ((unsigned int)n + block - 1) / block;
+	CUstream stream = pool->stream;
+	if (drv->cuLaunchKernel(fn_mat, grid, 1, 1, block, 1, 1, 0, stream, params, NULL) != CUDA_SUCCESS) {
+		return -3;
 	}
 
 	if (stream && drv->cuStreamSynchronize) {

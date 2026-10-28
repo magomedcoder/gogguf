@@ -100,6 +100,21 @@ func TestKVDropOldest(t *testing.T) {
 	}
 }
 
+func TestKVBump(t *testing.T) {
+	c := NewKV(1, 4, 2, nil)
+	if err := c.Bump(0, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	if c.LayerLen(0) != 2 || len(c.KLayer(0)) != 4 {
+		t.Fatalf("layer=%d klen=%d", c.LayerLen(0), len(c.KLayer(0)))
+	}
+
+	if err := c.Bump(0, 3); err == nil {
+		t.Fatal("expected overflow")
+	}
+}
+
 func TestKVEnsureRoom(t *testing.T) {
 	c := NewKV(1, 3, 2, nil)
 	for i := range 3 {

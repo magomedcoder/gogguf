@@ -55,14 +55,21 @@ Same GGUF, same `-ngl` / prompt length / decode `-n`, and matching prefill batch
 | decode tok/s         | `tg` (token generation)                  |
 | TTFT                 | first-token latency (not always printed) |
 
-Example pair (adjust paths / layer count):
+Example pair (adjust paths / layer count). Use a **long** `-p` (≥512 tokens) so prefill is measurable; a one-token prompt makes `prefill_tps` look like decode:
 
 ```bash
-./build/tools bench -m model.gguf -p "Hello" -n 128 -b 32 -ngl 999 --runs 3 --json
-./llama-bench -m model.gguf -p 512 -n 128 -ngl 999 -b 32
+# GoGGUF (CUDA build)
+PROMPT=$(python3 -c 'print("Hello world. "*200)')   # ~600 tokens
+CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools/
+./build/tools bench -m models/Qwen3-1.7B-Q8_0.gguf -p "$PROMPT" -n 128 -b 32 -ngl 999 --runs 3 --json
+
+# llama.cpp (same machine / GGUF / -ngl / -b)
+./llama-bench -m models/Qwen3-1.7B-Q8_0.gguf -p 512 -n 128 -ngl 999 -b 32
 ```
 
-DoD targets (roadmap): prefill ≥~0.5* llama-bench `pp`, decode ≥~0.7* `tg` at `-b`≥32 on dense fused quants.
+**DoD targets**: prefill ≥~0.5* llama-bench `pp`, decode ≥~0.7* `tg` at `-b`≥32 on dense fused quants (Qwen3-1.7B-Q8_0 reference).
+
+**Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** GoGGUF after F32 `matmul_mat_f32` + residency decode without host k/v mirror - `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4` (`-b 32 -n 128 -ngl 999`). Re-run the pair above against local `llama-bench` to compute ratios; overall DoD remains open until those ratios land.
 
 ## `greedy`
 

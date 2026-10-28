@@ -212,6 +212,82 @@ Q8_EXIT:
 }
 `
 
+// matmul_mat_f32: W[rows,cols] * X[batch,cols] -> out[batch,rows]; tid = b*rows+r (true GEMM launch)
+const matmulMatF32Kernel = `
+.visible .entry matmul_mat_f32(
+    .param .u64 param_matrix,
+    .param .u64 param_x,
+    .param .u64 param_out,
+    .param .u32 param_rows,
+    .param .u32 param_cols,
+    .param .u32 param_batch
+)
+{
+    .reg .pred      %p<3>;
+    .reg .b32       %r<16>;
+    .reg .b64       %rd<20>;
+    .reg .f32       %f<4>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r10, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_rows];
+    ld.param.u32    %r14, [param_batch];
+    mul.lo.u32      %r15, %r5, %r14;
+    setp.ge.u32     %p0, %r10, %r15;
+    @%p0            bra MF32_EXIT;
+
+    rem.u32         %r4, %r10, %r5;
+    div.u32         %r13, %r10, %r5;
+
+    ld.param.u64    %rd1, [param_matrix];
+    ld.param.u64    %rd2, [param_x];
+    ld.param.u64    %rd3, [param_out];
+    ld.param.u32    %r6, [param_cols];
+
+    mul.wide.u32    %rd14, %r13, %r6;
+    shl.b64         %rd14, %rd14, 2;
+    add.u64         %rd2, %rd2, %rd14;
+
+    mov.f32         %f1, 0f00000000;
+    mov.u32         %r7, 0;
+
+MF32_LOOP:
+    setp.ge.u32     %p1, %r7, %r6;
+    @%p1            bra MF32_DONE;
+
+    mul.wide.u32    %rd4, %r4, %r6;
+    cvt.u64.u32     %rd12, %r7;
+    add.u64         %rd5, %rd4, %rd12;
+    shl.b64         %rd6, %rd5, 2;
+    add.u64         %rd7, %rd1, %rd6;
+    ld.global.f32   %f2, [%rd7];
+
+    cvt.u64.u32     %rd8, %r7;
+    shl.b64         %rd9, %rd8, 2;
+    add.u64         %rd10, %rd2, %rd9;
+    ld.global.f32   %f3, [%rd10];
+
+    fma.rn.f32      %f1, %f2, %f3, %f1;
+
+    add.u32         %r7, %r7, 1;
+    bra MF32_LOOP;
+
+MF32_DONE:
+    mul.wide.u32    %rd15, %r13, %r5;
+    cvt.u64.u32     %rd16, %r4;
+    add.u64         %rd17, %rd15, %rd16;
+    shl.b64         %rd18, %rd17, 2;
+    add.u64         %rd19, %rd3, %rd18;
+    st.global.f32   [%rd19], %f1;
+
+MF32_EXIT:
+    ret;
+}
+`
+
 // matmul_mat_q8_0: W[rows,cols] * X[batch,cols] -> out[batch,rows]; tid = b*rows+r
 const matmulMatQ8Kernel = `
 .visible .entry matmul_mat_q8_0(
@@ -1434,7 +1510,7 @@ Q8K_EXIT:
 }
 `
 
-const matmulKernelsBody = matmulVecKernel + matmulQ8Kernel + matmulMatQ8Kernel + matmulQ4Kernel + matmulQ4KKernel + matmulQ5KKernel + matmulQ6KKernel +
+const matmulKernelsBody = matmulVecKernel + matmulMatF32Kernel + matmulQ8Kernel + matmulMatQ8Kernel + matmulQ4Kernel + matmulQ4KKernel + matmulQ5KKernel + matmulQ6KKernel +
 	matmulQ41Kernel + matmulQ50Kernel + matmulQ51Kernel + matmulQ2KKernel + matmulQ3KKernel + matmulQ8KKernel
 
 // opsKernelsBody - RMSNorm, RoPE, SwiGLU, attention, softmax, add.

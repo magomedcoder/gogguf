@@ -28,7 +28,7 @@ func (b *Backend) matMulMatValidate(rows, cols, batch int, x, out []float32) err
 	return nil
 }
 
-// MatMulMatCachedInto FP32 W * X[batch] (device-offset vec launches; F32 true GEMM deferred).
+// MatMulMatCachedInto FP32 W * X[batch] via matmul_mat_f32 (single launch) when available.
 func (b *Backend) MatMulMatCachedInto(name string, matrix []float32, rows, cols int, x []float32, batch int, out []float32) error {
 	if err := b.matMulMatValidate(rows, cols, batch, x, out); err != nil {
 		return err
@@ -43,18 +43,35 @@ func (b *Backend) MatMulMatCachedInto(name string, matrix []float32, rows, cols 
 
 	b.lastVecAddr = 0
 	b.lastVecLen = 0
-	rc := C.gguf_cuda_matmul_mat_device(
-		&b.drv,
-		b.ctx,
-		b.fn,
-		&b.matmulPool,
-		gm.ptr,
-		(*C.float)(unsafe.Pointer(&x[0])),
-		(*C.float)(unsafe.Pointer(&out[0])),
-		C.int(rows),
-		C.int(cols),
-		C.int(batch),
-	)
+	var rc C.int
+	if b.hasMatF32 {
+		rc = C.gguf_cuda_matmul_mat_f32_device(
+			&b.drv,
+			b.ctx,
+			b.fnMatF32,
+			b.fn,
+			&b.matmulPool,
+			gm.ptr,
+			(*C.float)(unsafe.Pointer(&x[0])),
+			(*C.float)(unsafe.Pointer(&out[0])),
+			C.int(rows),
+			C.int(cols),
+			C.int(batch),
+		)
+	} else {
+		rc = C.gguf_cuda_matmul_mat_device(
+			&b.drv,
+			b.ctx,
+			b.fn,
+			&b.matmulPool,
+			gm.ptr,
+			(*C.float)(unsafe.Pointer(&x[0])),
+			(*C.float)(unsafe.Pointer(&out[0])),
+			C.int(rows),
+			C.int(cols),
+			C.int(batch),
+		)
+	}
 
 	if rc != 0 {
 		return fmt.Errorf("cuda: MatMulMatCachedInto %q: code %d", name, int(rc))

@@ -55,12 +55,18 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 | decode tok/s         | `tg` (token generation)                        |
 | TTFT                 | задержка первого токена (не всегда печатается) |
 
+Для measurable prefill нужен **длинный** `-p` (≥512 токенов); один токен делает `prefill_tps` похожим на decode:
+
 ```bash
-./build/tools bench -m model.gguf -p "Hello" -n 128 -b 32 -ngl 999 --runs 3 --json
-./llama-bench -m model.gguf -p 512 -n 128 -ngl 999 -b 32
+PROMPT=$(python3 -c 'print("Hello world. "*200)')
+CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools/
+./build/tools bench -m models/Qwen3-1.7B-Q8_0.gguf -p "$PROMPT" -n 128 -b 32 -ngl 999 --runs 3 --json
+./llama-bench -m models/Qwen3-1.7B-Q8_0.gguf -p 512 -n 128 -ngl 999 -b 32
 ```
 
-Ориентир из roadmap: prefill ≥~0.5* `pp`, decode ≥~0.7* `tg` при `-b`≥32 на dense fused-квантах.
+**DoD**: prefill ≥~0.5* `pp`, decode ≥~0.7* `tg` при `-b`≥32 на dense fused (эталон Qwen3-1.7B-Q8_0).
+
+**Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** после F32 `matmul_mat_f32` + residency decode без host k/v mirror - `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4`. Пару с локальным `llama-bench` пересчитать на своей машине; общий DoD ещё открыт.
 
 ## `greedy`
 

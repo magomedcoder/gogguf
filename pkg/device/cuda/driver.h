@@ -309,7 +309,11 @@ int gguf_cuda_upload_q8_k(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matr
 int gguf_cuda_matmul_vec_q8_k_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
 
 // gguf_cuda_matmul_mat_device: W * X[batch] via one HtoD + B device-offset vec launches + one DtoH (fn = matmul_vec_*).
+// Prefer gguf_cuda_matmul_mat_f32_device / q8_0 when a true matmul_mat_* kernel is loaded.
 int gguf_cuda_matmul_mat_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch);
+
+// gguf_cuda_matmul_mat_f32_device: single-launch matmul_mat_f32 (fn_mat); batch==1 or missing fn_mat uses vec path.
+int gguf_cuda_matmul_mat_f32_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_mat, CUfunction fn_vec, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch);
 
 // gguf_cuda_matmul_mat_q8_0_device: single-launch matmul_mat_q8_0 (fn = that entry); batch==1 uses vec path.
 int gguf_cuda_matmul_mat_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_mat, CUfunction fn_vec, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch);

@@ -55,6 +55,7 @@ type Backend struct {
 	moduleOps       C.CUmodule
 	fn              C.CUfunction
 	fnQ8            C.CUfunction
+	fnMatF32        C.CUfunction // matmul_mat_f32 (batched F32 GEMM)
 	fnMatQ8         C.CUfunction // matmul_mat_q8_0 (batched GEMM)
 	fnQ4            C.CUfunction
 	fnQ4K           C.CUfunction
@@ -66,6 +67,7 @@ type Backend struct {
 	fnQ2K           C.CUfunction
 	fnQ3K           C.CUfunction
 	fnQ8K           C.CUfunction
+	hasMatF32       bool
 	hasMatQ8        bool
 	fnRMS           C.CUfunction
 	fnRoPE          C.CUfunction
@@ -208,6 +210,12 @@ func (b *Backend) loadMatmulModule(gpuCC int, errBuf *[4096]C.char) error {
 		rc := C.gguf_cuda_load_module(&b.drv, b.ctx, cptx, &b.module, &b.fn, &b.fnQ8, nil, nil, nil, &errBuf[0], C.size_t(len(errBuf)))
 		C.free(unsafe.Pointer(cptx))
 		if rc == 0 {
+			cMatF32 := C.CString("matmul_mat_f32")
+			if C.gguf_cuda_module_function(&b.drv, b.module, cMatF32, &b.fnMatF32) == 0 {
+				b.hasMatF32 = true
+			}
+			C.free(unsafe.Pointer(cMatF32))
+
 			cMatQ8 := C.CString("matmul_mat_q8_0")
 			if C.gguf_cuda_module_function(&b.drv, b.module, cMatQ8, &b.fnMatQ8) == 0 {
 				b.hasMatQ8 = true
@@ -2299,8 +2307,13 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t dtype.DType, mode compute.RoPEMo
 		return err
 	}
 
-	if len(cos) < headDim/2 || len(sin) < headDim/2 || len(kOut) < nKVHeads*headDim || len(vOut) < nKVHeads*headDim {
+	kvDim := nKVHeads * headDim
+	if len(cos) < headDim/2 || len(sin) < headDim/2 {
 		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: buffers too short")
+	}
+	// kOut/vOut optional on residency decode (nil = skip host KV mirror DtoH).
+	if (len(kOut) > 0 && len(kOut) < kvDim) || (len(vOut) > 0 && len(vOut) < kvDim) {
+		return fmt.Errorf("cuda: QKVRoPEAttentionQuantCached: k/v buffers too short")
 	}
 
 	b.mu.Lock()
@@ -2369,10 +2382,17 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t dtype.DType, mode compute.RoPEMo
 	if len(h) >= embd {
 		hPtr = (*C.float)(unsafe.Pointer(&h[0]))
 	}
-	// Residency: skip attn DtoH (AttnFFN uses d_vec); still mirror k/v for CPU cache recovery.
+	// Host mirrors optional: pass nil/empty slices to skip DtoH (residency decode).
 	var attnPtr *C.float
-	if !resident && len(attn) >= nHeads*headDim {
+	if len(attn) >= nHeads*headDim {
 		attnPtr = (*C.float)(unsafe.Pointer(&attn[0]))
+	}
+	var kPtr, vPtr *C.float
+	if len(kOut) >= kvDim {
+		kPtr = (*C.float)(unsafe.Pointer(&kOut[0]))
+	}
+	if len(vOut) >= kvDim {
+		vPtr = (*C.float)(unsafe.Pointer(&vOut[0]))
 	}
 
 	rc := C.gguf_cuda_qkv_rope_attn_device(
@@ -2397,8 +2417,8 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t dtype.DType, mode compute.RoPEMo
 		(*C.float)(unsafe.Pointer(&cos[0])),
 		(*C.float)(unsafe.Pointer(&sin[0])),
 		attnPtr,
-		(*C.float)(unsafe.Pointer(&kOut[0])),
-		(*C.float)(unsafe.Pointer(&vOut[0])),
+		kPtr,
+		vPtr,
 		C.int(embd),
 		C.int(nHeads),
 		C.int(nKVHeads),

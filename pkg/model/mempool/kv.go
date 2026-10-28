@@ -61,6 +61,20 @@ func (c *KV) Append(layer int, k, v []float32) error {
 	return c.AppendN(layer, k, v, 1)
 }
 
+// Bump reserves n token slots on a layer without writing K/V.
+// Used when GPU KV is the source of truth and the host mirror is skipped.
+func (c *KV) Bump(layer, n int) error {
+	if n < 1 || layer < 0 || layer >= len(c.layers) {
+		return fmt.Errorf("mempool: invalid KV Bump layer=%d n=%d", layer, n)
+	}
+	l := &c.layers[layer]
+	if l.n+n > c.maxSeq {
+		return fmt.Errorf("mempool: KV overflow layer=%d have=%d add=%d maxSeq=%d", layer, l.n, n, c.maxSeq)
+	}
+	l.n += n
+	return nil
+}
+
 // AppendN appends K/V of n tokens to layer (k/v: [n*kvDim]).
 func (c *KV) AppendN(layer int, k, v []float32, n int) error {
 	if n < 1 || layer < 0 || layer >= len(c.layers) {
