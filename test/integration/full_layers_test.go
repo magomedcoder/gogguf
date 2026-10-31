@@ -10,7 +10,7 @@ import (
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/debug"
-	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/model"
 )
 
 func fullLayersFixture(t *testing.T, name string) string {
@@ -33,13 +33,13 @@ func fullLayersFixture(t *testing.T, name string) string {
 
 func collectLayerHidden(t *testing.T, engine *gogguf.Engine, ids []int) debug.LayersDump {
 	t.Helper()
-	setter, ok := engine.Model.(interface{ SetDebugHooks(*qwen3.DebugHooks) })
+	setter, ok := engine.Model.(model.DebugHookSetter)
 	if !ok {
 		t.Fatal("model does not support debug hooks")
 	}
 
 	var dump debug.LayersDump
-	setter.SetDebugHooks(&qwen3.DebugHooks{
+	setter.SetDebugHooks(&debug.Hooks{
 		OnEmbed: func(x []float32) {
 			dump.Embed = append([]float32(nil), x...)
 		},

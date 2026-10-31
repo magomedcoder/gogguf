@@ -2,7 +2,6 @@ package phi2
 
 import (
 	"fmt"
-	"github.com/magomedcoder/gogguf/pkg/dtype"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/device"
@@ -258,48 +257,7 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 }
 
 func (m *Model) embed(tokenID int) error {
-	raw, err := m.weights.Raw("token_embd.weight")
-	if err != nil {
-		return err
-	}
-
-	info, err := m.weights.Info("token_embd.weight")
-	if err != nil {
-		return err
-	}
-
-	switch info.Type {
-	case dtype.Q8_0:
-		return compute.EmbeddingQ8_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_0:
-		return compute.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_1:
-		return compute.EmbeddingQ4_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_0:
-		return compute.EmbeddingQ5_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_1:
-		return compute.EmbeddingQ5_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_K:
-		return compute.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_K:
-		return compute.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q6_K:
-		return compute.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q2_K:
-		return compute.EmbeddingQ2_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q3_K:
-		return compute.EmbeddingQ3_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q8_K:
-		return compute.EmbeddingQ8_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	default:
-		f32, err := m.weights.Floats("token_embd.weight")
-		if err != nil {
-			return err
-		}
-		off := tokenID * m.cfg.EmbeddingDim
-		copy(m.scratch.x, f32[off:off+m.cfg.EmbeddingDim])
-		return nil
-	}
+	return dispatch.EmbedTokenInto(m.weights, m.scratch.x, m.cfg.EmbeddingDim, tokenID)
 }
 
 func (m *Model) forwardBlock(layer int, pos int) error {
@@ -408,39 +366,6 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 	return dispatch.MatMulRawInto(m.weights, name, rows, cols, vec, out)
 }
 
-func (m *Model) matmulGPU(name string, rows, cols int, vec []float32) ([]float32, error) {
-	info, err := m.weights.Info(name)
-	if err != nil {
-		return nil, err
-	}
-
-	raw, err := m.weights.Raw(name)
-	if err != nil && info.Type != dtype.F32 && info.Type != dtype.F16 {
-		return nil, err
-	}
-
-	switch info.Type {
-	case dtype.Q8_0:
-		return m.dev.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
-	case dtype.Q4_0:
-		return m.dev.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
-	case dtype.Q4_K:
-		return m.dev.MatMulVecQ4_KCached(name, raw, rows, cols, vec)
-	case dtype.Q5_K:
-		return m.dev.MatMulVecQ5_KCached(name, raw, rows, cols, vec)
-	case dtype.Q6_K:
-		return m.dev.MatMulVecQ6_KCached(name, raw, rows, cols, vec)
-	case dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q8_K:
-		return device.MatMulVecQuantCached(m.dev, info.Type, name, raw, rows, cols, vec)
-	default:
-		f32, err := m.weights.Floats(name)
-		if err != nil {
-			return nil, err
-		}
-		return m.dev.MatMulVecCached(name, f32, rows, cols, vec)
-	}
-}
-
 func (m *Model) logitsFinish() error {
 	return m.logitsFromHidden(m.scratch.x)
 }
@@ -456,50 +381,8 @@ func (m *Model) logitsFromHidden(x []float32) error {
 		return nil
 	}
 
-	name := m.lmHeadName
-	raw, err := m.weights.Raw(name)
-	if err != nil {
+	if err := dispatch.MatMulRawInto(m.weights, m.lmHeadName, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits); err != nil {
 		return err
-	}
-
-	info, err := m.weights.Info(name)
-	if err != nil {
-		return err
-	}
-
-	var matErr error
-	switch info.Type {
-	case dtype.Q8_0:
-		matErr = compute.MatMulVecQ8_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q4_0:
-		matErr = compute.MatMulVecQ4_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q4_1:
-		matErr = compute.MatMulVecQ4_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q5_0:
-		matErr = compute.MatMulVecQ5_0Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q5_1:
-		matErr = compute.MatMulVecQ5_1Into(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q4_K:
-		matErr = compute.MatMulVecQ4_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q5_K:
-		matErr = compute.MatMulVecQ5_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q6_K:
-		matErr = compute.MatMulVecQ6_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q2_K:
-		matErr = compute.MatMulVecQ2_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q3_K:
-		matErr = compute.MatMulVecQ3_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	case dtype.Q8_K:
-		matErr = compute.MatMulVecQ8_KInto(raw, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	default:
-		f32, err := m.weights.Floats(name)
-		if err != nil {
-			return err
-		}
-		matErr = compute.MatMulVecInto(f32, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.scratch.h, m.scratch.logits)
-	}
-	if matErr != nil {
-		return matErr
 	}
 
 	compute.AddBiasInPlace(m.scratch.logits, m.lmHeadBias)

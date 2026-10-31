@@ -1,9 +1,9 @@
 package sampler
 
 import (
+	"cmp"
 	"math/rand/v2"
 	"slices"
-	"sort"
 )
 
 // Config - sampling parameters
@@ -83,8 +83,8 @@ func applyTopK(logits []float32, mask []bool, k int) {
 		}
 	}
 
-	sort.Slice(items, func(a, b int) bool {
-		return items[a].prob > items[b].prob
+	slices.SortFunc(items, func(a, b idxProb) int {
+		return cmp.Compare(b.prob, a.prob)
 	})
 
 	if k > len(items) {
@@ -111,19 +111,18 @@ func applyTopP(probs []float64, mask []bool, p float32) {
 		}
 	}
 
-	sort.Slice(items, func(a, b int) bool {
-		return items[a].prob > items[b].prob
+	slices.SortFunc(items, func(a, b idxProb) int {
+		return cmp.Compare(b.prob, a.prob)
 	})
 
 	cum := 0.0
 	keep := make(map[int]struct{}, len(items))
-	for j, it := range items {
+	for _, it := range items {
 		keep[it.i] = struct{}{}
 		cum += it.prob
 		if cum >= float64(p)-1e-6 {
 			break
 		}
-		_ = j
 	}
 
 	for i := range mask {

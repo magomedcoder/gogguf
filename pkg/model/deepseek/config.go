@@ -28,62 +28,52 @@ type Config struct {
 
 // ParseConfig reads deepseek.*
 func ParseConfig(r *format.Reader) (Config, error) {
-	prefix := "deepseek."
-	getInt := func(key string) (int, error) {
-		return r.Metadata.Int(prefix + key)
-	}
+	meta := format.PrefixedMeta{Prefix: "deepseek.", MD: r.Metadata}
 
-	ctx, err := getInt("context_length")
+	ctx, err := meta.Int("context_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	emb, err := getInt("embedding_length")
+	emb, err := meta.Int("embedding_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	ffn, err := getInt("feed_forward_length")
+	ffn, err := meta.Int("feed_forward_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	layers, err := getInt("block_count")
+	layers, err := meta.Int("block_count")
 	if err != nil {
 		return Config{}, err
 	}
 
-	heads, err := getInt("attention.head_count")
+	heads, err := meta.Int("attention.head_count")
 	if err != nil {
 		return Config{}, err
 	}
 
-	kvHeads, err := getInt("attention.head_count_kv")
+	kvHeads, err := meta.Int("attention.head_count_kv")
 	if err != nil {
 		return Config{}, err
 	}
 
-	eps := float32(1e-6)
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"attention.layer_norm_rms_epsilon"); err == nil {
-		eps = v
-	}
-
-	freqBase := float32(10000)
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.freq_base"); err == nil {
-		freqBase = v
-	}
+	eps := meta.Float32Or("attention.layer_norm_rms_epsilon", 1e-6)
+	freqBase := meta.Float32Or("rope.freq_base", 10000)
 
 	if heads <= 0 {
 		return Config{}, fmt.Errorf("deepseek: attention.head_count=%d", heads)
 	}
 
 	headDim := emb / heads
-	if v, err := getInt("attention.key_length"); err == nil && v > 0 {
+	if v, err := meta.Int("attention.key_length"); err == nil && v > 0 {
 		headDim = v
 	}
 
 	denseLead := 0
-	if v, err := getInt("leading_dense_block_count"); err == nil && v >= 0 {
+	if v, err := meta.Int("leading_dense_block_count"); err == nil && v >= 0 {
 		denseLead = v
 	}
 
@@ -92,28 +82,28 @@ func ParseConfig(r *format.Reader) (Config, error) {
 	}
 
 	nExpert := 0
-	if v, err := getInt("expert_count"); err == nil {
+	if v, err := meta.Int("expert_count"); err == nil {
 		nExpert = v
 	}
 
 	nExpertUsed := 0
-	if v, err := getInt("expert_used_count"); err == nil {
+	if v, err := meta.Int("expert_used_count"); err == nil {
 		nExpertUsed = v
 	}
 
 	nShared := 0
-	if v, err := getInt("expert_shared_count"); err == nil {
+	if v, err := meta.Int("expert_shared_count"); err == nil {
 		nShared = v
 	}
 
 	expertFFN := 0
-	if v, err := getInt("expert_feed_forward_length"); err == nil {
+	if v, err := meta.Int("expert_feed_forward_length"); err == nil {
 		expertFFN = v
 	}
 
-	wScale := float32(1)
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"expert_weights_scale"); err == nil && v != 0 {
-		wScale = v
+	wScale := meta.Float32Or("expert_weights_scale", 1)
+	if wScale == 0 {
+		wScale = 1
 	}
 
 	if denseLead < layers {
@@ -126,7 +116,7 @@ func ParseConfig(r *format.Reader) (Config, error) {
 		}
 	}
 
-	vocab, err := vocabSize(r, emb)
+	vocab, err := format.VocabSizeFromEmb(r, emb, "deepseek")
 	if err != nil {
 		return Config{}, err
 	}
@@ -174,26 +164,4 @@ func (c Config) maxFFN() int {
 	}
 
 	return m
-}
-
-func vocabSize(r *format.Reader, emb int) (int, error) {
-	info, err := r.TensorInfo("token_embd.weight")
-	if err != nil {
-		return 0, err
-	}
-
-	if len(info.Dimensions) != 2 {
-		return 0, fmt.Errorf("deepseek: token_embd.weight: expected 2D")
-	}
-
-	a, b := int(info.Dimensions[0]), int(info.Dimensions[1])
-	if a == emb {
-		return b, nil
-	}
-
-	if b == emb {
-		return a, nil
-	}
-
-	return 0, fmt.Errorf("deepseek: token_embd.weight %v does not contain embedding_length=%d", info.Dimensions, emb)
 }

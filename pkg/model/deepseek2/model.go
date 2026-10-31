@@ -2,7 +2,6 @@ package deepseek2
 
 import (
 	"fmt"
-	"github.com/magomedcoder/gogguf/pkg/dtype"
 	"math"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
@@ -277,49 +276,7 @@ func (m *Model) forwardToken(tokenID, pos int) error {
 }
 
 func (m *Model) embedToken(tokenID int) error {
-	raw, err := m.weights.Raw("token_embd.weight")
-	if err != nil {
-		return err
-	}
-
-	info, err := m.weights.Info("token_embd.weight")
-	if err != nil {
-		return err
-	}
-
-	switch info.Type {
-	case dtype.Q8_0:
-		return compute.EmbeddingQ8_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_0:
-		return compute.EmbeddingQ4_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_1:
-		return compute.EmbeddingQ4_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_0:
-		return compute.EmbeddingQ5_0Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_1:
-		return compute.EmbeddingQ5_1Into(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_K:
-		return compute.EmbeddingQ4_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_K:
-		return compute.EmbeddingQ5_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q6_K:
-		return compute.EmbeddingQ6_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q2_K:
-		return compute.EmbeddingQ2_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q3_K:
-		return compute.EmbeddingQ3_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q8_K:
-		return compute.EmbeddingQ8_KInto(m.scratch.x, raw, m.cfg.EmbeddingDim, tokenID)
-	default:
-		f32, err := m.weights.Floats("token_embd.weight")
-		if err != nil {
-			return err
-		}
-
-		off := tokenID * m.cfg.EmbeddingDim
-		copy(m.scratch.x, f32[off:off+m.cfg.EmbeddingDim])
-		return nil
-	}
+	return dispatch.EmbedTokenInto(m.weights, m.scratch.x, m.cfg.EmbeddingDim, tokenID)
 }
 
 func (m *Model) forwardBlock(layer, pos int) error {
@@ -552,24 +509,13 @@ func (m *Model) ffnMoE(lt layerTensors, layer int) error {
 		return m.sharedExpert(lt, layer)
 	}
 
-	gateBuf := m.scratch.gate[:ffn]
-	upBuf := m.scratch.up[:ffn]
-	for i, ei := range idxs {
-		if err := dispatch.MatMulExpertInto(m.weights, lt.gateExps, ei, ffn, embd, m.scratch.h, gateBuf); err != nil {
-			return err
-		}
-		if err := dispatch.MatMulExpertInto(m.weights, lt.upExps, ei, ffn, embd, m.scratch.h, upBuf); err != nil {
-			return err
-		}
-		compute.SwiGLUInPlace(gateBuf, upBuf)
-		if err := dispatch.MatMulExpertInto(m.weights, lt.downExps, ei, embd, ffn, gateBuf, m.scratch.tmp); err != nil {
-			return err
-		}
-
-		w := weights[i]
-		for j := range embd {
-			m.scratch.moeAcc[j] += m.scratch.tmp[j] * w
-		}
+	if err := moe.ExpertsSwiGLUInto(
+		m.weights, lt.gateExps, lt.upExps, lt.downExps,
+		idxs, weights, m.scratch.h,
+		m.scratch.gate[:ffn], m.scratch.up[:ffn], m.scratch.tmp, m.scratch.moeAcc,
+		embd, ffn,
+	); err != nil {
+		return err
 	}
 
 	return m.sharedExpert(lt, layer)

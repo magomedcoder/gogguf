@@ -5,12 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/debug"
-	"github.com/magomedcoder/gogguf/pkg/model/llama"
-	"github.com/magomedcoder/gogguf/pkg/model/mistral"
-	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/model"
 )
 
 type layerLogitsCase struct {
@@ -86,7 +85,7 @@ func runLayerLogits(args []string) error {
 	}
 
 	out := layerLogitsFile{
-		Model: modelBasename(*modelPath),
+		Model: filepath.Base(*modelPath),
 		Cases: []layerLogitsCase{{
 			Name:        name,
 			LayerGreedy: layerGreedy,
@@ -109,39 +108,10 @@ func runLayerLogits(args []string) error {
 }
 
 func setLayerLogitsHook(engine *gogguf.Engine, onLayer func(int, []float32)) bool {
-	switch m := engine.Model.(type) {
-	case interface {
-		SetDebugHooks(*qwen3.DebugHooks)
-	}:
-		m.SetDebugHooks(&qwen3.DebugHooks{
-			OnLayerLogits: onLayer,
-		})
-		return true
-	case interface {
-		SetDebugHooks(*llama.DebugHooks)
-	}:
-		m.SetDebugHooks(&llama.DebugHooks{
-			OnLayerLogits: onLayer,
-		})
-		return true
-	case interface {
-		SetDebugHooks(*mistral.DebugHooks)
-	}:
-		m.SetDebugHooks(&mistral.DebugHooks{
-			OnLayerLogits: onLayer,
-		})
-		return true
-	default:
+	setter, ok := engine.Model.(model.DebugHookSetter)
+	if !ok {
 		return false
 	}
-}
-
-func modelBasename(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[i+1:]
-		}
-	}
-
-	return path
+	setter.SetDebugHooks(&debug.Hooks{OnLayerLogits: onLayer})
+	return true
 }

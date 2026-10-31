@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"strings"
@@ -41,15 +40,9 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "failed to read body", "invalid_request_error")
-		return
-	}
-
 	var req embeddingsRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid JSON", "invalid_request_error")
+	if err := decodeWire(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
 
@@ -164,14 +157,14 @@ func parseEmbeddingsInput(raw json.RawMessage) ([]embedInput, error) {
 	switch raw[0] {
 	case '"':
 		var s string
-		if err := json.Unmarshal(raw, &s); err != nil {
+		if err := unmarshalWire(raw, &s); err != nil {
 			return nil, fmt.Errorf("input: expected a string")
 		}
 		return []embedInput{{text: s}}, nil
 	case '[':
 		// []string | []int | [][]int
 		var asStrings []string
-		if err := json.Unmarshal(raw, &asStrings); err == nil {
+		if err := unmarshalWire(raw, &asStrings); err == nil {
 			out := make([]embedInput, len(asStrings))
 			for i, s := range asStrings {
 				out[i] = embedInput{text: s}
@@ -180,12 +173,12 @@ func parseEmbeddingsInput(raw json.RawMessage) ([]embedInput, error) {
 		}
 
 		var asInts []int
-		if err := json.Unmarshal(raw, &asInts); err == nil {
+		if err := unmarshalWire(raw, &asInts); err == nil {
 			return []embedInput{{tokens: asInts}}, nil
 		}
 
 		var asTokenBatches [][]int
-		if err := json.Unmarshal(raw, &asTokenBatches); err == nil {
+		if err := unmarshalWire(raw, &asTokenBatches); err == nil {
 			out := make([]embedInput, len(asTokenBatches))
 			for i, t := range asTokenBatches {
 				out[i] = embedInput{

@@ -21,10 +21,8 @@ func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) erro
 	}
 
 	embd := m.cfg.EmbeddingDim
-	for i, tok := range tokenIDs {
-		if err := dispatch.EmbedTokenInto(m.weights, m.scratch.bx[i*embd:(i+1)*embd], embd, tok); err != nil {
-			return err
-		}
+	if err := dispatch.EmbedTokensInto(m.weights, m.scratch.bx[:b*embd], embd, tokenIDs); err != nil {
+		return err
 	}
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {

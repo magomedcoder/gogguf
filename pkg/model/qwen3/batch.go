@@ -3,10 +3,9 @@ package qwen3
 import (
 	"fmt"
 
-	"github.com/magomedcoder/gogguf/pkg/dtype"
-
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/device"
+	"github.com/magomedcoder/gogguf/pkg/exec/dispatch"
 )
 
 // forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
@@ -27,10 +26,8 @@ func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) erro
 	}
 
 	embd := m.cfg.EmbeddingDim
-	for i, tok := range tokenIDs {
-		if err := m.embedTokenInto(tok, m.scratch.x[i*embd:(i+1)*embd]); err != nil {
-			return err
-		}
+	if err := dispatch.EmbedTokensInto(m.weights, m.scratch.x[:b*embd], embd, tokenIDs); err != nil {
+		return err
 	}
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
@@ -227,144 +224,14 @@ func (m *Model) attentionBatchCausalInto(attn, q []float32, layer, pastLen, batc
 // matmulBatchInto: W * X[batch] via MatMulMat*Cached on GPU or CPU MatMulMat*.
 func (m *Model) matmulBatchInto(name string, rows, cols int, x, out []float32, batch, layer int) error {
 	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		if err := m.matmulBatchGPU(name, rows, cols, x, out, batch); err == nil {
+		if err := dispatch.MatMulMatGPUInto(m.dev, m.weights, name, rows, cols, x, batch, out); err == nil {
 			return nil
 		}
 	}
 
-	return m.matmulBatchCPU(name, rows, cols, x, out, batch)
-}
-
-func (m *Model) matmulBatchGPU(name string, rows, cols int, x, out []float32, batch int) error {
-	raw, err := m.weights.Raw(name)
-	if err != nil {
-		return err
-	}
-
-	info, err := m.weights.Info(name)
-	if err != nil {
-		return err
-	}
-
-	switch info.Type {
-	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K, dtype.Q8_K:
-		return device.MatMulMatQuantCachedInto(m.dev, info.Type, name, raw, rows, cols, x, batch, out)
-	default:
-		f32, err := m.weights.Floats(name)
-		if err != nil {
-			return err
-		}
-		return device.MatMulMatCachedIntoFP32(m.dev, name, f32, rows, cols, x, batch, out)
-	}
-}
-
-func (m *Model) matmulBatchCPU(name string, rows, cols int, x, out []float32, batch int) error {
-	raw, err := m.weights.Raw(name)
-	if err != nil {
-		return err
-	}
-
-	info, err := m.weights.Info(name)
-	if err != nil {
-		return err
-	}
-
-	switch info.Type {
-	case dtype.Q8_0:
-		return compute.MatMulMatQ8_0Into(raw, rows, cols, x, batch, out)
-	case dtype.Q4_0:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ4_0Into(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q4_1:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ4_1Into(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q5_0:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ5_0Into(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q5_1:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ5_1Into(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q4_K:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ4_KInto(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q5_K:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ5_KInto(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q6_K:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ6_KInto(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q2_K:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ2_KInto(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q3_K:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ3_KInto(raw, rows, cols, vec, dst)
-		})
-	case dtype.Q8_K:
-		return compute.MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
-			return compute.MatMulVecQ8_KInto(raw, rows, cols, vec, dst)
-		})
-	default:
-		f32, err := m.weights.Floats(name)
-		if err != nil {
-			return err
-		}
-
-		return compute.MatMulMatInto(f32, rows, cols, x, batch, out)
-	}
+	return dispatch.MatMulMatRawInto(m.weights, name, rows, cols, x, batch, out)
 }
 
 func (m *Model) embedTokenInto(tokenID int, dst []float32) error {
-	raw, err := m.weights.Raw("token_embd.weight")
-	if err != nil {
-		return err
-	}
-
-	info, err := m.weights.Info("token_embd.weight")
-	if err != nil {
-		return err
-	}
-
-	switch info.Type {
-	case dtype.Q8_0:
-		return compute.EmbeddingQ8_0Into(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_0:
-		return compute.EmbeddingQ4_0Into(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_1:
-		return compute.EmbeddingQ4_1Into(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_0:
-		return compute.EmbeddingQ5_0Into(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_1:
-		return compute.EmbeddingQ5_1Into(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q4_K:
-		return compute.EmbeddingQ4_KInto(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q5_K:
-		return compute.EmbeddingQ5_KInto(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q6_K:
-		return compute.EmbeddingQ6_KInto(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q2_K:
-		return compute.EmbeddingQ2_KInto(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q3_K:
-		return compute.EmbeddingQ3_KInto(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	case dtype.Q8_K:
-		return compute.EmbeddingQ8_KInto(dst, raw, m.cfg.EmbeddingDim, tokenID)
-	default:
-		f32, err := m.weights.Floats("token_embd.weight")
-		if err != nil {
-			return err
-		}
-
-		off := tokenID * m.cfg.EmbeddingDim
-		copy(dst, f32[off:off+m.cfg.EmbeddingDim])
-
-		return nil
-	}
+	return dispatch.EmbedTokenInto(m.weights, dst, m.cfg.EmbeddingDim, tokenID)
 }

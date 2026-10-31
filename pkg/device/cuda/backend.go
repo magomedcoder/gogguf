@@ -575,6 +575,8 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 	return out, nil
 }
 
+// MatMulVecQ*_CachedInto methods below are intentionally duplicated per quant (upload cache + PTX launch differ).
+// Collapsing via codegen/templates is a future cleanup; do not hand-merge into one dynamic path without benches.
 func (b *Backend) MatMulVecQ8_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
 	if err := validateQ8MatMul(raw, rows, cols, vec); err != nil {
 		return err

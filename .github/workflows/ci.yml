@@ -60,8 +60,9 @@ jobs:
             echo "ok $t"
           done
 
-  integration:
+  integration-qwen:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -70,37 +71,73 @@ jobs:
           go-version: "1.27.x"
           cache-dependency-path: go.sum
 
-      - name: Download test models
+      - name: Download Qwen3 test model
         run: |
           mkdir -p models
           curl -L -o models/Qwen3-1.7B-Q8_0.gguf \
             https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q8_0.gguf
-          curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf \
-            https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
 
       - name: Package tests with models
         run: go test -count=1 -timeout 15m ./pkg/model/qwen3/
 
-      - name: Refresh Llama golden fixtures (CPU reference)
+      - name: Integration tests (Qwen3)
+        env:
+          GOMEMLIMIT: 6GiB
+        run: go test -tags=integration -count=1 -parallel 1 -timeout 30m -skip 'TestMistral|TestLlama32' ./test/integration/
+
+  integration-llama:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: go.sum
+
+      - name: Download Llama test model
+        run: |
+          mkdir -p models
+          curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
+
+      - name: Integration tests (Llama)
+        env:
+          GOMEMLIMIT: 6GiB
+        run: go test -tags=integration -count=1 -parallel 1 -timeout 30m -run 'TestLlama32' ./test/integration/
+
+  refresh-llama-fixtures:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: go.sum
+
+      - name: Download Llama test model
+        run: |
+          mkdir -p models
+          curl -L -o models/Llama-3.2-1B-Instruct-Q8_0.gguf https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf
+
+      - name: Refresh Llama golden fixtures
         run: |
           go run ./cmd/tools refreshllama -m models/Llama-3.2-1B-Instruct-Q8_0.gguf -o test/fixtures
-          if ! git diff --quiet -- test/fixtures/llama32_golden.json test/fixtures/llama32_layer_logits.json; then
-            git diff --stat -- test/fixtures/llama32_*.json
-            mkdir -p artifact-llama-fixtures
-            cp test/fixtures/llama32_golden.json test/fixtures/llama32_layer_logits.json artifact-llama-fixtures/
-          fi
+          mkdir -p artifact-llama-fixtures
+          cp test/fixtures/llama32_golden.json test/fixtures/llama32_layer_logits.json artifact-llama-fixtures/
+          git diff --stat -- test/fixtures/llama32_*.json || true
 
       - uses: actions/upload-artifact@v4
-        if: hashFiles('artifact-llama-fixtures/*') != ''
         with:
           name: llama-fixtures-refresh
           path: artifact-llama-fixtures/
 
-      - name: Integration tests (Qwen3 + Llama)
-        run: go test -tags=integration -count=1 -timeout 30m ./test/integration/...
-
   integration-mistral:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -116,7 +153,9 @@ jobs:
             https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf
 
       - name: Integration tests (Mistral)
-        run: go test -tags=integration -count=1 -timeout 30m -run 'TestMistral' ./test/integration/
+        env:
+          GOMEMLIMIT: 6GiB
+        run: go test -tags=integration -count=1 -parallel 1 -timeout 30m -run 'TestMistral' ./test/integration/
 
   cuda:
     runs-on: ubuntu-latest

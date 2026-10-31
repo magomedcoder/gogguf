@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/magomedcoder/gogguf/pkg/strutil"
 )
 
 // ParseDeviceList parses -dev flag: "1" or "0,1" (device ordinals after CUDA_VISIBLE_DEVICES). Empty string = default device (nil)
@@ -13,14 +15,9 @@ func ParseDeviceList(s string) ([]int, error) {
 		return nil, nil
 	}
 
-	parts := strings.Split(s, ",")
+	parts := strutil.SplitCommaTrim(s)
 	devices := make([]int, 0, len(parts))
 	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-
 		n, err := strconv.Atoi(p)
 		if err != nil {
 			return nil, fmt.Errorf("device: -dev %q: expected device index: %w", p, err)
@@ -39,15 +36,10 @@ func ParseTensorSplit(s string) ([]float64, error) {
 		return nil, nil
 	}
 
-	parts := strings.Split(s, ",")
+	parts := strutil.SplitCommaTrim(s)
 	split := make([]float64, 0, len(parts))
 	var total float64
 	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-
 		v, err := strconv.ParseFloat(p, 64)
 		if err != nil {
 			return nil, fmt.Errorf("device: -tensor-split %q: expected number: %w", p, err)

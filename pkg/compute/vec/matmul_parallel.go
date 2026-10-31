@@ -62,6 +62,7 @@ func ParallelForWork(items, minItems int, fn func(start, end int)) {
 
 	chunk := (items + workers - 1) / workers
 	var wg sync.WaitGroup
+	// WaitGroup.Go would spawn fresh goroutines and bypass poolJobs / deadlock guards.
 	for start := 0; start < items; start += chunk {
 		end := min(start+chunk, items)
 		wg.Add(1)

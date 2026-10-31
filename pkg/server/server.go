@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -72,9 +71,10 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) ListenAndServe(addr string) error {
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           s.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
+		Addr:                addr,
+		Handler:             s.Handler(),
+		ReadHeaderTimeout:   10 * time.Second,
+		MaxHeaderValueCount: http.DefaultMaxHeaderValueCount,
 	}
 	return srv.ListenAndServe()
 }
@@ -82,9 +82,10 @@ func (s *Server) ListenAndServe(addr string) error {
 // Run blocks until ctx.Done() or ListenAndServe returns an error.
 func (s *Server) Run(ctx context.Context, addr string) error {
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           s.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
+		Addr:                addr,
+		Handler:             s.Handler(),
+		ReadHeaderTimeout:   10 * time.Second,
+		MaxHeaderValueCount: http.DefaultMaxHeaderValueCount,
 	}
 
 	errCh := make(chan error, 1)
@@ -244,16 +245,18 @@ type apiErrorBody struct {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	data, _ := marshalWire(v)
+	_, _ = w.Write(data)
 }
 
 func writeAPIError(w http.ResponseWriter, status int, message, typ string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(apiErrorResponse{
+	data, _ := marshalWire(apiErrorResponse{
 		Error: apiErrorBody{
 			Message: message,
 			Type:    typ,
 		},
 	})
+	_, _ = w.Write(data)
 }

@@ -9,20 +9,19 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/runtime"
-	"github.com/magomedcoder/gogguf/pkg/runtime/sampler"
 )
 
 // OpenAI Chat Completions request (unsupported extras are accepted as stubs / ignored).
 type chatCompletionRequest struct {
 	Model               string          `json:"model"`
 	Messages            []chatMessage   `json:"messages"`
-	MaxTokens           int             `json:"max_tokens"`
-	MaxCompletionTokens int             `json:"max_completion_tokens"`
+	MaxTokens           int             `json:"max_tokens,omitzero"`
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitzero"`
 	Temperature         *float64        `json:"temperature,omitempty"`
 	TopP                *float64        `json:"top_p,omitempty"`
-	N                   int             `json:"n"`
+	N                   int             `json:"n,omitzero"`
 	Stop                json.RawMessage `json:"stop,omitempty"`
-	Stream              bool            `json:"stream"`
+	Stream              bool            `json:"stream,omitzero"`
 	StreamOptions       *streamOptions  `json:"stream_options,omitempty"`
 	PresencePenalty     *float64        `json:"presence_penalty,omitempty"`
 	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"`
@@ -34,11 +33,11 @@ type chatCompletionRequest struct {
 	ResponseFormat      json.RawMessage `json:"response_format,omitempty"`
 	Tools               []chat.Tool     `json:"tools,omitempty"`
 	ToolChoice          json.RawMessage `json:"tool_choice,omitempty"`
-	ParallelToolCalls   bool            `json:"parallel_tool_calls,omitempty"`
+	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"`
 }
 
 type streamOptions struct {
-	IncludeUsage bool `json:"include_usage"`
+	IncludeUsage bool `json:"include_usage,omitzero"`
 }
 
 type chatMessage struct {
@@ -136,7 +135,7 @@ func parseChatMessageContent(raw json.RawMessage) string {
 
 	if raw[0] == '"' {
 		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
+		if err := unmarshalWire(raw, &s); err == nil {
 			return s
 		}
 
@@ -147,7 +146,7 @@ func parseChatMessageContent(raw json.RawMessage) string {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	}
-	if err := json.Unmarshal(raw, &parts); err != nil {
+	if err := unmarshalWire(raw, &parts); err != nil {
 		return ""
 	}
 
@@ -168,7 +167,7 @@ func parseStop(raw json.RawMessage) []string {
 
 	if raw[0] == '"' {
 		var s string
-		if err := json.Unmarshal(raw, &s); err == nil && s != "" {
+		if err := unmarshalWire(raw, &s); err == nil && s != "" {
 			return []string{s}
 		}
 
@@ -176,7 +175,7 @@ func parseStop(raw json.RawMessage) []string {
 	}
 
 	var arr []string
-	if err := json.Unmarshal(raw, &arr); err == nil {
+	if err := unmarshalWire(raw, &arr); err == nil {
 		return arr
 	}
 
@@ -189,45 +188,16 @@ func parseToolChoice(raw json.RawMessage) any {
 	}
 
 	var asString string
-	if err := json.Unmarshal(raw, &asString); err == nil {
+	if err := unmarshalWire(raw, &asString); err == nil {
 		return asString
 	}
 
 	var asObj any
-	if err := json.Unmarshal(raw, &asObj); err == nil {
+	if err := unmarshalWire(raw, &asObj); err == nil {
 		return asObj
 	}
 
 	return nil
-}
-
-func (req *chatCompletionRequest) maxNewTokens() int {
-	if req.MaxCompletionTokens > 0 {
-		return req.MaxCompletionTokens
-	}
-
-	if req.MaxTokens > 0 {
-		return req.MaxTokens
-	}
-
-	return 128
-}
-
-func (req *chatCompletionRequest) samplerConfig() sampler.Config {
-	cfg := sampler.Config{TopP: 1}
-	if req.TopP != nil {
-		cfg.TopP = float32(*req.TopP)
-	}
-
-	if req.Temperature != nil {
-		cfg.Temp = float32(*req.Temperature)
-	}
-
-	if req.Seed != nil {
-		cfg.Seed = uint64(*req.Seed)
-	}
-
-	return cfg
 }
 
 // openaiFinishReason maps a parsed reply and the generation stop onto OpenAI finish_reason.
@@ -264,7 +234,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req chatCompletionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeWire(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
@@ -324,11 +294,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	parallelToolCalls := false
+	if req.ParallelToolCalls != nil {
+		parallelToolCalls = *req.ParallelToolCalls
+	}
 	prompt, err := chat.FormatMessages(msgs, chat.Options{
 		Metadata:          s.engine.Metadata(),
 		Tools:             req.Tools,
 		ToolChoice:        parseToolChoice(req.ToolChoice),
-		ParallelToolCalls: req.ParallelToolCalls,
+		ParallelToolCalls: parallelToolCalls,
 	})
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error(), "server_error")
@@ -350,17 +324,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	genParams := runtime.GenerateParams{
-		MaxTokens:       req.maxNewTokens(),
-		Sampler:         sampler.New(req.samplerConfig()),
-		RepeatPenalty:   frequencyPenaltyToRepeat(req.FrequencyPenalty),
-		RepeatLastN:     64,
-		PresencePenalty: presencePenaltyValue(req.PresencePenalty),
-		LogitBias:       bias,
-		Stop:            stops,
-		Logprobs:        wantLogprobs,
-		TopLogprobs:     topLogprobs,
-	}
+	genParams := baseGenerateParams(req.MaxTokens, req.MaxCompletionTokens, req.TopP, req.Temperature, req.Seed, req.FrequencyPenalty, req.PresencePenalty, bias, stops)
+	genParams.Logprobs = wantLogprobs
+	genParams.TopLogprobs = topLogprobs
 
 	s.inferMu.Lock()
 	defer s.inferMu.Unlock()
@@ -509,8 +475,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 			}},
 			Usage: usage,
 		}
-		data, _ := json.Marshal(chunk)
-		fmt.Fprintf(w, "data: %s\n\n", data)
+		_ = writeSSEJSON(w, chunk)
 		flusher.Flush()
 	}
 
@@ -528,7 +493,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	err = sess.GenerateSteps(params)
 	if err != nil {
 		conv.Rollback(snap)
-		fmt.Fprintf(w, "data: {\"error\":{\"message\":%q,\"type\":\"server_error\"}}\n\n", err.Error())
+		_ = writeSSEJSON(w, apiErrorResponse{Error: apiErrorBody{Message: err.Error(), Type: "server_error"}})
 		flusher.Flush()
 		return
 	}
@@ -539,7 +504,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	parsed := chat.ParseAssistantOutput(text)
 	if respFmt == "json_object" && !parsed.HasToolCalls() {
 		if err := ensureJSONObjectOutput(parsed.Content); err != nil {
-			fmt.Fprintf(w, "data: {\"error\":{\"message\":%q,\"type\":\"invalid_request_error\"}}\n\n", err.Error())
+			_ = writeSSEJSON(w, apiErrorResponse{Error: apiErrorBody{Message: err.Error(), Type: "invalid_request_error"}})
 			flusher.Flush()
 			return
 		}

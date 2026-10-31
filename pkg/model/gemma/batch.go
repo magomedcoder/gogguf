@@ -21,13 +21,10 @@ func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) erro
 	}
 
 	embd := m.cfg.EmbeddingDim
-	for i, tok := range tokenIDs {
-		row := m.scratch.bx[i*embd : (i+1)*embd]
-		if err := dispatch.EmbedTokenInto(m.weights, row, embd, tok); err != nil {
-			return err
-		}
-		compute.ScaleInPlace(row, m.cfg.EmbedScale)
+	if err := dispatch.EmbedTokensInto(m.weights, m.scratch.bx[:b*embd], embd, tokenIDs); err != nil {
+		return err
 	}
+	compute.ScaleInPlace(m.scratch.bx[:b*embd], m.cfg.EmbedScale)
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
 		if err := m.forwardBlockBatch(layer, startPos, b); err != nil {

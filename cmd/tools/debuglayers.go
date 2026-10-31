@@ -8,7 +8,8 @@ import (
 
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/compute"
-	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/debug"
+	"github.com/magomedcoder/gogguf/pkg/model"
 )
 
 type layerReport struct {
@@ -71,14 +72,12 @@ func runDebugLayers(args []string) error {
 		Layers:     make([]layerMetric, 0, 32),
 	}
 
-	setter, ok := engine.Model.(interface {
-		SetDebugHooks(*qwen3.DebugHooks)
-	})
+	setter, ok := engine.Model.(model.DebugHookSetter)
 	if !ok {
 		return fmt.Errorf("model does not support debug hooks")
 	}
 
-	setter.SetDebugHooks(&qwen3.DebugHooks{
+	setter.SetDebugHooks(&debug.Hooks{
 		OnEmbed: func(x []float32) {
 			report.EmbedRMS = compute.VectorRMS(x)
 		},

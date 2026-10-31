@@ -1,25 +1,18 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
+	"uuid"
 )
 
 const requestIDHeader = "X-Request-Id"
 
 func newRequestID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("req_%x", time.Now().UnixNano())
-	}
-
-	return "req_" + hex.EncodeToString(b[:])
+	return "req_" + uuid.New().String()
 }
 
 func withRequestID(next http.Handler) http.Handler {
@@ -57,7 +50,7 @@ func parseLogitBias(raw json.RawMessage) (map[int]float32, error) {
 	}
 
 	var asMap map[string]float64
-	if err := json.Unmarshal(raw, &asMap); err != nil {
+	if err := unmarshalWire(raw, &asMap); err != nil {
 		return nil, fmt.Errorf("logit_bias must be an object of token_id -> float: %w", err)
 	}
 
@@ -85,7 +78,7 @@ func parseResponseFormat(raw json.RawMessage) (string, error) {
 	}
 
 	var rf responseFormat
-	if err := json.Unmarshal(raw, &rf); err != nil {
+	if err := unmarshalWire(raw, &rf); err != nil {
 		return "", fmt.Errorf("response_format: %w", err)
 	}
 
@@ -111,15 +104,15 @@ func ensureJSONObjectOutput(text string) error {
 		s = strings.TrimPrefix(s, "```json")
 		s = strings.TrimPrefix(s, "```JSON")
 		s = strings.TrimPrefix(s, "```")
-		if i := strings.LastIndex(s, "```"); i >= 0 {
-			s = s[:i]
+		if before, _, ok := strings.CutLast(s, "```"); ok {
+			s = before
 		}
 
 		s = strings.TrimSpace(s)
 	}
 
 	var v any
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
+	if err := unmarshalWire([]byte(s), &v); err != nil {
 		return fmt.Errorf("response_format=json_object: completion is not valid JSON")
 	}
 
@@ -157,7 +150,7 @@ func contentHasMultimodal(raw json.RawMessage) bool {
 	var parts []struct {
 		Type string `json:"type"`
 	}
-	if err := json.Unmarshal(raw, &parts); err != nil {
+	if err := unmarshalWire(raw, &parts); err != nil {
 		return false
 	}
 

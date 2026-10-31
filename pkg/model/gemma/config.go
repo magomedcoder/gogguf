@@ -47,60 +47,51 @@ func ParseConfigGemma2(r *format.Reader) (Config, error) {
 }
 
 func parseConfig(r *format.Reader, prefix string, variant Variant) (Config, error) {
-	getInt := func(key string) (int, error) {
-		return r.Metadata.Int(prefix + key)
-	}
+	meta := format.PrefixedMeta{Prefix: prefix, MD: r.Metadata}
 
-	ctx, err := getInt("context_length")
+	ctx, err := meta.Int("context_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	emb, err := getInt("embedding_length")
+	emb, err := meta.Int("embedding_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	ffn, err := getInt("feed_forward_length")
+	ffn, err := meta.Int("feed_forward_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	layers, err := getInt("block_count")
+	layers, err := meta.Int("block_count")
 	if err != nil {
 		return Config{}, err
 	}
 
-	heads, err := getInt("attention.head_count")
+	heads, err := meta.Int("attention.head_count")
 	if err != nil {
 		return Config{}, err
 	}
 
 	kvHeads := heads
-	if v, err := getInt("attention.head_count_kv"); err == nil && v > 0 {
+	if v, err := meta.Int("attention.head_count_kv"); err == nil && v > 0 {
 		kvHeads = v
 	}
 
-	eps := float32(1e-6)
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"attention.layer_norm_rms_epsilon"); err == nil {
-		eps = v
-	}
-
-	freqBase := float32(10000)
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.freq_base"); err == nil {
-		freqBase = v
-	}
+	eps := meta.Float32Or("attention.layer_norm_rms_epsilon", 1e-6)
+	freqBase := meta.Float32Or("rope.freq_base", 10000)
 
 	if heads <= 0 {
 		return Config{}, fmt.Errorf("gemma: attention.head_count=%d", heads)
 	}
 
 	headDim := emb / heads
-	if v, err := getInt("attention.key_length"); err == nil && v > 0 {
+	if v, err := meta.Int("attention.key_length"); err == nil && v > 0 {
 		headDim = v
 	}
 
-	vocab, err := vocabSize(r, emb)
+	vocab, err := format.VocabSizeFromEmb(r, emb, "gemma")
 	if err != nil {
 		return Config{}, err
 	}
@@ -122,27 +113,27 @@ func parseConfig(r *format.Reader, prefix string, variant Variant) (Config, erro
 
 	if variant == VariantGemma2 {
 		cfg.SlidingWindow = 4096
-		if v, err := getInt("attention.sliding_window"); err == nil && v > 0 {
+		if v, err := meta.Int("attention.sliding_window"); err == nil && v > 0 {
 			cfg.SlidingWindow = v
 		}
 
 		cfg.SWAPeriod = 2
-		if v, err := getInt("attention.sliding_window_pattern"); err == nil && v > 0 {
+		if v, err := meta.Int("attention.sliding_window_pattern"); err == nil && v > 0 {
 			cfg.SWAPeriod = v
 		}
 
 		cfg.RopeFreqBaseSWA = freqBase
-		if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.freq_base_swa"); err == nil && v > 0 {
+		if v := meta.Float32Or("rope.freq_base_swa", 0); v > 0 {
 			cfg.RopeFreqBaseSWA = v
 		}
 
 		cfg.AttnLogitSoftcap = 50
-		if v, err := format.MetaValue[float32](r.Metadata, prefix+"attn_logit_softcapping"); err == nil && v > 0 {
+		if v := meta.Float32Or("attn_logit_softcapping", 0); v > 0 {
 			cfg.AttnLogitSoftcap = v
 		}
 
 		cfg.FinalLogitSoftcap = 30
-		if v, err := format.MetaValue[float32](r.Metadata, prefix+"final_logit_softcapping"); err == nil && v > 0 {
+		if v := meta.Float32Or("final_logit_softcapping", 0); v > 0 {
 			cfg.FinalLogitSoftcap = v
 		}
 	}
@@ -150,7 +141,7 @@ func parseConfig(r *format.Reader, prefix string, variant Variant) (Config, erro
 	return cfg, nil
 }
 
-// IsSWALayer: gemma2, period=2 -> even layers are SWA (like llama.cpp set_swa_pattern)
+// IsSWALayer gemma2, period=2 -> even layers are SWA (like llama.cpp set_swa_pattern)
 func (c Config) IsSWALayer(layer int) bool {
 	if c.Variant != VariantGemma2 || c.SlidingWindow <= 0 {
 		return false
@@ -170,26 +161,4 @@ func (c Config) ropeBase(layer int) float32 {
 	}
 
 	return c.RopeFreqBase
-}
-
-func vocabSize(r *format.Reader, emb int) (int, error) {
-	info, err := r.TensorInfo("token_embd.weight")
-	if err != nil {
-		return 0, err
-	}
-
-	if len(info.Dimensions) != 2 {
-		return 0, fmt.Errorf("gemma: token_embd.weight: expected 2D")
-	}
-
-	a, b := int(info.Dimensions[0]), int(info.Dimensions[1])
-	if a == emb {
-		return b, nil
-	}
-
-	if b == emb {
-		return a, nil
-	}
-
-	return 0, fmt.Errorf("gemma: token_embd.weight %v does not contain embedding_length=%d", info.Dimensions, emb)
 }

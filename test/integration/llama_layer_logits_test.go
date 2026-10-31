@@ -3,42 +3,19 @@
 package integration
 
 import (
-	"encoding/json"
 	"math"
-	"os"
 	"testing"
 
 	"github.com/magomedcoder/gogguf"
-	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/debug"
-	"github.com/magomedcoder/gogguf/pkg/model/llama"
+	"github.com/magomedcoder/gogguf/pkg/model"
 )
 
 func loadLlamaLayerLogitsFixture(t *testing.T) layerLogitsFile {
 	t.Helper()
 
-	paths := []string{
-		"../fixtures/llama32_layer_logits.json",
-		"test/fixtures/llama32_layer_logits.json",
-	}
-
-	var data []byte
-	var err error
-	for _, p := range paths {
-		data, err = os.ReadFile(p)
-		if err == nil {
-			break
-		}
-	}
-	if data == nil {
-		t.Fatal("llama32_layer_logits.json not found")
-	}
-
 	var lf layerLogitsFile
-	if err := json.Unmarshal(data, &lf); err != nil {
-		t.Fatalf("failed to parse fixture: %v", err)
-	}
-
+	loadFixtureJSON(t, false, &lf, fixtureJSONPaths("llama32_layer_logits.json")...)
 	return lf
 }
 
@@ -55,25 +32,14 @@ func TestLlama32LayerLogitsFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	setter, ok := engine.Model.(interface {
-		SetDebugHooks(*llama.DebugHooks)
-	})
+	setter, ok := engine.Model.(model.DebugHookSetter)
 	if !ok {
 		t.Fatal("model does not support debug hooks")
 	}
 
 	for _, tc := range lf.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			prompt := tc.Input
-			if tc.ChatUser != "" {
-				var err error
-				prompt, err = chat.FormatUser(tc.ChatUser, chat.Options{
-					Metadata: engine.Metadata(),
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
+			prompt := promptFromCase(t, engine, tc.Input, tc.ChatUser)
 
 			ids, err := ctx.EncodeForInference(prompt)
 			if err != nil {
@@ -83,7 +49,7 @@ func TestLlama32LayerLogitsFixture(t *testing.T) {
 			got := make([]int, 0, len(tc.LayerGreedy))
 			gotTop := make([][]debug.Logit, 0, len(tc.LayerTopLogits))
 
-			setter.SetDebugHooks(&llama.DebugHooks{
+			setter.SetDebugHooks(&debug.Hooks{
 				OnLayerLogits: func(layer int, logits []float32) {
 					_ = layer
 					got = append(got, gogguf.Greedy(logits))

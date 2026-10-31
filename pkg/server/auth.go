@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/magomedcoder/gogguf/pkg/strutil"
 )
 
 // withAPIKey requires Authorization: Bearer <key> or X-API-Key when apiKey is set.
@@ -40,9 +42,8 @@ func apiKeyFromRequest(r *http.Request) string {
 
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if ip := strings.TrimSpace(parts[0]); ip != "" {
-			return ip
+		if parts := strutil.SplitCommaTrim(xff); len(parts) > 0 {
+			return parts[0]
 		}
 	}
 

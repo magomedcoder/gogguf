@@ -3,15 +3,12 @@
 package integration
 
 import (
-	"encoding/json"
 	"math"
-	"os"
 	"testing"
 
 	"github.com/magomedcoder/gogguf"
-	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/debug"
-	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/model"
 )
 
 type layerLogitsFile struct {
@@ -30,29 +27,8 @@ type layerLogitsCase struct {
 func loadLayerLogitsFixture(t *testing.T) layerLogitsFile {
 	t.Helper()
 
-	paths := []string{
-		"../fixtures/qwen3_layer_logits.json",
-		"test/fixtures/qwen3_layer_logits.json",
-	}
-
-	var data []byte
-	var err error
-	for _, p := range paths {
-		data, err = os.ReadFile(p)
-		if err == nil {
-			break
-		}
-	}
-
-	if data == nil {
-		t.Skip("layer logits fixture not found")
-	}
-
 	var lf layerLogitsFile
-	if err := json.Unmarshal(data, &lf); err != nil {
-		t.Fatalf("failed to parse fixture: %v", err)
-	}
-
+	loadFixtureJSON(t, true, &lf, fixtureJSONPaths("qwen3_layer_logits.json")...)
 	return lf
 }
 
@@ -69,25 +45,14 @@ func TestLayerLogitsFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	setter, ok := engine.Model.(interface {
-		SetDebugHooks(*qwen3.DebugHooks)
-	})
+	setter, ok := engine.Model.(model.DebugHookSetter)
 	if !ok {
 		t.Fatal("model does not support debug hooks")
 	}
 
 	for _, tc := range lf.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			prompt := tc.Input
-			if tc.ChatUser != "" {
-				var err error
-				prompt, err = chat.FormatUser(tc.ChatUser, chat.Options{
-					Metadata: engine.Metadata(),
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
+			prompt := promptFromCase(t, engine, tc.Input, tc.ChatUser)
 
 			ids, err := ctx.EncodeForInference(prompt)
 			if err != nil {
@@ -97,7 +62,7 @@ func TestLayerLogitsFixture(t *testing.T) {
 			got := make([]int, 0, len(tc.LayerGreedy))
 			gotTop := make([][]debug.Logit, 0, len(tc.LayerTopLogits))
 
-			setter.SetDebugHooks(&qwen3.DebugHooks{
+			setter.SetDebugHooks(&debug.Hooks{
 				OnLayerLogits: func(layer int, logits []float32) {
 					_ = layer
 					got = append(got, gogguf.Greedy(logits))

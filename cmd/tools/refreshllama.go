@@ -9,7 +9,7 @@ import (
 
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/debug"
-	"github.com/magomedcoder/gogguf/pkg/model/llama"
+	"github.com/magomedcoder/gogguf/pkg/model"
 )
 
 // runRefreshLlama rewrites test/fixtures/llama32_golden.json and llama32_layer_logits.json from the current CPU forward (use after numeric path changes).
@@ -33,9 +33,7 @@ func runRefreshLlama(args []string) error {
 		return err
 	}
 
-	setter, ok := engine.Model.(interface {
-		SetDebugHooks(*llama.DebugHooks)
-	})
+	setter, ok := engine.Model.(model.DebugHookSetter)
 	if !ok {
 		return fmt.Errorf("llama model missing debug hooks")
 	}
@@ -151,7 +149,7 @@ func runRefreshLlama(args []string) error {
 		}
 		var greedy []int
 		var tops [][]debug.Logit
-		setter.SetDebugHooks(&llama.DebugHooks{
+		setter.SetDebugHooks(&debug.Hooks{
 			OnLayerLogits: func(_ int, logits []float32) {
 				greedy = append(greedy, gogguf.Greedy(logits))
 				tops = append(tops, debug.TopLogits(logits, *topN))

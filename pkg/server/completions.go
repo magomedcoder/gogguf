@@ -8,18 +8,17 @@ import (
 	"time"
 
 	"github.com/magomedcoder/gogguf/pkg/runtime"
-	"github.com/magomedcoder/gogguf/pkg/runtime/sampler"
 )
 
 // Legacy OpenAI Completions API (prefer /v1/chat/completions)
 type completionsRequest struct {
 	Model            string          `json:"model"`
 	Prompt           json.RawMessage `json:"prompt"`
-	MaxTokens        int             `json:"max_tokens"`
+	MaxTokens        int             `json:"max_tokens,omitzero"`
 	Temperature      *float64        `json:"temperature,omitempty"`
 	TopP             *float64        `json:"top_p,omitempty"`
-	N                int             `json:"n"`
-	Stream           bool            `json:"stream"`
+	N                int             `json:"n,omitzero"`
+	Stream           bool            `json:"stream,omitzero"`
 	Stop             json.RawMessage `json:"stop,omitempty"`
 	PresencePenalty  *float64        `json:"presence_penalty,omitempty"`
 	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"`
@@ -27,7 +26,7 @@ type completionsRequest struct {
 	Seed             *int64          `json:"seed,omitempty"`
 	LogitBias        json.RawMessage `json:"logit_bias,omitempty"`
 	Logprobs         *int            `json:"logprobs,omitempty"` // stub
-	Echo             bool            `json:"echo"`
+	Echo             bool            `json:"echo,omitzero"`
 	Suffix           string          `json:"suffix,omitempty"` // stub
 }
 
@@ -70,7 +69,7 @@ func parseCompletionsPrompt(raw json.RawMessage) (string, error) {
 
 	if raw[0] == '"' {
 		var s string
-		if err := json.Unmarshal(raw, &s); err != nil {
+		if err := unmarshalWire(raw, &s); err != nil {
 			return "", err
 		}
 
@@ -79,7 +78,7 @@ func parseCompletionsPrompt(raw json.RawMessage) (string, error) {
 
 	if raw[0] == '[' {
 		var strs []string
-		if err := json.Unmarshal(raw, &strs); err == nil {
+		if err := unmarshalWire(raw, &strs); err == nil {
 			return strings.Join(strs, ""), nil
 		}
 
@@ -89,31 +88,6 @@ func parseCompletionsPrompt(raw json.RawMessage) (string, error) {
 	return "", fmt.Errorf("invalid prompt")
 }
 
-func (req *completionsRequest) maxNewTokens() int {
-	if req.MaxTokens > 0 {
-		return req.MaxTokens
-	}
-
-	return 128
-}
-
-func (req *completionsRequest) samplerConfig() sampler.Config {
-	cfg := sampler.Config{TopP: 1}
-	if req.TopP != nil {
-		cfg.TopP = float32(*req.TopP)
-	}
-
-	if req.Temperature != nil {
-		cfg.Temp = float32(*req.Temperature)
-	}
-
-	if req.Seed != nil {
-		cfg.Seed = uint64(*req.Seed)
-	}
-
-	return cfg
-}
-
 func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed", "invalid_request_error")
@@ -121,7 +95,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req completionsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeWire(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
@@ -157,15 +131,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	genParams := runtime.GenerateParams{
-		MaxTokens:       req.maxNewTokens(),
-		Sampler:         sampler.New(req.samplerConfig()),
-		RepeatPenalty:   frequencyPenaltyToRepeat(req.FrequencyPenalty),
-		RepeatLastN:     64,
-		PresencePenalty: presencePenaltyValue(req.PresencePenalty),
-		LogitBias:       bias,
-		Stop:            stops,
-	}
+	genParams := baseGenerateParams(req.MaxTokens, 0, req.TopP, req.Temperature, req.Seed, req.FrequencyPenalty, req.PresencePenalty, bias, stops)
 
 	s.inferMu.Lock()
 	defer s.inferMu.Unlock()
@@ -254,8 +220,7 @@ func (s *Server) serveCompletionsStream(w http.ResponseWriter, conv *runtime.Con
 				FinishReason: finish,
 			}},
 		}
-		data, _ := json.Marshal(chunk)
-		fmt.Fprintf(w, "data: %s\n\n", data)
+		_ = writeSSEJSON(w, chunk)
 		flusher.Flush()
 	}
 
@@ -270,7 +235,7 @@ func (s *Server) serveCompletionsStream(w http.ResponseWriter, conv *runtime.Con
 
 	if err := sess.GenerateSteps(params); err != nil {
 		conv.Rollback(snap)
-		fmt.Fprintf(w, "data: {\"error\":{\"message\":%q,\"type\":\"server_error\"}}\n\n", err.Error())
+		_ = writeSSEJSON(w, apiErrorResponse{Error: apiErrorBody{Message: err.Error(), Type: "server_error"}})
 		flusher.Flush()
 		return
 	}

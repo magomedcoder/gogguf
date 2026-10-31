@@ -1,9 +1,7 @@
 package llama
 
-// DebugHooks - callbacks for step-by-step forward pass debugging (compare with llama.cpp)
-type DebugHooks struct {
-	OnEmbed       func(x []float32)
-	OnLayer       func(layer int, x []float32)
-	OnLayerLogits func(layer int, logits []float32)
-	OnLogits      func(logits []float32)
-}
+import "github.com/magomedcoder/gogguf/pkg/debug"
+
+// DebugHooks is a type alias of [debug.Hooks] for backward-compatible API surface in this architecture package.
+// Prefer [debug.Hooks] and [model.DebugHookSetter] in new code.
+type DebugHooks = debug.Hooks

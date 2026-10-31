@@ -44,23 +44,28 @@ func TestSessionIDFromRequest(t *testing.T) {
 
 func TestModelsFormat(t *testing.T) {
 	srv := New(&runtime.Engine{}, "/models/test.gguf")
-	rec := httptest.NewRecorder()
-	srv.handleModels(rec, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	ts := httptest.NewTestServer(t, srv.Handler())
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, expected 200", rec.Code)
+	resp, err := ts.Client().Get(ts.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, expected 200", resp.StatusCode)
 	}
 
-	var resp modelsResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+	var body modelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 
-	if len(resp.Data) != 1 || resp.Data[0].ID == "" {
-		t.Fatalf("expected one model with id, got %+v", resp)
+	if len(body.Data) != 1 || body.Data[0].ID == "" {
+		t.Fatalf("expected one model with id, got %+v", body)
 	}
-	if resp.Data[0].Object != "model" || resp.Data[0].OwnedBy != "gogguf" {
-		t.Fatalf("model card: %+v", resp.Data[0])
+	if body.Data[0].Object != "model" || body.Data[0].OwnedBy != "gogguf" {
+		t.Fatalf("model card: %+v", body.Data[0])
 	}
 }
 

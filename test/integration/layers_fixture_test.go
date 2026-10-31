@@ -3,15 +3,13 @@
 package integration
 
 import (
-	"encoding/json"
 	"math"
-	"os"
 	"testing"
 
 	"github.com/magomedcoder/gogguf"
-	"github.com/magomedcoder/gogguf/pkg/chat"
 	"github.com/magomedcoder/gogguf/pkg/compute"
-	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/debug"
+	"github.com/magomedcoder/gogguf/pkg/model"
 )
 
 type layersFile struct {
@@ -31,28 +29,8 @@ type layersCase struct {
 func loadLayersFixture(t *testing.T) layersFile {
 	t.Helper()
 
-	paths := []string{
-		"../fixtures/qwen3_layers.json",
-		"test/fixtures/qwen3_layers.json",
-	}
-
-	var data []byte
-	var err error
-	for _, p := range paths {
-		data, err = os.ReadFile(p)
-		if err == nil {
-			break
-		}
-	}
-	if data == nil {
-		t.Skip("layers fixture not found")
-	}
-
 	var lf layersFile
-	if err := json.Unmarshal(data, &lf); err != nil {
-		t.Fatalf("failed to parse fixture: %v", err)
-	}
-
+	loadFixtureJSON(t, true, &lf, fixtureJSONPaths("qwen3_layers.json")...)
 	return lf
 }
 
@@ -64,25 +42,14 @@ func TestLayersFixture(t *testing.T) {
 	}
 	defer engine.Close()
 
-	setter, ok := engine.Model.(interface {
-		SetDebugHooks(*qwen3.DebugHooks)
-	})
+	setter, ok := engine.Model.(model.DebugHookSetter)
 	if !ok {
 		t.Fatal("model does not support debug hooks")
 	}
 
 	for _, tc := range lf.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			prompt := tc.Input
-			if tc.ChatUser != "" {
-				var err error
-				prompt, err = chat.FormatUser(tc.ChatUser, chat.Options{
-					Metadata: engine.Metadata(),
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
+			prompt := promptFromCase(t, engine, tc.Input, tc.ChatUser)
 
 			ids, err := engine.Tokenizer().Encode(prompt)
 			if err != nil {
@@ -92,7 +59,7 @@ func TestLayersFixture(t *testing.T) {
 			var embedRMS float32
 			layerRMS := make([]float32, 0, len(tc.LayerRMS))
 
-			setter.SetDebugHooks(&qwen3.DebugHooks{
+			setter.SetDebugHooks(&debug.Hooks{
 				OnEmbed: func(x []float32) {
 					embedRMS = compute.VectorRMS(x)
 				},

@@ -105,38 +105,15 @@ func EmbedTokenInto(store *weights.Store, dst []float32, embd, tokenID int) erro
 		return err
 	}
 
-	switch info.Type {
-	case dtype.Q8_0:
-		return compute.EmbeddingQ8_0Into(dst, raw, embd, tokenID)
-	case dtype.Q4_0:
-		return compute.EmbeddingQ4_0Into(dst, raw, embd, tokenID)
-	case dtype.Q4_1:
-		return compute.EmbeddingQ4_1Into(dst, raw, embd, tokenID)
-	case dtype.Q5_0:
-		return compute.EmbeddingQ5_0Into(dst, raw, embd, tokenID)
-	case dtype.Q5_1:
-		return compute.EmbeddingQ5_1Into(dst, raw, embd, tokenID)
-	case dtype.Q4_K:
-		return compute.EmbeddingQ4_KInto(dst, raw, embd, tokenID)
-	case dtype.Q5_K:
-		return compute.EmbeddingQ5_KInto(dst, raw, embd, tokenID)
-	case dtype.Q6_K:
-		return compute.EmbeddingQ6_KInto(dst, raw, embd, tokenID)
-	case dtype.Q2_K:
-		return compute.EmbeddingQ2_KInto(dst, raw, embd, tokenID)
-	case dtype.Q3_K:
-		return compute.EmbeddingQ3_KInto(dst, raw, embd, tokenID)
-	case dtype.Q8_K:
-		return compute.EmbeddingQ8_KInto(dst, raw, embd, tokenID)
-	default:
-		f32, err := store.Floats(name)
-		if err != nil {
+	return EmbeddingTypedInto(info.Type, dst, raw, embd, tokenID, store, name)
+}
+
+// EmbedTokensInto writes embedding rows for tokens into dst [len(tokens)*embd]
+func EmbedTokensInto(store *weights.Store, dst []float32, embd int, tokens []int) error {
+	for i, tok := range tokens {
+		if err := EmbedTokenInto(store, dst[i*embd:(i+1)*embd], embd, tok); err != nil {
 			return err
 		}
-
-		off := tokenID * embd
-		copy(dst, f32[off:off+embd])
-
-		return nil
 	}
+	return nil
 }

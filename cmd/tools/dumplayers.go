@@ -8,9 +8,7 @@ import (
 
 	"github.com/magomedcoder/gogguf"
 	"github.com/magomedcoder/gogguf/pkg/debug"
-	"github.com/magomedcoder/gogguf/pkg/model/llama"
-	"github.com/magomedcoder/gogguf/pkg/model/mistral"
-	"github.com/magomedcoder/gogguf/pkg/model/qwen3"
+	"github.com/magomedcoder/gogguf/pkg/model"
 )
 
 // runDumpLayers writes embed + hidden after each layer (.bin/.json).
@@ -116,26 +114,13 @@ func setLayerHiddenHooks(engine *gogguf.Engine, dump *debug.LayersDump) bool {
 		dump.Layers = append(dump.Layers, append([]float32(nil), x...))
 	}
 
-	switch m := engine.Model.(type) {
-	case interface{ SetDebugHooks(*qwen3.DebugHooks) }:
-		m.SetDebugHooks(&qwen3.DebugHooks{
-			OnEmbed: onEmbed,
-			OnLayer: onLayer,
-		})
-		return true
-	case interface{ SetDebugHooks(*llama.DebugHooks) }:
-		m.SetDebugHooks(&llama.DebugHooks{
-			OnEmbed: onEmbed,
-			OnLayer: onLayer,
-		})
-		return true
-	case interface{ SetDebugHooks(*mistral.DebugHooks) }:
-		m.SetDebugHooks(&mistral.DebugHooks{
-			OnEmbed: onEmbed,
-			OnLayer: onLayer,
-		})
-		return true
-	default:
+	setter, ok := engine.Model.(model.DebugHookSetter)
+	if !ok {
 		return false
 	}
+	setter.SetDebugHooks(&debug.Hooks{
+		OnEmbed: onEmbed,
+		OnLayer: onLayer,
+	})
+	return true
 }

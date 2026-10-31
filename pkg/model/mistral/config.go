@@ -71,77 +71,61 @@ func ParseConfigQwen2MoE(r *format.Reader) (Config, error) {
 }
 
 func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultRope float32, defaultSlidingWindow int) (Config, error) {
-	getInt := func(key string) (int, error) {
-		return r.Metadata.Int(prefix + key)
-	}
+	meta := format.PrefixedMeta{Prefix: prefix, MD: r.Metadata}
 
-	ctx, err := getInt("context_length")
+	ctx, err := meta.Int("context_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	emb, err := getInt("embedding_length")
+	emb, err := meta.Int("embedding_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	ffn, err := getInt("feed_forward_length")
+	ffn, err := meta.Int("feed_forward_length")
 	if err != nil {
 		return Config{}, err
 	}
 
-	layers, err := getInt("block_count")
+	layers, err := meta.Int("block_count")
 	if err != nil {
 		return Config{}, err
 	}
 
-	heads, err := getInt("attention.head_count")
+	heads, err := meta.Int("attention.head_count")
 	if err != nil {
 		return Config{}, err
 	}
 
-	kvHeads, err := getInt("attention.head_count_kv")
+	kvHeads, err := meta.Int("attention.head_count_kv")
 	if err != nil {
 		return Config{}, err
 	}
 
-	eps := defaultEps
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"attention.layer_norm_rms_epsilon"); err == nil {
-		eps = v
-	}
-
-	freqBase := defaultRope
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"rope.freq_base"); err == nil {
-		freqBase = v
-	}
+	eps := meta.Float32Or("attention.layer_norm_rms_epsilon", defaultEps)
+	freqBase := meta.Float32Or("rope.freq_base", defaultRope)
 
 	headDim := emb / heads
 	if heads <= 0 {
 		return Config{}, fmt.Errorf("mistral: attention.head_count=%d", heads)
 	}
 
-	if v, err := getInt("attention.key_length"); err == nil && v > 0 {
+	if v, err := meta.Int("attention.key_length"); err == nil && v > 0 {
 		headDim = v
 	}
 
 	slidingWindow := defaultSlidingWindow
-	if v, err := getInt("attention.sliding_window"); err == nil && v > 0 {
+	if v, err := meta.Int("attention.sliding_window"); err == nil && v > 0 {
 		slidingWindow = v
 	}
 
-	nExpert := 0
-	if v, err := getInt("expert_count"); err == nil {
-		nExpert = v
-	}
+	nExpert := meta.IntOr("expert_count", 0)
+	nExpertUsed := meta.IntOr("expert_used_count", 0)
 
-	nExpertUsed := 0
-	if v, err := getInt("expert_used_count"); err == nil {
-		nExpertUsed = v
-	}
-
-	wScale := float32(1)
-	if v, err := format.MetaValue[float32](r.Metadata, prefix+"expert_weights_scale"); err == nil && v != 0 {
-		wScale = v
+	wScale := meta.Float32Or("expert_weights_scale", 1)
+	if wScale == 0 {
+		wScale = 1
 	}
 
 	if nExpert > 0 {
@@ -155,16 +139,16 @@ func parseConfigWithPrefix(r *format.Reader, prefix string, defaultEps, defaultR
 	}
 
 	expertFFN := 0
-	if v, err := getInt("expert_feed_forward_length"); err == nil && v > 0 {
+	if v, err := meta.Int("expert_feed_forward_length"); err == nil && v > 0 {
 		expertFFN = v
 	}
 
 	sharedFFN := 0
-	if v, err := getInt("expert_shared_feed_forward_length"); err == nil && v > 0 {
+	if v, err := meta.Int("expert_shared_feed_forward_length"); err == nil && v > 0 {
 		sharedFFN = v
 	}
 
-	vocab, err := vocabSize(r, emb)
+	vocab, err := format.VocabSizeFromEmb(r, emb, "mistral")
 	if err != nil {
 		return Config{}, err
 	}
@@ -213,26 +197,4 @@ func (c Config) maxFFN() int {
 	}
 
 	return m
-}
-
-func vocabSize(r *format.Reader, emb int) (int, error) {
-	info, err := r.TensorInfo("token_embd.weight")
-	if err != nil {
-		return 0, err
-	}
-
-	if len(info.Dimensions) != 2 {
-		return 0, fmt.Errorf("mistral: token_embd.weight: expected 2D")
-	}
-
-	a, b := int(info.Dimensions[0]), int(info.Dimensions[1])
-	if a == emb {
-		return b, nil
-	}
-
-	if b == emb {
-		return a, nil
-	}
-
-	return 0, fmt.Errorf("mistral: token_embd.weight %v does not contain embedding_length=%d", info.Dimensions, emb)
 }

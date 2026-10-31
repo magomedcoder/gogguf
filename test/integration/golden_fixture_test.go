@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"encoding/json"
 	"math"
 	"os"
 	"testing"
@@ -36,27 +35,8 @@ type goldenLogit struct {
 func loadGolden(t *testing.T) goldenFile {
 	t.Helper()
 
-	paths := []string{
-		"../fixtures/qwen3_golden.json",
-		"test/fixtures/qwen3_golden.json",
-	}
-
-	var data []byte
-	var err error
-	for _, p := range paths {
-		data, err = os.ReadFile(p)
-		if err == nil {
-			break
-		}
-	}
-	if data == nil {
-		t.Skip("golden fixture not found")
-	}
-
 	var gf goldenFile
-	if err := json.Unmarshal(data, &gf); err != nil {
-		t.Fatalf("failed to parse fixture: %v", err)
-	}
+	loadFixtureJSON(t, true, &gf, fixtureJSONPaths("qwen3_golden.json")...)
 	return gf
 }
 

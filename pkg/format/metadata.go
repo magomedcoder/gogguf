@@ -54,6 +54,16 @@ func MetaValue[T any](metadata Metadata, name string) (T, error) {
 	return v.(T), nil
 }
 
+// MetaValueOr returns metadata value as type T, or def if missing or wrong type.
+func MetaValueOr[T any](md Metadata, key string, def T) T {
+	v, err := MetaValue[T](md, key)
+	if err != nil {
+		return def
+	}
+
+	return v
+}
+
 // MetaValueNumber returns metadata value with given name as number
 // If value is not a number, returns error
 // Number is converted to type T
@@ -101,4 +111,37 @@ func MetaValueNumber[T ~int | ~uint8 | ~int8 | ~uint16 | ~int16 | ~uint32 | ~int
 	default:
 		return 0, fmt.Errorf("metadata value %q is not a number, type: %T", name, v)
 	}
+}
+
+// MetaValueNumberOr returns metadata value as number type T, or def on error.
+func MetaValueNumberOr[T ~int | ~uint8 | ~int8 | ~uint16 | ~int16 | ~uint32 | ~int32 | ~uint64 | ~int64 | ~float32 | ~float64](md Metadata, key string, def T) T {
+	v, err := MetaValueNumber[T](md, key)
+	if err != nil {
+		return def
+	}
+
+	return v
+}
+
+// VocabSizeFromEmb infers vocab from token_embd.weight dims given embedding length.
+func VocabSizeFromEmb(r *Reader, emb int, archLabel string) (int, error) {
+	info, err := r.TensorInfo("token_embd.weight")
+	if err != nil {
+		return 0, err
+	}
+
+	if len(info.Dimensions) != 2 {
+		return 0, fmt.Errorf("%s: token_embd.weight: expected 2D", archLabel)
+	}
+
+	a, b := int(info.Dimensions[0]), int(info.Dimensions[1])
+	if a == emb {
+		return b, nil
+	}
+
+	if b == emb {
+		return a, nil
+	}
+
+	return 0, fmt.Errorf("%s: token_embd.weight %v does not contain embedding_length=%d", archLabel, info.Dimensions, emb)
 }
