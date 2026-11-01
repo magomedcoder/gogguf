@@ -58,7 +58,7 @@ func (m *Model) initFused() {
 func (m *Model) initResidency() {
 	if m.cfg.ExpertCount > 0 {
 		if m.fused != nil && gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
-			m.logitsOnGPU = true
+			m.decode.LogitsOnGPU = true
 		}
 
 		return
@@ -75,7 +75,7 @@ func (m *Model) initResidency() {
 		return
 	}
 	m.residency = true
-	m.logitsOnGPU = true
+	m.decode.LogitsOnGPU = true
 }
 
 // forwardBlockDevice runs the layer on GPU over resident hidden state.
@@ -88,14 +88,14 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 	if err := m.cache.Bump(layer, 1); err != nil {
 		return err
 	}
-	m.cpuKVHollow = true
+	m.decode.CPUKVHollow = true
 
 	return m.attnFFNGPU(layer, ln, nil, nil)
 }
 
 // tryRecoverGPUKV rebuilds device KV from the CPU mirror without ResetCache (session stays).
 func (m *Model) tryRecoverGPUKV() bool {
-	if m.dev == nil || !m.gpuKVStale || m.cpuKVHollow {
+	if m.dev == nil || !m.decode.GPUKVStale || m.decode.CPUKVHollow {
 		return false
 	}
 
@@ -121,7 +121,7 @@ func (m *Model) tryRecoverGPUKV() bool {
 			return false
 		}
 	}
-	m.gpuKVStale = false
+	m.decode.GPUKVStale = false
 
 	return true
 }
@@ -129,7 +129,7 @@ func (m *Model) tryRecoverGPUKV() bool {
 // recoverHiddenFromDevice brings hidden state back to host after a device-layer failure.
 // If residual was partially updated, valid state exists nowhere - error.
 func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
-	m.residDevice = false
+	m.decode.ResidDevice = false
 	m.residency = false
 
 	if !m.dev.HiddenActive() {
@@ -145,11 +145,11 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 
 // syncHiddenFromDevice pulls hidden state from device when resident (for host readers)
 func (m *Model) syncHiddenFromDevice() error {
-	if !m.residDevice {
+	if !m.decode.ResidDevice {
 		return nil
 	}
 
-	m.residDevice = false
+	m.decode.ResidDevice = false
 
 	return m.dev.HiddenDownload(m.scratch.x[:m.cfg.EmbeddingDim])
 }

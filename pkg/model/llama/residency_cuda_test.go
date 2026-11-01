@@ -76,7 +76,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 		}
 
 		// layer may silently fall back to host on upload OOM (recoverHiddenFromDevice)
-		if !m.residency || !m.residDevice {
+		if !m.residency || !m.decode.ResidDevice {
 			t.Skip("residency fell back to host (likely insufficient VRAM)")
 		}
 
@@ -85,7 +85,7 @@ func TestLlamaResidencyEngagedFullOffload(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if !m.logitsOnGPU {
+		if !m.decode.LogitsOnGPU {
 			t.Fatal("logitsOnGPU cleared: GPU lm_head failed")
 		}
 
@@ -148,7 +148,7 @@ func TestLlamaFullOffloadLogitsParity(t *testing.T) {
 	}
 	defer dev.Close()
 
-	if requireResid && !dev.residDevice {
+	if requireResid && !dev.decode.ResidDevice {
 		t.Fatal("hidden did not stay on device with full offload")
 	}
 

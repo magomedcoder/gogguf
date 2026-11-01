@@ -1,80 +1,64 @@
 package qwen3
 
 import (
-	"fmt"
-
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/exec/dispatch"
+	"github.com/magomedcoder/gogguf/pkg/exec/prefill"
 )
 
 // forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
 // With -ngl matmul uses MatMulMat*Cached (quant GEMM / batched device launches); attention - device.AttentionScoresKVBatch over GPU KV (one launch with CUDA attn_flash); otherwise CPU GEMM + CPU causal attn.
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
-	b := len(tokenIDs)
-	if b == 0 {
-		return fmt.Errorf("qwen3: empty batch")
-	}
-
-	// Prefill chunk uses host scratch; pull any resident decode hidden first.
-	if err := m.syncHiddenFromDevice(); err != nil {
-		return err
-	}
-
-	if b > m.nBatch {
-		return fmt.Errorf("qwen3: batch=%d > n_batch=%d", b, m.nBatch)
-	}
-
 	embd := m.cfg.EmbeddingDim
-	if err := dispatch.EmbedTokensInto(m.weights, m.scratch.x[:b*embd], embd, tokenIDs); err != nil {
-		return err
-	}
-
-	for layer := 0; layer < m.cfg.NumLayers; layer++ {
-		if err := m.forwardBlockBatch(layer, startPos, b); err != nil {
-			return err
-		}
-	}
-	m.cache.AdvanceN(b)
-
-	if !needLogits {
-		return nil
-	}
-
-	last := m.scratch.x[(b-1)*embd : b*embd]
-	// Prefer GPU logits after re-upload when residency is on.
-	if m.residency && m.dev != nil && m.logitsOnGPU {
-		if err := m.dev.HiddenUpload(last); err != nil {
-			m.residency = false
-			m.residDevice = false
-			if err := m.logitsFromHidden(last); err != nil {
-				return err
-			}
-		} else {
-			m.residDevice = true
-			if err := m.logitsDevice(); err != nil {
-				m.logitsOnGPU = false
+	return prefill.Run("qwen3", m.nBatch, m.cfg.NumLayers, startPos, tokenIDs, needLogits,
+		m.syncHiddenFromDevice,
+		func(b int) error {
+			return dispatch.EmbedTokensInto(m.weights, m.scratch.x[:b*embd], embd, tokenIDs)
+		},
+		func(layer, startPos, batch int) error {
+			return m.forwardBlockBatch(layer, startPos, batch)
+		},
+		func(b int) {
+			m.cache.AdvanceN(b)
+		},
+		func(b int) error {
+			last := m.scratch.x[(b-1)*embd : b*embd]
+			// Prefer GPU logits after re-upload when residency is on
+			if m.residency && m.dev != nil && m.decode.LogitsOnGPU {
+				if err := m.dev.HiddenUpload(last); err != nil {
+					m.residency = false
+					m.decode.ResidDevice = false
+					if err := m.logitsFromHidden(last); err != nil {
+						return err
+					}
+				} else {
+					m.decode.ResidDevice = true
+					if err := m.logitsDevice(); err != nil {
+						m.decode.LogitsOnGPU = false
+						if err := m.logitsFromHidden(last); err != nil {
+							return err
+						}
+					}
+				}
+			} else {
 				if err := m.logitsFromHidden(last); err != nil {
 					return err
 				}
-			}
-		}
-	} else {
-		if err := m.logitsFromHidden(last); err != nil {
-			return err
-		}
 
-		if m.residency && m.dev != nil {
-			if err := m.dev.HiddenUpload(last); err != nil {
-				m.residency = false
-			} else {
-				m.residDevice = true
+				if m.residency && m.dev != nil {
+					if err := m.dev.HiddenUpload(last); err != nil {
+						m.residency = false
+					} else {
+						m.decode.ResidDevice = true
+					}
+				}
 			}
-		}
-	}
 
-	m.emitLogitsDebug()
-	return nil
+			m.emitLogitsDebug()
+			return nil
+		},
+	)
 }
 
 func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
@@ -143,9 +127,9 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	}
 
 	// mirror chunk K/V into GPU KV-cache, else decode after batch-prefill sees incomplete cache.
-	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.decode.GPUKVStale {
 		if err := m.dev.KVCacheAppendN(layer, pastLen, k, v, batch); err != nil {
-			m.gpuKVStale = true
+			m.decode.GPUKVStale = true
 			_ = m.tryRecoverGPUKV()
 		}
 	}
@@ -211,7 +195,7 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 // attentionBatchCausalInto: causal multi-query attention for batch.
 // On GPU - device.AttentionScoresKVBatch (queries see past+i+1); else CPU reference.
 func (m *Model) attentionBatchCausalInto(attn, q []float32, layer, pastLen, batch int) error {
-	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.decode.GPUKVStale {
 		// single launch (fused attn_flash on CUDA) when the backend supports it, else per-query loop
 		if err := device.AttentionScoresKVBatch(m.dev, layer, attn, q, batch, pastLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil

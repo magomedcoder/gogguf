@@ -31,13 +31,9 @@ type completionsRequest struct {
 }
 
 type completionsResponse struct {
-	ID                string              `json:"id"`
-	Object            string              `json:"object"`
-	Created           int64               `json:"created"`
-	Model             string              `json:"model"`
-	SystemFingerprint string              `json:"system_fingerprint,omitempty"`
-	Choices           []completionsChoice `json:"choices"`
-	Usage             chatCompletionUsage `json:"usage"`
+	streamMeta
+	Choices []completionsChoice `json:"choices"`
+	Usage   usageTokens         `json:"usage"`
 }
 
 type completionsChoice struct {
@@ -48,10 +44,7 @@ type completionsChoice struct {
 }
 
 type completionsStreamChunk struct {
-	ID      string                    `json:"id"`
-	Object  string                    `json:"object"`
-	Created int64                     `json:"created"`
-	Model   string                    `json:"model"`
+	streamMeta
 	Choices []completionsStreamChoice `json:"choices"`
 }
 
@@ -178,7 +171,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 			Logprobs:     nil,
 			FinishReason: sess.StopReason(),
 		}},
-		Usage: chatCompletionUsage{
+		Usage: usageTokens{
 			PromptTokens:     sess.PromptTokenCount(),
 			CompletionTokens: sess.GeneratedCount(),
 			TotalTokens:      sess.PromptTokenCount() + sess.GeneratedCount(),

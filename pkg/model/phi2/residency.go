@@ -18,19 +18,19 @@ func (m *Model) initResidency() {
 
 	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENeoX)
 	if m.fused.HeadOnGPU(m.lmHeadName) {
-		m.logitsOnGPU = true
+		m.decode.LogitsOnGPU = true
 	}
 }
 
 // lmHeadGPU computes logits = lm_head * h on GPU; false means fall back to the host lm_head
 func (m *Model) lmHeadGPU(h []float32) bool {
-	if !m.logitsOnGPU || m.fused == nil {
+	if !m.decode.LogitsOnGPU || m.fused == nil {
 		return false
 	}
 
 	if err := m.fused.MatMulInto(m.lmHeadName, m.cfg.VocabSize, m.cfg.EmbeddingDim, h, m.scratch.logits); err != nil {
 		// weight type / VRAM: continue on host
-		m.logitsOnGPU = false
+		m.decode.LogitsOnGPU = false
 		return false
 	}
 

@@ -117,7 +117,7 @@ func TestUnmarshalWireCompletionsRequest(t *testing.T) {
 			Text:         "hi",
 			FinishReason: "stop",
 		}},
-		Usage: chatCompletionUsage{
+		Usage: usageTokens{
 			PromptTokens:     1,
 			CompletionTokens: 1,
 			TotalTokens:      2,
@@ -135,7 +135,7 @@ func TestUnmarshalWireCompletionsRequest(t *testing.T) {
 			Text:         "hi",
 			FinishReason: "stop",
 		}},
-		Usage: chatCompletionUsage{
+		Usage: usageTokens{
 			PromptTokens:     1,
 			CompletionTokens: 1,
 			TotalTokens:      2,
@@ -148,6 +148,71 @@ func TestUnmarshalWireCompletionsRequest(t *testing.T) {
 
 	if string(got) != string(want) {
 		t.Fatalf("completions response wire mismatch:\nv1=%s\nv2=%s", want, got)
+	}
+}
+
+func TestUsageJSONFieldNames(t *testing.T) {
+	usage := usageTokens{
+		PromptTokens:     3,
+		CompletionTokens: 2,
+		TotalTokens:      5,
+	}
+
+	chatBody, err := json.Marshal(chatCompletionResponse{
+		ID:      "chatcmpl-1",
+		Object:  "chat.completion",
+		Model:   "m",
+		Created: 1,
+		Choices: []chatCompletionChoice{
+			{
+				Index:        0,
+				FinishReason: "stop",
+			},
+		},
+		Usage: usage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmplBody, err := json.Marshal(completionsResponse{
+		ID:      "cmpl-1",
+		Object:  "text_completion",
+		Model:   "m",
+		Created: 1,
+		Choices: []completionsChoice{
+			{
+				Index:        0,
+				Text:         "x",
+				FinishReason: "stop",
+			},
+		},
+		Usage: usage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, raw := range []json.RawMessage{chatBody, cmplBody} {
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+
+		u, ok := m["usage"]
+		if !ok {
+			t.Fatalf("missing usage in %s", raw)
+		}
+
+		var umap map[string]int
+		if err := json.Unmarshal(u, &umap); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, key := range []string{"prompt_tokens", "completion_tokens", "total_tokens"} {
+			if _, ok := umap[key]; !ok {
+				t.Fatalf("usage missing %q in %s", key, raw)
+			}
+		}
 	}
 }
 

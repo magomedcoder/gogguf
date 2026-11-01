@@ -27,8 +27,8 @@ type Model struct {
 	lmHeadName   string
 	lmHeadBias   []float32
 
-	fused       *gpuresid.Runner // lm_head on GPU (see initResidency)
-	logitsOnGPU bool             // lm_head matmul runs on GPU after host LayerNorm
+	fused  *gpuresid.Runner // lm_head on GPU (see initResidency)
+	decode gpuresid.DecodeFlags
 }
 
 type layerBias struct {

@@ -66,7 +66,7 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 		t.Fatal("expected residency=true with full Q8_0 offload")
 	}
 
-	if !m.logitsOnGPU {
+	if !m.decode.LogitsOnGPU {
 		t.Fatal("expected logitsOnGPU=true with full Q8_0 offload")
 	}
 
@@ -76,7 +76,7 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 	}
 
 	// after all layers hidden still on device: no DtoH
-	if !m.residDevice || !m.residency {
+	if !m.decode.ResidDevice || !m.residency {
 		t.Skip("residency fell back to host (likely insufficient VRAM)")
 	}
 
@@ -86,7 +86,7 @@ func TestResidencyEngagedFullOffload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !m.logitsOnGPU {
+	if !m.decode.LogitsOnGPU {
 		t.Fatal("logitsOnGPU cleared: GPU lm_head failed")
 	}
 }
@@ -102,7 +102,7 @@ func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if m.gpuKVStale {
+	if m.decode.GPUKVStale {
 		t.Fatal("GPU KV-cache marked stale: KVCacheAppendN failed")
 	}
 
@@ -112,7 +112,7 @@ func TestBatchPrefillKeepsGPUKV(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !m.residDevice {
+	if !m.decode.ResidDevice {
 		t.Fatal("decode after batch did not use device-resident path")
 	}
 }
@@ -141,7 +141,7 @@ func TestGPUBatchMatmulAttnParity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if batch.gpuKVStale {
+	if batch.decode.GPUKVStale {
 		t.Fatal("GPU KV stale after successful batch-prefill")
 	}
 
@@ -182,7 +182,7 @@ func TestGPUKVStaleFallsBackToCPUAttention(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !small.gpuKVStale {
+	if !small.decode.GPUKVStale {
 		t.Fatal("expected gpuKVStale=true when GPU KV shorter than prompt")
 	}
 

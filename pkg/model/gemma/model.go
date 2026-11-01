@@ -31,9 +31,8 @@ type Model struct {
 	gpuLayers  []gpuresid.Tensors // layer weight names for fused paths
 	layerQuant []bool             // layer fully in supported fused quant
 
-	residency   bool // fused QKV+attention decode (Gemma 1 only; hidden stays on host, see initResidency)
-	logitsOnGPU bool // out_norm + lm_head computed on GPU from the final hidden state
-	gpuKVStale  bool // GPU KV-cache incomplete: attention on CPU only
+	residency bool // fused QKV+attention decode (Gemma 1 only; hidden stays on host, see initResidency)
+	decode    gpuresid.DecodeFlags
 }
 
 // LoadGemma creates Gemma 1
@@ -106,7 +105,7 @@ func (m *Model) prepareSWAAppend(layer, n int) {
 
 	m.cache.DropOldestLayer(layer, have+n-w)
 	if m.dev != nil {
-		m.gpuKVStale = true
+		m.decode.GPUKVStale = true
 	}
 }
 
@@ -126,7 +125,7 @@ func (m *Model) Config() Config { return m.cfg }
 // ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
-	m.gpuKVStale = false
+	m.decode.GPUKVStale = false
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -249,7 +248,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	m.prepareSWAAppend(layer, 1)
 
 	// Gemma 1 only (m.residency): fused QKV+RoPE+attention reads the GPU KV-cache, so it must be complete
-	if m.residency && onGPU && !m.gpuKVStale {
+	if m.residency && onGPU && !m.decode.GPUKVStale {
 		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
 			if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
 				return err
@@ -281,9 +280,9 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		}
 
 		// token missed GPU KV-cache - disable GPU attention until ResetCache
-		if onGPU && !m.gpuKVStale {
+		if onGPU && !m.decode.GPUKVStale {
 			if err := m.dev.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v); err != nil {
-				m.gpuKVStale = true
+				m.decode.GPUKVStale = true
 			}
 		}
 
@@ -379,7 +378,7 @@ func (m *Model) attentionKV(layer, seqLen int) (k, v []float32, attnSeq int) {
 func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, layer int) error {
 	softcap := m.cfg.AttnLogitSoftcap
 	swaClip := m.cfg.IsSWALayer(layer) && m.cfg.SlidingWindow > 0
-	if softcap == 0 && !swaClip && !m.gpuKVStale && m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+	if softcap == 0 && !swaClip && !m.decode.GPUKVStale && m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		if err := m.dev.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil
 		}
@@ -402,7 +401,7 @@ func (m *Model) logitsFinish() error {
 
 // logitsFromLast: lm_head on GPU (hidden uploaded once) when enabled, else on host
 func (m *Model) logitsFromLast(x []float32) error {
-	if m.logitsOnGPU && m.fused != nil {
+	if m.decode.LogitsOnGPU && m.fused != nil {
 		if err := m.logitsDevice(x); err == nil {
 			return nil
 		}

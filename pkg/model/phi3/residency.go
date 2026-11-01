@@ -29,7 +29,7 @@ func (m *Model) initResidency() {
 	}
 
 	if gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
-		m.logitsOnGPU = true
+		m.decode.LogitsOnGPU = true
 	}
 }
 
@@ -40,13 +40,13 @@ func (m *Model) logitsDevice(x []float32) error {
 
 // logitsFromLast: lm_head on GPU when enabled, else on host
 func (m *Model) logitsFromLast(x []float32) error {
-	if m.logitsOnGPU && m.fused != nil {
+	if m.decode.LogitsOnGPU && m.fused != nil {
 		if err := m.logitsDevice(x); err == nil {
 			return nil
 		}
 
 		// lm_head on GPU failed (weight type / VRAM): continue on host
-		m.logitsOnGPU = false
+		m.decode.LogitsOnGPU = false
 	}
 
 	return m.logitsFromHidden(x)

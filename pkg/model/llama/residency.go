@@ -54,13 +54,13 @@ func (m *Model) initResidency() {
 		return
 	}
 	m.residency = true
-	m.logitsOnGPU = true
+	m.decode.LogitsOnGPU = true
 }
 
 // uploadHidden uploads hidden state before layers (one HtoD per token).
 // Debug hooks read host buffer x, so residency is not enabled with them
 func (m *Model) uploadHidden() {
-	if !m.residency || m.debug != nil || m.gpuKVStale {
+	if !m.residency || m.debug != nil || m.decode.GPUKVStale {
 		return
 	}
 
@@ -69,7 +69,7 @@ func (m *Model) uploadHidden() {
 		return
 	}
 
-	m.residDevice = true
+	m.decode.ResidDevice = true
 }
 
 // forwardBlockDevice runs the layer on GPU over resident hidden state.
@@ -82,7 +82,7 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 	if err := m.cache.Bump(layer, 1); err != nil {
 		return err
 	}
-	m.cpuKVHollow = true
+	m.decode.CPUKVHollow = true
 
 	return m.attnFFNGPU(layer, ln, nil, nil)
 }
@@ -103,7 +103,7 @@ func (m *Model) attnFFNGPU(layer int, ln layerNorms, x, attn []float32) error {
 
 // recoverHiddenFromDevice brings hidden state back to host after a device-layer failure
 func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
-	m.residDevice = false
+	m.decode.ResidDevice = false
 	m.residency = false
 
 	if !m.dev.HiddenActive() {
@@ -119,11 +119,11 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 
 // syncHiddenFromDevice pulls hidden state from device when resident (for host readers)
 func (m *Model) syncHiddenFromDevice() error {
-	if !m.residDevice {
+	if !m.decode.ResidDevice {
 		return nil
 	}
 
-	m.residDevice = false
+	m.decode.ResidDevice = false
 
 	return m.dev.HiddenDownload(m.scratch.x)
 }

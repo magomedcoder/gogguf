@@ -6,38 +6,36 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/exec/dispatch"
+	"github.com/magomedcoder/gogguf/pkg/exec/prefill"
 )
 
 // forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
 // With -ngl matmul uses MatMulMat*Cached; attention is per-query (softcap / SWA aware); FFN - GeGLU.
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
-	b := len(tokenIDs)
-	if b == 0 {
-		return fmt.Errorf("gemma: empty batch")
-	}
-
-	if b > m.nBatch {
-		return fmt.Errorf("gemma: batch=%d > n_batch=%d", b, m.nBatch)
-	}
-
 	embd := m.cfg.EmbeddingDim
-	if err := dispatch.EmbedTokensInto(m.weights, m.scratch.bx[:b*embd], embd, tokenIDs); err != nil {
-		return err
-	}
-	compute.ScaleInPlace(m.scratch.bx[:b*embd], m.cfg.EmbedScale)
+	return prefill.Run("gemma", m.nBatch, m.cfg.NumLayers, startPos, tokenIDs, needLogits,
+		nil,
+		func(b int) error {
+			if err := dispatch.EmbedTokensInto(m.weights, m.scratch.bx[:b*embd], embd, tokenIDs); err != nil {
+				return err
+			}
+			compute.ScaleInPlace(m.scratch.bx[:b*embd], m.cfg.EmbedScale)
+			return nil
+		},
+		func(layer, startPos, batch int) error {
+			if err := m.forwardBlockBatch(layer, startPos, batch); err != nil {
+				return fmt.Errorf("gemma: layer %d pos %d: %w", layer, startPos, err)
+			}
 
-	for layer := 0; layer < m.cfg.NumLayers; layer++ {
-		if err := m.forwardBlockBatch(layer, startPos, b); err != nil {
-			return fmt.Errorf("gemma: layer %d pos %d: %w", layer, startPos, err)
-		}
-	}
-	m.cache.AdvanceN(b)
-
-	if !needLogits {
-		return nil
-	}
-
-	return m.logitsFromLast(m.scratch.bx[(b-1)*embd : b*embd])
+			return nil
+		},
+		func(b int) {
+			m.cache.AdvanceN(b)
+		},
+		func(b int) error {
+			return m.logitsFromLast(m.scratch.bx[(b-1)*embd : b*embd])
+		},
+	)
 }
 
 func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
@@ -89,11 +87,11 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	}
 
 	// mirror chunk K/V into GPU KV-cache (same best-effort policy as the serial path)
-	gpuKV := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale
+	gpuKV := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.decode.GPUKVStale
 	if gpuKV {
 		if err := m.dev.KVCacheAppendN(layer, pastLen, k, v, batch); err != nil {
 			// chunk missed GPU KV-cache: decode must not read it until ResetCache
-			m.gpuKVStale = true
+			m.decode.GPUKVStale = true
 			gpuKV = false
 		}
 	}

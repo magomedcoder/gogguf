@@ -57,14 +57,14 @@ func (m *Model) initFused() {
 // fused FFNGeGLU (see ffnInto); the full device-resident layer (forwardBlockDevice) is deferred until a
 // GeGLU AttnFFN kernel exists.
 //
-// Logits on GPU (m.logitsOnGPU): both variants when ngl covers all layers and the backend is hidden-resident
+// Logits on GPU (m.decode.LogitsOnGPU): both variants when ngl covers all layers and the backend is hidden-resident
 func (m *Model) initResidency() {
 	if m.fused == nil {
 		return
 	}
 
 	if gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
-		m.logitsOnGPU = true
+		m.decode.LogitsOnGPU = true
 	}
 
 	if m.cfg.Variant != VariantGemma || m.cfg.AttnLogitSoftcap != 0 || m.cfg.SlidingWindow != 0 {
@@ -100,5 +100,5 @@ func (m *Model) logitsDevice(x []float32) error {
 // recoverLogits disables GPU logits after a failure so the caller falls back to the host lm_head.
 // Layers never leave hidden state on the device (see initResidency), so there is nothing to download
 func (m *Model) recoverLogits() {
-	m.logitsOnGPU = false
+	m.decode.LogitsOnGPU = false
 }

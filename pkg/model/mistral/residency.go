@@ -81,7 +81,7 @@ func (m *Model) initResidency() {
 		return
 	}
 	m.residency = true
-	m.logitsOnGPU = true
+	m.decode.LogitsOnGPU = true
 }
 
 // gpuAttnFull: full GPU KV-cache attention is correct only when the SWA window covers the full sequence
@@ -93,7 +93,7 @@ func (m *Model) gpuAttnFull(seqLen int) bool {
 
 // uploadHidden uploads hidden state before layers (one HtoD per token)
 func (m *Model) uploadHidden() {
-	if !m.residency || m.debug != nil || m.gpuKVStale || !m.gpuAttnFull(m.cache.Len()+1) {
+	if !m.residency || m.debug != nil || m.decode.GPUKVStale || !m.gpuAttnFull(m.cache.Len()+1) {
 		return
 	}
 
@@ -102,7 +102,7 @@ func (m *Model) uploadHidden() {
 		return
 	}
 
-	m.residDevice = true
+	m.decode.ResidDevice = true
 }
 
 // forwardBlockDevice runs the layer on GPU over resident hidden state.
@@ -115,7 +115,7 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 	if err := m.cache.Bump(layer, 1); err != nil {
 		return err
 	}
-	m.cpuKVHollow = true
+	m.decode.CPUKVHollow = true
 
 	return m.attnFFNGPU(layer, ln, nil, nil)
 }
@@ -135,7 +135,7 @@ func (m *Model) attnFFNGPU(layer int, ln layerNorms, x, attn []float32) error {
 
 // recoverHiddenFromDevice brings hidden state back to host after a device-layer failure
 func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
-	m.residDevice = false
+	m.decode.ResidDevice = false
 	m.residency = false
 
 	if !m.dev.HiddenActive() {
@@ -151,11 +151,11 @@ func (m *Model) recoverHiddenFromDevice(layer int, cause error) error {
 
 // syncHiddenFromDevice pulls hidden state from device when resident there
 func (m *Model) syncHiddenFromDevice() error {
-	if !m.residDevice {
+	if !m.decode.ResidDevice {
 		return nil
 	}
 
-	m.residDevice = false
+	m.decode.ResidDevice = false
 
 	return m.dev.HiddenDownload(m.scratch.x)
 }
@@ -168,7 +168,7 @@ func (m *Model) logitsDevice() error {
 // initMoELogits: MoE layers run on host, but the final hidden state can still go through the GPU lm_head
 func (m *Model) initMoELogits() {
 	if gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
-		m.logitsOnGPU = true
+		m.decode.LogitsOnGPU = true
 	}
 }
 

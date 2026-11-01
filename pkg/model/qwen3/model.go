@@ -30,12 +30,9 @@ type Model struct {
 	outNorm      []float32
 	lmHeadName   string
 
-	layerQuant  []dtype.DType // matmul weight type per layer for fused paths
-	residency   bool          // layers can keep hidden state on device
-	residDevice bool          // hidden state is on device; host buffer x is stale
-	logitsOnGPU bool          // out_norm + lm_head computed on GPU
-	gpuKVStale  bool          // GPU KV-cache incomplete: attention on CPU only
-	cpuKVHollow bool          // CPU KV slots bumped without K/V data (residency decode)
+	layerQuant []dtype.DType // matmul weight type per layer for fused paths
+	residency  bool          // layers can keep hidden state on device
+	decode     gpuresid.DecodeFlags
 
 	fused     *gpuresid.Runner   // fused GPU layer paths
 	fusedDims gpuresid.Dims      // dimensions for fused paths
@@ -150,9 +147,9 @@ func (m *Model) Config() Config {
 // ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
-	m.residDevice = false
-	m.gpuKVStale = false
-	m.cpuKVHollow = false
+	m.decode.ResidDevice = false
+	m.decode.GPUKVStale = false
+	m.decode.CPUKVHollow = false
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -250,11 +247,11 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 	// Prefer GPU gather into d_resid (no host emb HtoD); else CPU embed + HiddenUpload.
 	gathered := false
-	if m.residency && m.debug == nil && !m.gpuKVStale && m.dev != nil {
+	if m.residency && m.debug == nil && !m.decode.GPUKVStale && m.dev != nil {
 		if raw, err := m.weights.Raw("token_embd.weight"); err == nil {
 			if info, err := m.weights.Info("token_embd.weight"); err == nil {
 				if err := device.TryEmbedGather(m.dev, "token_embd.weight", raw, info.Type, tokenID, m.cfg.VocabSize, m.cfg.EmbeddingDim); err == nil {
-					m.residDevice = true
+					m.decode.ResidDevice = true
 					gathered = true
 				}
 			}
@@ -276,11 +273,11 @@ func (m *Model) forwardToken(tokenID, pos int, debug bool) error {
 	// single HtoD hidden state per token when gather missed; layers then run on device.
 	// Debug hooks read host buffer x, so residency is disabled with them.
 	// gpuKVStale: fused QKV attends using GPU KV-cache, which is incomplete.
-	if !gathered && m.residency && m.debug == nil && !m.gpuKVStale {
+	if !gathered && m.residency && m.debug == nil && !m.decode.GPUKVStale {
 		if err := m.dev.HiddenUpload(m.scratch.x[:m.cfg.EmbeddingDim]); err != nil {
 			m.residency = false
 		} else {
-			m.residDevice = true
+			m.decode.ResidDevice = true
 		}
 	}
 
@@ -332,21 +329,21 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 	// entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals.
 	// host x is not read or updated.
-	if m.residDevice {
+	if m.decode.ResidDevice {
 		err := m.forwardBlockDevice(layer, pos, ln)
 		if err == nil {
 			return nil
 		}
 
 		// Hollow CPU mirror: cannot fall back to host attention; reset and fail.
-		if m.cpuKVHollow {
+		if m.decode.CPUKVHollow {
 			m.ResetCache()
 			return fmt.Errorf("qwen3: layer %d residency failed without CPU KV mirror: %w", layer, err)
 		}
 
 		// Device KV append failure (-6): mark stale and try rebuild from CPU mirror.
 		if strings.Contains(err.Error(), "code -6") || strings.Contains(err.Error(), "code -2") {
-			m.gpuKVStale = true
+			m.decode.GPUKVStale = true
 			_ = m.tryRecoverGPUKV()
 		}
 
@@ -360,7 +357,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	}
 
 	// fused QKV reads attention from GPU KV-cache: when gpuKVStale it is incomplete
-	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && qkvResidencyEnabled() && !m.gpuKVStale {
+	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && qkvResidencyEnabled() && !m.decode.GPUKVStale {
 		if err := m.qkvAttnGPU(layer, pos, ln, h, k, v, attn); err == nil {
 			if err := m.cache.Append(layer, k, v); err != nil {
 				return err
@@ -399,9 +396,9 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		}
 
 		// token missed GPU KV-cache - disable GPU attention until ResetCache, else fused QKV/AttentionScoresKV use incomplete cache
-		if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.gpuKVStale {
+		if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.decode.GPUKVStale {
 			if err := m.dev.KVCacheAppend(layer, kvPos, k, v); err != nil {
-				m.gpuKVStale = true
+				m.decode.GPUKVStale = true
 				_ = m.tryRecoverGPUKV()
 			}
 		}
@@ -522,13 +519,13 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 
 func (m *Model) logits() error {
 	// hidden on device - out_norm + lm_head on GPU too; only logits go to host
-	if m.residDevice && m.logitsOnGPU {
+	if m.decode.ResidDevice && m.decode.LogitsOnGPU {
 		if err := m.logitsDevice(); err == nil {
 			return nil
 		}
 
 		// lm_head on GPU failed (weight type / VRAM): continue on host
-		m.logitsOnGPU = false
+		m.decode.LogitsOnGPU = false
 	}
 
 	if err := m.syncHiddenFromDevice(); err != nil {
@@ -536,13 +533,13 @@ func (m *Model) logits() error {
 	}
 
 	// hidden on host (MoE): lm_head on GPU after one upload
-	if m.logitsOnGPU && m.cfg.ExpertCount > 0 && m.fused != nil {
+	if m.decode.LogitsOnGPU && m.cfg.ExpertCount > 0 && m.fused != nil {
 		err := m.fused.LogitsFromHost(m.scratch.x, "output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 		if err == nil {
 			return nil
 		}
 
-		m.logitsOnGPU = false
+		m.decode.LogitsOnGPU = false
 	}
 
 	return m.logitsFromHidden(m.scratch.x[:m.cfg.EmbeddingDim])
@@ -593,7 +590,7 @@ func (m *Model) swigluInPlace(gate, up []float32, layer int) {
 func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, layer int) error {
 	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		// gpuKVStale: some tokens missed GPU KV-cache - attention uses CPU cache only
-		if !m.gpuKVStale {
+		if !m.decode.GPUKVStale {
 			if err := m.dev.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 				return nil
 			}

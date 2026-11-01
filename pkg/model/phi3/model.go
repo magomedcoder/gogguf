@@ -28,7 +28,7 @@ type Model struct {
 	ropeFactorsLong  []float32
 	fused            *gpuresid.Runner // fused GPU layer FFN
 	ffnGPU           []bool           // layer FFN runs fused on GPU (separate gate/up only)
-	logitsOnGPU      bool             // out_norm + lm_head computed on GPU from the final hidden state
+	decode           gpuresid.DecodeFlags
 }
 
 // Load creates Phi-3 from GGUF weights

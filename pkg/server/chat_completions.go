@@ -49,13 +49,9 @@ type chatMessage struct {
 }
 
 type chatCompletionResponse struct {
-	ID                string                 `json:"id"`
-	Object            string                 `json:"object"`
-	Created           int64                  `json:"created"`
-	Model             string                 `json:"model"`
-	SystemFingerprint string                 `json:"system_fingerprint,omitempty"`
-	Choices           []chatCompletionChoice `json:"choices"`
-	Usage             chatCompletionUsage    `json:"usage"`
+	streamMeta
+	Choices []chatCompletionChoice `json:"choices"`
+	Usage   usageTokens            `json:"usage"`
 }
 
 type chatCompletionChoice struct {
@@ -88,20 +84,10 @@ type chatMessagePlain struct {
 	ToolCalls []chat.ToolCall `json:"tool_calls,omitempty"`
 }
 
-type chatCompletionUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
 type chatStreamChunk struct {
-	ID                string               `json:"id"`
-	Object            string               `json:"object"`
-	Created           int64                `json:"created"`
-	Model             string               `json:"model"`
-	SystemFingerprint string               `json:"system_fingerprint,omitempty"`
-	Choices           []chatStreamChoice   `json:"choices"`
-	Usage             *chatCompletionUsage `json:"usage,omitempty"`
+	streamMeta
+	Choices []chatStreamChoice `json:"choices"`
+	Usage   *usageTokens       `json:"usage,omitempty"`
 }
 
 type chatStreamChoice struct {
@@ -384,7 +370,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			FinishReason: openaiFinishReason(parsed.HasToolCalls(), sess.StopReason()),
 			Logprobs:     buildChatLogprobs(sess),
 		}},
-		Usage: chatCompletionUsage{
+		Usage: usageTokens{
 			PromptTokens:     sess.PromptTokenCount(),
 			CompletionTokens: sess.GeneratedCount(),
 			TotalTokens:      sess.PromptTokenCount() + sess.GeneratedCount(),
@@ -461,7 +447,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	created := time.Now().Unix()
 
-	writeChunk := func(delta chatStreamDelta, finish *string, usage *chatCompletionUsage) {
+	writeChunk := func(delta chatStreamDelta, finish *string, usage *usageTokens) {
 		chunk := chatStreamChunk{
 			ID:                id,
 			Object:            "chat.completion.chunk",
@@ -530,9 +516,9 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	}
 
 	finish := openaiFinishReason(parsed.HasToolCalls(), sess.StopReason())
-	var usage *chatCompletionUsage
+	var usage *usageTokens
 	if includeUsage {
-		usage = &chatCompletionUsage{
+		usage = &usageTokens{
 			PromptTokens:     sess.PromptTokenCount(),
 			CompletionTokens: sess.GeneratedCount(),
 			TotalTokens:      sess.PromptTokenCount() + sess.GeneratedCount(),

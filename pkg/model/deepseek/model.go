@@ -28,7 +28,7 @@ type Model struct {
 	layerTensors []layerTensors
 	outNorm      []float32
 	lmHeadName   string
-	logitsOnGPU  bool // out_norm + lm_head on GPU from the final host hidden state
+	decode       gpuresid.DecodeFlags // LogitsOnGPU: out_norm + lm_head on GPU from final host hidden state
 }
 
 // Load creates DeepSeek from weights
@@ -98,7 +98,7 @@ func (m *Model) initFused() {
 	}
 
 	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENorm)
-	m.logitsOnGPU = gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName)
+	m.decode.LogitsOnGPU = gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName)
 	m.moeGPU = make([]bool, m.cfg.NumLayers)
 	for i, lt := range m.layerTensors {
 		if !lt.moe {
@@ -472,13 +472,13 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 
 // logitsFromLast: lm_head on GPU (hidden uploaded once) when enabled, else on host
 func (m *Model) logitsFromLast(x []float32) error {
-	if m.logitsOnGPU && m.fused != nil {
+	if m.decode.LogitsOnGPU && m.fused != nil {
 		err := m.fused.LogitsFromHost(x, "output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 		if err == nil {
 			return nil
 		}
 
-		m.logitsOnGPU = false
+		m.decode.LogitsOnGPU = false
 	}
 
 	return m.logitsFromHidden(x)

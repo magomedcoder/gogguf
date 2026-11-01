@@ -34,11 +34,8 @@ type Model struct {
 	layerQuant []bool             // layer fully in supported fused quant
 	moeGPU     bool               // MoE experts computed on GPU
 
-	residency   bool // layers can keep hidden state on device
-	residDevice bool // hidden state is on device; host buffer x is stale
-	logitsOnGPU bool // out_norm + lm_head computed on GPU
-	gpuKVStale  bool // GPU KV-cache incomplete: attention on CPU only
-	cpuKVHollow bool // CPU KV slots bumped without K/V data (residency decode)
+	residency bool // layers can keep hidden state on device
+	decode    gpuresid.DecodeFlags
 }
 
 // Load creates Mistral from weights (mistral.* prefix)
@@ -130,7 +127,7 @@ func (m *Model) ensureKVRoom(n int) {
 	}
 
 	if dropped := m.cache.EnsureRoom(n); dropped > 0 && m.dev != nil {
-		m.gpuKVStale = true
+		m.decode.GPUKVStale = true
 	}
 }
 
@@ -153,9 +150,9 @@ func (m *Model) Config() Config {
 // ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
-	m.residDevice = false
-	m.gpuKVStale = false
-	m.cpuKVHollow = false
+	m.decode.ResidDevice = false
+	m.decode.GPUKVStale = false
+	m.decode.CPUKVHollow = false
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -300,13 +297,13 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	usedQKVResidency := false
 
 	// entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals
-	if m.residDevice {
+	if m.decode.ResidDevice {
 		err := m.forwardBlockDevice(layer, pos, ln)
 		if err == nil {
 			return nil
 		}
 
-		if m.cpuKVHollow {
+		if m.decode.CPUKVHollow {
 			m.ResetCache()
 			return fmt.Errorf("mistral: layer %d residency failed without CPU KV mirror: %w", layer, err)
 		}
@@ -321,7 +318,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	}
 
 	// fused QKV attends over full GPU KV-cache: SWA window and stale cache are incompatible
-	if onGPU && gpuresid.QKVResidencyEnabled() && !m.gpuKVStale && m.gpuAttnFull(m.cache.Len()+1) {
+	if onGPU && gpuresid.QKVResidencyEnabled() && !m.decode.GPUKVStale && m.gpuAttnFull(m.cache.Len()+1) {
 		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
 			if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
 				return err
@@ -352,9 +349,9 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 			return err
 		}
 
-		if onGPU && !m.gpuKVStale {
+		if onGPU && !m.decode.GPUKVStale {
 			if err := m.dev.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v); err != nil {
-				m.gpuKVStale = true
+				m.decode.GPUKVStale = true
 			}
 		}
 
@@ -565,12 +562,12 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 
 func (m *Model) logitsFinish() error {
 	// hidden on device - out_norm + lm_head on GPU too; only logits go to host
-	if m.residDevice && m.logitsOnGPU {
+	if m.decode.ResidDevice && m.decode.LogitsOnGPU {
 		if err := m.logitsDevice(); err == nil {
 			return nil
 		}
 
-		m.logitsOnGPU = false
+		m.decode.LogitsOnGPU = false
 	}
 
 	if err := m.syncHiddenFromDevice(); err != nil {
@@ -578,12 +575,12 @@ func (m *Model) logitsFinish() error {
 	}
 
 	// hidden on host (MoE): lm_head on GPU after one upload
-	if m.logitsOnGPU && m.cfg.isMoE() {
+	if m.decode.LogitsOnGPU && m.cfg.isMoE() {
 		if err := m.logitsFromHost(); err == nil {
 			return nil
 		}
 
-		m.logitsOnGPU = false
+		m.decode.LogitsOnGPU = false
 	}
 
 	return m.logitsFromHidden(m.scratch.x)
@@ -621,7 +618,7 @@ func (m *Model) attentionScoresInto(dst, q, k, v, scores []float32, seqLen, laye
 
 	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
 		// gpuKVStale: some tokens missed GPU KV-cache - attention uses CPU mirror only
-		if effectiveLen == seqLen && !m.gpuKVStale {
+		if effectiveLen == seqLen && !m.decode.GPUKVStale {
 			if err := m.dev.AttentionScoresKV(layer, dst, q, seqLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 				return nil
 			}
