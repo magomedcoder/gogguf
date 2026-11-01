@@ -132,10 +132,10 @@ func TestLlama32LayerLogitsFixture(t *testing.T) {
 	}
 }
 
-// llamaLayerLogitClose is looser than final-logits llamaLogitClose: mid-layer lm_head probes accumulate FMA order drift across the stack (~0.2–0.3 abs)
+// llamaLayerLogitClose is looser than final-logits llamaLogitClose: mid-layer lm_head probes accumulate FMA-order drift across runners (CI has seen ~0.6 abs on layer 0)
 func llamaLayerLogitClose(got, want float32) bool {
 	d := math.Abs(float64(got - want))
-	return d <= math.Max(0.3, 0.04*math.Abs(float64(want)))
+	return d <= math.Max(0.75, 0.06*math.Abs(float64(want)))
 }
 
 func llamaAcceptLayerGreedy(got, want int, top []debug.Logit) bool {
