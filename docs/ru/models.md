@@ -15,23 +15,22 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 | **Mistral**        | `mistral` / `llama`*   | поддерживается | NeoX RoPE, GQA; golden Mistral-7B-v0.2; автоопределение по имени |
 | **Mixtral**        | `llama`**              | частично       | MoE 8x7B; `llama.expert_count`; NeoX через mistral               |
 | **DeepSeek**       | `deepseek`             | частично       | Dense lead + MoE; не `deepseek2` (MLA)                           |
-| **DeepSeek2**      | `deepseek2`            | частично       | Absorbed MLA + YaRN + MoE; MLA на GPU (RoPE/YaRN на CPU)         |
-| **Phi-2**          | `phi2`                 | частично       | LayerNorm, parallel residual, GELU                               |
-| **Phi-3**          | `phi3`                 | частично       | Fused QKV/FFN, partial RoPE, LongRoPE                            |
-| **Gemma / Gemma2** | `gemma` / `gemma2`     | частично       | GeGLU; gemma2 softcap/SWA; у Gemma1 fused residency              |
+| **DeepSeek2**      | `deepseek2`            | частично       | Absorbed MLA + GPU YaRN; legacy `attn_kv_b` MHA; MoE resid       |
+| **Phi-2**          | `phi2`                 | частично       | LayerNorm+GELU residency; parallel residual                      |
+| **Phi-3**          | `phi3`                 | частично       | LongRoPE + fused QKV/FFN residency                               |
+| **Gemma / Gemma2** | `gemma` / `gemma2`     | частично       | GeGLU AttnFFN residency; softcap/post-norm; SWA window           |
 
 ### Arch * GPU (CUDA `-tags cuda`, `-ngl`)
 
-| Arch                         | Dense residency       | `n_batch`        | Примечания                      |
-|------------------------------|-----------------------|------------------|---------------------------------|
-| Qwen3 dense                  | full                  | да (default 32)  | fused QKV/AttnFFN/logits        |
-| Llama / Mistral              | QKV/AttnFFN           | да               | единый `CanEnableResidency`     |
-| Gemma 1                      | fused GeGLU           | да               | без softcap/SWA                 |
-| Gemma2                       | частично              | да               | post-norm/softcap/SWA позже     |
-| Phi-3                        | FFN + logits          | да               | LongRoPE/fused QKV позже        |
-| Phi-2                        | lm_head после host LN | да               | kernels LayerNorm/GELU позже    |
-| MoE (Qwen3/Mixtral/DeepSeek) | ExpertFFN + logits    | принудительно 1  | batched experts позже           |
-| DeepSeek2                    | MLA KV на device      | принудительно 1  | RoPE/YaRN на CPU                |
+| Arch                         | Dense residency     | `n_batch`       | Примечания                          |
+|------------------------------|---------------------|-----------------|-------------------------------------|
+| Qwen3 dense                  | full                | да (default 32) | fused QKV/AttnFFN/logits            |
+| Llama / Mistral              | QKV/AttnFFN         | да              | единый `CanEnableResidency`         |
+| Gemma 1 / Gemma2             | full GeGLU          | да              | softcap+post-norm; SWA reclaim A4   |
+| Phi-3                        | full QKV/AttnFFN    | да              | LongRoPE; fused qkv/ffn row-slices  |
+| Phi-2                        | LN+GELU resid       | да              | composed kernels; partial RoPE host |
+| MoE (Qwen3/Mixtral/DeepSeek) | ExpertFFNAccumulate | принудительно 1 | n_batch>1 -> A3                     |
+| DeepSeek2                    | MLA + MoE resid     | принудительно 1 | GPU YaRN; legacy attn_kv_b MHA      |
 
 \* TheBloke и convert.py часто ставят `general.architecture: llama` - gogguf определяет Mistral по `general.name` / sliding window.
 

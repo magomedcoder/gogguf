@@ -20,7 +20,11 @@ type Model struct {
 	ngl          int
 	fused        *gpuresid.Runner
 	moeGPU       []bool
+	layerQuant   []bool
+	residency    bool
+	decode       gpuresid.DecodeFlags
 	cache        *MLACache
+	mhaCache     *MHACache // legacy attn_kv_b full MHA K/V; nil when all layers absorbed
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
@@ -79,30 +83,17 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Mode
 		gpuMaxSeq:    gpuMaxSeq,
 	}
 
+	for _, lt := range layerTensors {
+		if !lt.absorbed {
+			m.mhaCache = NewMHACache(cfg)
+			break
+		}
+	}
+
 	m.initFused()
 	m.initMLAGPU()
 
 	return m, nil
-}
-
-// initFused sets up GPU layer paths. MLA attention uses the dedicated device MLA cache (see initMLAGPU): K=kv_lora+rope, V=kv_lora does not fit the GQA KV-cache (n_kv_heads * head_dim)
-//
-// MoE (P1 deferred): full device-resident MoE layers need batched expert dispatch (router top-k, then per-expert FFN and accumulation on device) and n_batch>1 support.
-// Until then MoE layers keep the per-token ExpertFFN path (n_batch=1, hidden state on host); only out_norm + lm_head may run on GPU (lm_head already runs on GPU through matmulInto here).
-func (m *Model) initFused() {
-	if m.dev == nil || m.ngl <= 0 {
-		return
-	}
-
-	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENeoX)
-	m.moeGPU = make([]bool, m.cfg.NumLayers)
-	for i, lt := range m.layerTensors {
-		if !lt.moe {
-			continue
-		}
-
-		m.moeGPU[i] = m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps)
-	}
 }
 
 // initMLAGPU allocates the device latent KV cache when the backend supports MLA.
@@ -169,15 +160,17 @@ func (m *Model) mlaWeightLoader(name string) ([]float32, error) {
 	return f, nil
 }
 
-// mlaAttnGPU: RoPE q_pe on host, append latent K/V to the device cache, run mla_attn (absorb k_b, attention, v_b projection) into scratch.attn.
-// Any error: caller falls back to CPU and sets mlaStale.
+// mlaAttnGPU: YaRN/partial RoPE of q_pe on device (rope_heads over packed pe), append latent K/V, run mla_attn into scratch.attn.
+// k_pe must already be RoPE'd in kCache. Any error: caller falls back to CPU and sets mlaStale.
 func (m *Model) mlaAttnGPU(layer, pos, devPos, seqLen int, lt layerTensors) error {
 	cfg := m.cfg
 	headK := cfg.QKNopeDim + cfg.RopeDim
 	for h := 0; h < cfg.NumHeads; h++ {
-		dst := m.scratch.qRope[h*headK : (h+1)*headK]
-		copy(dst, m.scratch.qFull[h*headK:(h+1)*headK])
-		compute.ApplyRoPEPartialScaled(dst[cfg.QKNopeDim:], pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+		copy(m.scratch.qRope[h*headK:(h+1)*headK], m.scratch.qFull[h*headK:(h+1)*headK])
+	}
+
+	if err := m.ropeQPe(m.scratch.qRope, pos); err != nil {
+		return err
 	}
 
 	if err := m.mlaDev.MLACacheAppend(layer, devPos, m.scratch.kCache, m.scratch.vCache); err != nil {
@@ -185,6 +178,46 @@ func (m *Model) mlaAttnGPU(layer, pos, devPos, seqLen int, lt layerTensors) erro
 	}
 
 	return m.mlaDev.MLAAttention(layer, m.scratch.attn, m.scratch.qRope, seqLen, m.mlaParams, lt.kB, lt.vB, m.mlaWeightLoader)
+}
+
+// applyRoPEPE applies YaRN NeoX RoPE to a contiguous pe buffer [nHeads*RopeDim] via device rope_heads when available
+func (m *Model) applyRoPEPE(pe []float32, nHeads, pos int) error {
+	cfg := m.cfg
+	nRot := cfg.RopeDim
+	if nHeads <= 0 || nRot <= 0 || len(pe) < nHeads*nRot {
+		return fmt.Errorf("deepseek2: RoPE pe buffer too short")
+	}
+
+	scale := cfg.ropeScale()
+	if m.dev != nil {
+		if err := m.dev.ApplyRoPEHeadsScaled(pe, nHeads, nRot, pos, cfg.RopeFreqBase, scale); err == nil {
+			return nil
+		}
+	}
+
+	compute.ApplyRoPEHeadsPartialScaled(pe, nHeads, nRot, nRot, pos, cfg.RopeFreqBase, scale)
+	return nil
+}
+
+// ropeQPe RoPEs pe dims in-place for heads laid out as [nope|pe] * nHeads (packs pe, device RoPE, unpacks)
+func (m *Model) ropeQPe(heads []float32, pos int) error {
+	cfg := m.cfg
+	headK := cfg.QKNopeDim + cfg.RopeDim
+	nRot := cfg.RopeDim
+	pack := m.scratch.pePack
+	for h := 0; h < cfg.NumHeads; h++ {
+		copy(pack[h*nRot:(h+1)*nRot], heads[h*headK+cfg.QKNopeDim:h*headK+headK])
+	}
+
+	if err := m.applyRoPEPE(pack, cfg.NumHeads, pos); err != nil {
+		return err
+	}
+
+	for h := 0; h < cfg.NumHeads; h++ {
+		copy(heads[h*headK+cfg.QKNopeDim:h*headK+headK], pack[h*nRot:(h+1)*nRot])
+	}
+
+	return nil
 }
 
 // layerOnGPU reports whether the layer runs on GPU
@@ -198,6 +231,10 @@ func (m *Model) Config() Config {
 
 func (m *Model) ResetCache() {
 	m.cache.Reset()
+	if m.mhaCache != nil {
+		m.mhaCache.Reset()
+	}
+	m.decode.Clear()
 	m.mlaStale = false
 }
 
@@ -229,7 +266,7 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		}
 	}
 
-	if err := m.logitsFromHidden(m.scratch.x); err != nil {
+	if err := m.logitsFinish(); err != nil {
 		return nil, err
 	}
 
@@ -247,6 +284,10 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 		if err := m.forwardToken(tok, i); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return nil, err
 	}
 
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
@@ -283,6 +324,11 @@ func (m *Model) forwardBlock(layer, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
 
+	// MLA projections read host hidden; pull resid back before attention
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return err
+	}
+
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
@@ -292,6 +338,23 @@ func (m *Model) forwardBlock(layer, pos int) error {
 	}
 
 	compute.AddInPlace(m.scratch.x, m.scratch.tmp) // attn output is in tmp after wo
+
+	// Device-resident MoE/dense FFN after MLA (n_batch=1)
+	if m.residency && m.layerOnGPU(layer) {
+		var err error
+		if lt.moe {
+			err = m.forwardBlockDeviceMoE(layer, ln, lt)
+		} else {
+			err = m.forwardBlockDevice(layer, ln, lt)
+		}
+		if err == nil {
+			return nil
+		}
+
+		if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {
+			return rerr
+		}
+	}
 
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
@@ -312,6 +375,21 @@ func (m *Model) forwardBlock(layer, pos int) error {
 
 	compute.AddInPlace(m.scratch.x, m.scratch.tmp)
 	return nil
+}
+
+func (m *Model) logitsFinish() error {
+	if m.decode.ResidDevice && m.decode.LogitsOnGPU && m.fused != nil {
+		if err := m.logitsDevice(); err == nil {
+			return nil
+		}
+		m.decode.LogitsOnGPU = false
+	}
+
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return err
+	}
+
+	return m.logitsFromHidden(m.scratch.x)
 }
 
 // ffnDense - dense layer FFN; on GPU one fused SwiGLU call
@@ -369,7 +447,10 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 	copy(m.scratch.vCache, m.scratch.kvPe[:cfg.KVLoraRank])
 
 	kPe := m.scratch.kvPe[cfg.KVLoraRank : cfg.KVLoraRank+cfg.RopeDim]
-	compute.ApplyRoPEPartialScaled(kPe, pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+	if err := m.applyRoPEPE(kPe, 1, pos); err != nil {
+		return err
+	}
+
 	if err := compute.RMSNormInto(m.scratch.vCache, m.scratch.vCache, ln.kvANorm, cfg.RMSNormEps); err != nil {
 		return err
 	}
@@ -409,12 +490,14 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 	}
 
 	qk := cfg.qkDim()
+	if err := m.ropeQPe(m.scratch.qFull, pos); err != nil {
+		return err
+	}
+
 	for h := 0; h < cfg.NumHeads; h++ {
 		src := m.scratch.qFull[h*headK : (h+1)*headK]
 		qNope := src[:cfg.QKNopeDim]
-		qPe := m.scratch.qPe[:cfg.RopeDim]
-		copy(qPe, src[cfg.QKNopeDim:])
-		compute.ApplyRoPEPartialScaled(qPe, pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+		qPe := src[cfg.QKNopeDim:]
 
 		// wk_b head: {qk_nope, kv_lora}
 		wOff := h * cfg.QKNopeDim * cfg.KVLoraRank
@@ -449,6 +532,10 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
 	cfg := m.cfg
 	headK := cfg.QKNopeDim + cfg.RopeDim
+	if m.mhaCache == nil {
+		return fmt.Errorf("deepseek2: legacy attn_kv_b cache not initialized")
+	}
+
 	kvBW, err := m.weights.Floats(lt.kvB)
 	if err != nil {
 		return err
@@ -456,32 +543,56 @@ func (m *Model) mlaAttnLegacy(layer, pos int, lt layerTensors) error {
 
 	// kv_b: {kv_lora, n_head*(qk_nope+v_head)} - expand each head
 	perHead := cfg.QKNopeDim + cfg.VHeadDim
-	kFull := make([]float32, cfg.NumHeads*headK)
-	vFull := make([]float32, cfg.NumHeads*cfg.VHeadDim)
+	kFull := m.scratch.kMHA
+	vFull := m.scratch.vMHA
+	out := m.scratch.kvExp[:perHead]
+	kPe := m.scratch.kvPe[cfg.KVLoraRank : cfg.KVLoraRank+cfg.RopeDim]
 
 	for h := 0; h < cfg.NumHeads; h++ {
 		wOff := h * cfg.KVLoraRank * perHead
 		// ggml mul_mat: out[perHead] from W[kv_lora, perHead]
-		out := make([]float32, perHead)
 		if err := compute.MatMulColMajorInto(kvBW[wOff:wOff+cfg.KVLoraRank*perHead], cfg.KVLoraRank, perHead, m.scratch.vCache, out); err != nil {
 			return err
 		}
 
 		copy(kFull[h*headK:h*headK+cfg.QKNopeDim], out[:cfg.QKNopeDim])
-		// broadcast k_pe across heads
-		copy(kFull[h*headK+cfg.QKNopeDim:h*headK+headK], m.scratch.kvPe[cfg.KVLoraRank:])
+		// broadcast already-RoPE'd k_pe across heads
+		copy(kFull[h*headK+cfg.QKNopeDim:h*headK+headK], kPe)
 		copy(vFull[h*cfg.VHeadDim:(h+1)*cfg.VHeadDim], out[cfg.QKNopeDim:])
 	}
 
-	for h := 0; h < cfg.NumHeads; h++ {
-		compute.ApplyRoPEPartialScaled(m.scratch.qFull[h*headK+cfg.QKNopeDim:h*headK+headK], pos, cfg.RopeFreqBase, cfg.RopeDim, cfg.ropeScale())
+	if err := m.ropeQPe(m.scratch.qFull, pos); err != nil {
+		return err
 	}
 
-	// Legacy path without absorbed MLA is not implemented (needs separate MHA cache).
-	_ = kFull
-	_ = vFull
-	_ = layer
-	return fmt.Errorf("deepseek2: legacy attn_kv_b (non-MLA GGUF) not supported yet; need attn_k_b/attn_v_b")
+	kvPos := m.cache.Len()
+	if err := m.mhaCache.Append(layer, kFull, vFull); err != nil {
+		return err
+	}
+	seqLen := kvPos + 1
+
+	scale := cfg.AttnScale
+	if scale == 0 {
+		scale = float32(1 / math.Sqrt(float64(headK)))
+	}
+
+	if err := compute.AttentionScoresHVInto(
+		m.scratch.attn,
+		m.scratch.qFull,
+		m.mhaCache.KLayer(layer),
+		m.mhaCache.VLayer(layer),
+		m.scratch.scores,
+		seqLen,
+		cfg.NumHeads,
+		cfg.NumHeads,
+		headK,
+		cfg.VHeadDim,
+		scale,
+	); err != nil {
+		return err
+	}
+
+	return m.matmulInto(lt.attnOut, cfg.EmbeddingDim, cfg.NumHeads*cfg.VHeadDim, m.scratch.attn, m.scratch.tmp, layer)
 }
 
 func (m *Model) ffnMoE(lt layerTensors, layer int) error {

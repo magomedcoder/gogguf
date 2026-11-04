@@ -15,23 +15,22 @@ generation) is implemented only for specific architectures - selected by `genera
 | **Mistral**        | `mistral` / `llama`*   | supported | NeoX RoPE, GQA; golden Mistral-7B-v0.2; auto-detect by name |
 | **Mixtral**        | `llama`**              | partial   | MoE 8x7B; `llama.expert_count`; NeoX via mistral            |
 | **DeepSeek**       | `deepseek`             | partial   | Dense lead + MoE; not `deepseek2` (MLA)                     |
-| **DeepSeek2**      | `deepseek2`            | partial   | Absorbed MLA + YaRN + MoE; MLA on GPU (RoPE/YaRN CPU)       |
-| **Phi-2**          | `phi2`                 | partial   | LayerNorm, parallel residual, GELU                          |
-| **Phi-3**          | `phi3`                 | partial   | Fused QKV/FFN, partial RoPE, LongRoPE                       |
-| **Gemma / Gemma2** | `gemma` / `gemma2`     | partial   | GeGLU; gemma2 softcap/SWA; Gemma1 fused residency           |
+| **DeepSeek2**      | `deepseek2`            | partial   | Absorbed MLA + GPU YaRN; legacy `attn_kv_b` MHA; MoE resid  |
+| **Phi-2**          | `phi2`                 | partial   | LayerNorm+GELU residency; parallel residual                 |
+| **Phi-3**          | `phi3`                 | partial   | LongRoPE + fused QKV/FFN residency                          |
+| **Gemma / Gemma2** | `gemma` / `gemma2`     | partial   | GeGLU AttnFFN residency; softcap/post-norm; SWA window      |
 
 ### Arch * GPU coverage (CUDA `-tags cuda`, `-ngl`)
 
-| Arch                         | Dense residency       | `n_batch`        | Notes                           |
-|------------------------------|-----------------------|------------------|---------------------------------|
-| Qwen3 dense                  | full                  | yes (default 32) | fused QKV/AttnFFN/logits        |
-| Llama / Mistral              | QKV/AttnFFN           | yes              | unified `CanEnableResidency`    |
-| Gemma 1                      | fused GeGLU           | yes              | no softcap/SWA                  |
-| Gemma2                       | partial               | yes              | post-norm/softcap/SWA deferred  |
-| Phi-3                        | FFN + logits          | yes              | LongRoPE/fused QKV deferred     |
-| Phi-2                        | lm_head after host LN | yes              | LayerNorm/GELU kernels deferred |
-| MoE (Qwen3/Mixtral/DeepSeek) | ExpertFFN + logits    | forced 1         | batched experts later           |
-| DeepSeek2                    | MLA device KV         | forced 1         | RoPE/YaRN on CPU                |
+| Arch                         | Dense residency     | `n_batch`        | Notes                               |
+|------------------------------|---------------------|------------------|-------------------------------------|
+| Qwen3 dense                  | full                | yes (default 32) | fused QKV/AttnFFN/logits            |
+| Llama / Mistral              | QKV/AttnFFN         | yes              | unified `CanEnableResidency`        |
+| Gemma 1 / Gemma2             | full GeGLU          | yes              | softcap+post-norm; SWA reclaim A4   |
+| Phi-3                        | full QKV/AttnFFN    | yes              | LongRoPE; fused qkv/ffn row-slices  |
+| Phi-2                        | LN+GELU resid       | yes              | composed kernels; partial RoPE host |
+| MoE (Qwen3/Mixtral/DeepSeek) | ExpertFFNAccumulate | forced 1         | n_batch>1 -> A3                     |
+| DeepSeek2                    | MLA + MoE resid     | forced 1         | GPU YaRN; legacy attn_kv_b MHA      |
 
 \* TheBloke and convert.py often set `general.architecture: llama` - gogguf detects Mistral via `general.name` / sliding window.
 
@@ -61,11 +60,11 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 
 ### Supported weight quantizations
 
-| Type                         | CPU     | Native GPU + residency |
-|------------------------------|---------|------------------------|
-| F16, F32                     | dequant | FP32 path              |
-| Q8_0, Q4_0, Q4_1, Q5_0, Q5_1 | yes     | fused                  |
-| Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K | yes | fused                  |
+| Type                               | CPU     | Native GPU + residency |
+|------------------------------------|---------|------------------------|
+| F16, F32                           | dequant | FP32 path              |
+| Q8_0, Q4_0, Q4_1, Q5_0, Q5_1       | yes     | fused                  |
+| Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K | yes     | fused                  |
 
 Also listed as Legacy / K-quants / unquantized in tooling: Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K...Q8_K, F16, F32.
 

@@ -2,6 +2,7 @@ package phi3
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/device"
@@ -26,8 +27,12 @@ type Model struct {
 	lmHeadName       string
 	ropeFactorsShort []float32
 	ropeFactorsLong  []float32
-	fused            *gpuresid.Runner // fused GPU layer FFN
-	ffnGPU           []bool           // layer FFN runs fused on GPU (separate gate/up only)
+	fused            *gpuresid.Runner
+	fusedDims        gpuresid.Dims
+	gpuLayers        []gpuresid.Tensors
+	layerQuant       []bool
+	ffnGPU           []bool // host-path fused FFNNamed (separate gate/up only)
+	residency        bool   // device-resident hidden across layers (see initResidency)
 	decode           gpuresid.DecodeFlags
 }
 
@@ -85,7 +90,6 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Mode
 		return nil, err
 	}
 
-	// fused FFN only for layers with separate ffn_gate/ffn_up: merged ffn_up [embd, 2*ffn] would need a separate kernel
 	m.initFused()
 	m.initResidency()
 
@@ -111,6 +115,9 @@ func (m *Model) Config() Config {
 // ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
+	m.decode.ResidDevice = false
+	m.decode.GPUKVStale = false
+	m.decode.CPUKVHollow = false
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -149,18 +156,9 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		}
 	} else {
 		for i, id := range tokenIDs {
-			pos := startPos + i
-			if err := m.embed(id); err != nil {
+			if err := m.forwardToken(id, startPos+i); err != nil {
 				return nil, err
 			}
-
-			for layer := range m.cfg.NumLayers {
-				if err := m.forwardBlock(layer, pos); err != nil {
-					return nil, fmt.Errorf("phi3: layer %d pos %d: %w", layer, pos, err)
-				}
-			}
-
-			m.cache.Advance()
 		}
 
 		if err := m.logitsFinish(); err != nil {
@@ -185,17 +183,15 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	defer m.ResetCache()
 
 	for i, id := range tokenIDs {
-		if err := m.embed(id); err != nil {
+		if err := m.forwardToken(id, i); err != nil {
 			return nil, err
 		}
-
-		for layer := range m.cfg.NumLayers {
-			if err := m.forwardBlock(layer, i); err != nil {
-				return nil, err
-			}
-		}
-		m.cache.Advance()
 	}
+
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return nil, err
+	}
+
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return nil, err
 	}
@@ -205,6 +201,23 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	return out, nil
 }
 
+func (m *Model) forwardToken(tokenID, pos int) error {
+	if err := m.embed(tokenID); err != nil {
+		return err
+	}
+
+	m.uploadHidden()
+
+	for layer := range m.cfg.NumLayers {
+		if err := m.forwardBlock(layer, pos); err != nil {
+			return fmt.Errorf("phi3: layer %d pos %d: %w", layer, pos, err)
+		}
+	}
+	m.cache.Advance()
+
+	return nil
+}
+
 func (m *Model) embed(tokenID int) error {
 	return dispatch.EmbedTokenInto(m.weights, m.scratch.x, m.cfg.EmbeddingDim, tokenID)
 }
@@ -212,34 +225,77 @@ func (m *Model) embed(tokenID int) error {
 func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
+	onGPU := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
+	usedQKVResidency := false
+
+	if m.decode.ResidDevice {
+		err := m.forwardBlockDevice(layer, pos, ln)
+		if err == nil {
+			return nil
+		}
+
+		if m.decode.CPUKVHollow {
+			m.ResetCache()
+			return fmt.Errorf("phi3: layer %d residency failed without CPU KV mirror: %w", layer, err)
+		}
+
+		if strings.Contains(err.Error(), "code -6") || strings.Contains(err.Error(), "code -2") {
+			m.decode.GPUKVStale = true
+			_ = m.tryRecoverGPUKV()
+		}
+
+		if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {
+			return rerr
+		}
+	}
 
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
 
-	if err := m.projectQKV(lt, layer); err != nil {
-		return err
+	// QKVAttn (separate Q/K/V or fused attn_qkv row-slices) needs a complete GPU KV-cache
+	if m.residency && onGPU && !m.decode.GPUKVStale && gpuresid.QKVResidencyEnabled() {
+		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
+			if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
+				return err
+			}
+			usedQKVResidency = true
+		}
 	}
 
-	scale := m.ropeScale()
-	compute.ApplyRoPEHeadsPartialScaled(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, m.cfg.RopeDim, pos, m.cfg.RopeFreqBase, scale)
-	compute.ApplyRoPEHeadsPartialScaled(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, m.cfg.RopeDim, pos, m.cfg.RopeFreqBase, scale)
+	if !usedQKVResidency {
+		if err := m.projectQKV(lt, layer); err != nil {
+			return err
+		}
 
-	kvPos := m.cache.Len()
-	if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
-		return err
+		scale := m.ropeScale()
+		compute.ApplyRoPEHeadsPartialScaled(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, m.cfg.RopeDim, pos, m.cfg.RopeFreqBase, scale)
+		compute.ApplyRoPEHeadsPartialScaled(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, m.cfg.RopeDim, pos, m.cfg.RopeFreqBase, scale)
+
+		kvPos := m.cache.Len()
+		if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
+			return err
+		}
+
+		if onGPU && !m.decode.GPUKVStale {
+			if err := m.dev.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v); err != nil {
+				m.decode.GPUKVStale = true
+			}
+		}
+
+		seqLen := m.cache.Len() + 1
+		k := m.cache.KLayer(layer)
+		v := m.cache.VLayer(layer)
+
+		if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, k, v, m.scratch.scores, seqLen, layer); err != nil {
+			return err
+		}
 	}
 
-	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
-		_ = m.dev.KVCacheAppend(layer, kvPos, m.scratch.k, m.scratch.v)
-	}
-
-	seqLen := m.cache.Len() + 1
-	k := m.cache.KLayer(layer)
-	v := m.cache.VLayer(layer)
-
-	if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, k, v, m.scratch.scores, seqLen, layer); err != nil {
-		return err
+	if m.residency && onGPU && usedQKVResidency && gpuresid.AttnFFNResidencyEnabled() {
+		if err := m.attnFFNGPU(layer, ln, m.scratch.x, m.scratch.attn); err == nil {
+			return nil
+		}
 	}
 
 	if err := m.matmulInto(lt.attnOut, m.cfg.EmbeddingDim, m.cfg.NumHeads*m.cfg.HeadDim, m.scratch.attn, m.scratch.h, layer); err != nil {
@@ -365,6 +421,18 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 }
 
 func (m *Model) logitsFinish() error {
+	if m.decode.ResidDevice && m.decode.LogitsOnGPU && m.fused != nil {
+		if err := m.logitsDeviceResident(); err == nil {
+			m.decode.ResidDevice = false
+			return nil
+		}
+		m.decode.LogitsOnGPU = false
+	}
+
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return err
+	}
+
 	return m.logitsFromLast(m.scratch.x)
 }
 

@@ -70,28 +70,36 @@ type Backend struct {
 	hasMatF32       bool
 	hasMatQ8        bool
 	fnRMS           C.CUfunction
+	fnLayerNorm     C.CUfunction
 	fnRoPE          C.CUfunction
 	fnRoPENorm      C.CUfunction
 	fnSwiGLU        C.CUfunction
 	fnGeGLU         C.CUfunction
+	fnGELU          C.CUfunction
+	fnSoftcap       C.CUfunction
 	fnAttnQK        C.CUfunction
 	fnAttnV         C.CUfunction
 	fnSoftmax       C.CUfunction
 	fnAttnFlash     C.CUfunction // attn_flash (fused QK+softmax+V, optional)
 	fnMLA           C.CUfunction // mla_attn (absorbed MLA, optional)
 	fnAdd           C.CUfunction
+	fnAddScaled     C.CUfunction
 	fnEmbedGather   C.CUfunction
 	fnLogitsArgmax  C.CUfunction
 	hasRMS          bool
+	hasLayerNorm    bool
 	hasRoPE         bool
 	hasRoPENorm     bool
 	hasSwiGLU       bool
 	hasGeGLU        bool
+	hasGELU         bool
+	hasSoftcap      bool
 	hasAttn         bool
 	hasSoftmax      bool
 	hasAttnFlash    bool
 	hasMLA          bool
 	hasAdd          bool
+	hasAddScaled    bool
 	hasGraphs       bool
 	hasQ4           bool
 	hasQ4K          bool
@@ -315,6 +323,25 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 			}
 			C.free(unsafe.Pointer(cGeGLU))
 
+			cLayerNorm := C.CString("layernorm")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cLayerNorm, &b.fnLayerNorm) == 0 {
+				b.hasLayerNorm = true
+			}
+			C.free(unsafe.Pointer(cLayerNorm))
+
+			cGELU := C.CString("gelu")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cGELU, &b.fnGELU) == 0 {
+				b.hasGELU = true
+			}
+			C.free(unsafe.Pointer(cGELU))
+
+			cSoftcap := C.CString("softcap")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cSoftcap, &b.fnSoftcap) == 0 {
+				b.hasSoftcap = true
+				b.drv.fn_softcap = b.fnSoftcap
+			}
+			C.free(unsafe.Pointer(cSoftcap))
+
 			cAttnQK := C.CString("attn_qk")
 			cAttnV := C.CString("attn_v")
 			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnQK, &b.fnAttnQK) == 0 && C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAttnV, &b.fnAttnV) == 0 {
@@ -347,6 +374,12 @@ func (b *Backend) loadOpsModule(gpuCC int, errBuf *[4096]C.char) error {
 				b.hasAdd = true
 			}
 			C.free(unsafe.Pointer(cAdd))
+
+			cAddS := C.CString("add_scaled_inplace")
+			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cAddS, &b.fnAddScaled) == 0 {
+				b.hasAddScaled = true
+			}
+			C.free(unsafe.Pointer(cAddS))
 
 			cEmb := C.CString("embed_gather_q8_0")
 			if C.gguf_cuda_module_function(&b.drv, b.moduleOps, cEmb, &b.fnEmbedGather) == 0 {
@@ -1096,6 +1129,8 @@ func (b *Backend) AttnFFNResidualCached(woName, ffnNormName, gateName, upName, d
 		&b.matmulPool,
 		woM.ptr,
 		normM.ptr,
+		0,
+		0,
 		gateM.ptr,
 		upM.ptr,
 		downM.ptr,
@@ -1168,6 +1203,8 @@ func (b *Backend) AttnFFNResidualQ8_0Cached(woName, ffnNormName, gateName, upNam
 		&b.matmulPool,
 		woM.ptr,
 		normM.ptr,
+		0,
+		0,
 		gateM.ptr,
 		upM.ptr, downM.ptr,
 		(*C.float)(unsafe.Pointer(&x[0])),
@@ -1382,9 +1419,15 @@ func (b *Backend) FFNGeGLUQuantCached(t dtype.DType, gateName, upName, downName 
 	return b.ffnGatedQuantCached(b.fnGeGLU, "geglu", t, gateName, upName, downName, gateRaw, upRaw, downRaw, x, out, embd, ffn)
 }
 
-// ffnGatedQuantCached - gate/up matmul + fnAct activation + down on device
+// ffnGatedQuantCached - gate/up matmul + fnAct activation + down on device.
+// x==nil reads the MoE RMSNorm snapshot (d_moe_h) when MoEHiddenNorm / AttnOutResidualNorm ran.
 func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t dtype.DType, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
-	if len(x) < embd || len(out) < embd {
+	if len(out) < embd {
+		return fmt.Errorf("cuda: ffn %s: out too short", act)
+	}
+
+	fromMoE := len(x) == 0
+	if !fromMoE && len(x) < embd {
 		return fmt.Errorf("cuda: ffn %s: x/out too short", act)
 	}
 
@@ -1411,7 +1454,12 @@ func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t dtype.DT
 		return err
 	}
 
-	b.prepareVecUpload(x)
+	var xPtr *C.float
+	if !fromMoE {
+		b.prepareVecUpload(x)
+		xPtr = (*C.float)(unsafe.Pointer(&x[0]))
+	}
+
 	rc := C.gguf_cuda_ffn_swiglu_device(
 		&b.drv,
 		b.ctx,
@@ -1421,7 +1469,7 @@ func (b *Backend) ffnGatedQuantCached(fnAct C.CUfunction, act string, t dtype.DT
 		gateM.ptr,
 		upM.ptr,
 		downM.ptr,
-		(*C.float)(unsafe.Pointer(&x[0])),
+		xPtr,
 		(*C.float)(unsafe.Pointer(&out[0])),
 		C.int(embd),
 		C.int(ffn),
@@ -1442,8 +1490,23 @@ func (b *Backend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName,
 		return fmt.Errorf("cuda: attn+ffn residual kernels unavailable")
 	}
 
+	return b.attnFFNResidualQuantCached(b.fnSwiGLU, "swiglu", t, woName, ffnNormName, "", "", gateName, upName, downName, woRaw, gateRaw, upRaw, downRaw, ffnNorm, nil, nil, x, attn, embd, attnDim, ffn, eps)
+}
+
+// AttnFFNResidualGeGLUQuantCached like AttnFFNResidualQuantCached but GeGLU (Gemma).
+// Non-empty postAttnNormName / postFFNNormName enable Gemma2 post-norms before residual add.
+func (b *Backend) AttnFFNResidualGeGLUQuantCached(t dtype.DType, woName, ffnNormName, postAttnNormName, postFFNNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, postAttnNorm, postFFNNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	if !b.hasGeGLU || !b.hasRMS || !b.hasAdd {
+		return fmt.Errorf("cuda: attn+ffn residual geglu kernels unavailable")
+	}
+
+	return b.attnFFNResidualQuantCached(b.fnGeGLU, "geglu", t, woName, ffnNormName, postAttnNormName, postFFNNormName, gateName, upName, downName, woRaw, gateRaw, upRaw, downRaw, ffnNorm, postAttnNorm, postFFNNorm, x, attn, embd, attnDim, ffn, eps)
+}
+
+// attnFFNResidualQuantCached WO+residual+RMSNorm+gated-FFN+residual; fnAct is SwiGLU or GeGLU.
+func (b *Backend) attnFFNResidualQuantCached(fnAct C.CUfunction, actName string, t dtype.DType, woName, ffnNormName, postAttnNormName, postFFNNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, postAttnNorm, postFFNNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
 	if len(ffnNorm) < embd {
-		return fmt.Errorf("cuda: AttnFFNResidualQuantCached: ffn_norm too short")
+		return fmt.Errorf("cuda: AttnFFNResidualQuantCached(%s): ffn_norm too short", actName)
 	}
 
 	b.mu.Lock()
@@ -1454,7 +1517,7 @@ func (b *Backend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName,
 	resident := b.hiddenResident && len(x) == 0
 	if !resident {
 		if len(x) < embd {
-			return fmt.Errorf("cuda: AttnFFNResidualQuantCached: x too short")
+			return fmt.Errorf("cuda: AttnFFNResidualQuantCached(%s): x too short", actName)
 		}
 
 		b.clearResidencyLocked()
@@ -1473,6 +1536,28 @@ func (b *Backend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName,
 	normM, err := b.ensureFP32Matrix(ffnNormName, ffnNorm, embd, 1)
 	if err != nil {
 		return err
+	}
+
+	var postAttnPtr, postFFNPtr C.CUdeviceptr
+	if postAttnNormName != "" {
+		if len(postAttnNorm) < embd {
+			return fmt.Errorf("cuda: AttnFFNResidualQuantCached(%s): post_attn_norm too short", actName)
+		}
+		postAttnM, err := b.ensureFP32Matrix(postAttnNormName, postAttnNorm, embd, 1)
+		if err != nil {
+			return err
+		}
+		postAttnPtr = postAttnM.ptr
+	}
+	if postFFNNormName != "" {
+		if len(postFFNNorm) < embd {
+			return fmt.Errorf("cuda: AttnFFNResidualQuantCached(%s): post_ffn_norm too short", actName)
+		}
+		postFFNM, err := b.ensureFP32Matrix(postFFNNormName, postFFNNorm, embd, 1)
+		if err != nil {
+			return err
+		}
+		postFFNPtr = postFFNM.ptr
 	}
 
 	gateM, err := b.ensureQuantMatrix(t, gateName, gateRaw, ffn, embd)
@@ -1506,11 +1591,13 @@ func (b *Backend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName,
 		b.ctx,
 		fnMatmul,
 		b.fnRMS,
-		b.fnSwiGLU,
+		fnAct,
 		b.fnAdd,
 		&b.matmulPool,
 		woM.ptr,
 		normM.ptr,
+		postAttnPtr,
+		postFFNPtr,
 		gateM.ptr,
 		upM.ptr,
 		downM.ptr,
@@ -1532,7 +1619,7 @@ func (b *Backend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName,
 			b.clearResidencyLocked()
 		}
 
-		return fmt.Errorf("cuda: attn_ffn_residual %s: code %d", t, int(rc))
+		return fmt.Errorf("cuda: attn_ffn_residual_%s %s: code %d", actName, t, int(rc))
 	}
 
 	return nil
@@ -1812,6 +1899,7 @@ func (b *Backend) clearResidencyLocked() {
 	b.matmulPool.resid_on_device = 0
 	b.matmulPool.keep_resid_device = 0
 	b.matmulPool.resid_len = 0
+	b.matmulPool.moe_h_len = 0
 }
 
 // prepareVecUpload marks HtoD skip if same host vec already on GPU (Q/K/V from one h)
@@ -1853,18 +1941,213 @@ func (b *Backend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 	return nil
 }
 
+// LayerNormBiasInto writes (x-mean)/sqrt(var+eps)*weight + bias to dst
+func (b *Backend) LayerNormBiasInto(dst, x, weight, bias []float32, eps float32) error {
+	if !b.hasLayerNorm {
+		return fmt.Errorf("cuda: layernorm kernel unavailable")
+	}
+
+	n := len(x)
+	if n == 0 || len(dst) != n || len(weight) != n || len(bias) != n {
+		return fmt.Errorf("cuda: LayerNormBiasInto: length mismatch")
+	}
+
+	rc := C.gguf_cuda_layernorm(
+		&b.drv,
+		b.ctx,
+		b.fnLayerNorm,
+		(*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&weight[0])),
+		(*C.float)(unsafe.Pointer(&bias[0])),
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(n),
+		C.float(eps),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: layernorm: code %d", int(rc))
+	}
+
+	return nil
+}
+
+// GELUInPlace applies tanh-approx GELU on a host buffer
+func (b *Backend) GELUInPlace(x []float32) error {
+	if !b.hasGELU {
+		return fmt.Errorf("cuda: gelu kernel unavailable")
+	}
+
+	if len(x) == 0 {
+		return nil
+	}
+
+	rc := C.gguf_cuda_gelu(&b.drv, b.ctx, b.fnGELU, (*C.float)(unsafe.Pointer(&x[0])), C.int(len(x)))
+	if rc != 0 {
+		return fmt.Errorf("cuda: gelu: code %d", int(rc))
+	}
+
+	return nil
+}
+
+// LayerNormResidInto: LayerNorm+bias of resident d_resid into host dst (Phi-2 residency)
+func (b *Backend) LayerNormResidInto(dst, weight, bias []float32, weightName, biasName string, eps float32) error {
+	if !b.hasLayerNorm {
+		return fmt.Errorf("cuda: layernorm kernel unavailable")
+	}
+
+	n := len(dst)
+	if n == 0 || len(weight) < n || len(bias) < n {
+		return fmt.Errorf("cuda: LayerNormResidInto: buffers too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.hiddenResident {
+		return fmt.Errorf("cuda: LayerNormResidInto: residency not active")
+	}
+
+	wM, err := b.ensureFP32Matrix(weightName, weight[:n], n, 1)
+	if err != nil {
+		return err
+	}
+
+	bM, err := b.ensureFP32Matrix(biasName, bias[:n], n, 1)
+	if err != nil {
+		return err
+	}
+
+	rc := C.gguf_cuda_layernorm_resid(
+		&b.drv,
+		b.ctx,
+		b.fnLayerNorm,
+		&b.matmulPool,
+		wM.ptr,
+		bM.ptr,
+		(*C.float)(unsafe.Pointer(&dst[0])),
+		C.int(n),
+		C.float(eps),
+	)
+	if rc != 0 {
+		return fmt.Errorf("cuda: layernorm_resid: code %d", int(rc))
+	}
+
+	return nil
+}
+
+// ResidAdd adds host delta into resident d_resid (d_resid += delta)
+func (b *Backend) ResidAdd(delta []float32) error {
+	if !b.hasAdd {
+		return fmt.Errorf("cuda: add kernel unavailable")
+	}
+
+	n := len(delta)
+	if n == 0 {
+		return nil
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.hiddenResident {
+		return fmt.Errorf("cuda: ResidAdd: residency not active")
+	}
+
+	rc := C.gguf_cuda_resid_add(&b.drv, b.ctx, b.fnAdd, &b.matmulPool, (*C.float)(unsafe.Pointer(&delta[0])), C.int(n))
+	if rc != 0 {
+		return fmt.Errorf("cuda: resid_add: code %d", int(rc))
+	}
+
+	return nil
+}
+
+// LogitsFromDeviceLayerNorm: LayerNorm+bias(resident hidden) + lm_head; DtoH only logits (Phi-2)
+func (b *Backend) LogitsFromDeviceLayerNorm(t dtype.DType, normWName, normBName string, normW, normB []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error {
+	if !b.hasLayerNorm {
+		return fmt.Errorf("cuda: layernorm kernel unavailable")
+	}
+
+	if len(normW) < embd || len(normB) < embd || len(logits) < vocab {
+		return fmt.Errorf("cuda: LogitsFromDeviceLayerNorm: buffers too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.hiddenResident {
+		return fmt.Errorf("cuda: LogitsFromDeviceLayerNorm: residency not active")
+	}
+
+	normWM, err := b.ensureFP32Matrix(normWName, normW[:embd], embd, 1)
+	if err != nil {
+		return err
+	}
+
+	normBM, err := b.ensureFP32Matrix(normBName, normB[:embd], embd, 1)
+	if err != nil {
+		return err
+	}
+
+	var headPtr C.CUdeviceptr
+	fnMatmul := b.fn
+	if t == dtype.F32 || t == dtype.F16 {
+		headM, err := b.ensureFP32Matrix(headName, headF32, vocab, embd)
+		if err != nil {
+			return err
+		}
+		headPtr = headM.ptr
+	} else {
+		var fn C.CUfunction
+		if _, fn, err = b.quantCache(t); err != nil {
+			return err
+		}
+
+		headM, err := b.ensureQuantMatrix(t, headName, headRaw, vocab, embd)
+		if err != nil {
+			return err
+		}
+		headPtr = headM.ptr
+		fnMatmul = fn
+	}
+
+	rc := C.gguf_cuda_logits_from_device_layernorm(
+		&b.drv,
+		b.ctx,
+		fnMatmul,
+		b.fnLayerNorm,
+		&b.matmulPool,
+		normWM.ptr,
+		normBM.ptr,
+		headPtr,
+		(*C.float)(unsafe.Pointer(&logits[0])),
+		C.int(vocab),
+		C.int(embd),
+		C.float(eps),
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return fmt.Errorf("cuda: logits_from_device_layernorm: code %d", int(rc))
+	}
+
+	return nil
+}
+
 func (b *Backend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error {
+	return b.ApplyRoPEHeadsScaled(v, nHeads, headDim, pos, freqBase, compute.RoPEScale{})
+}
+
+func (b *Backend) ApplyRoPEHeadsScaled(v []float32, nHeads, headDim, pos int, freqBase float32, scale compute.RoPEScale) error {
 	if !b.hasRoPE {
 		return fmt.Errorf("cuda: rope kernel unavailable")
 	}
 
 	half := headDim / 2
 	if nHeads <= 0 || headDim <= 0 || half*2 != headDim {
-		return fmt.Errorf("cuda: ApplyRoPEHeads: invalid dimensions")
+		return fmt.Errorf("cuda: ApplyRoPEHeadsScaled: invalid dimensions")
 	}
 
 	if len(v) < nHeads*headDim {
-		return fmt.Errorf("cuda: ApplyRoPEHeads: v too short")
+		return fmt.Errorf("cuda: ApplyRoPEHeadsScaled: v too short")
 	}
 
 	if half > compute.MaxRoPEPairs() {
@@ -1873,7 +2156,7 @@ func (b *Backend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase
 
 	cos := make([]float32, half)
 	sin := make([]float32, half)
-	compute.RoPECosSin(cos, sin, headDim, pos, freqBase)
+	compute.RoPECosSinScaled(cos, sin, headDim, pos, freqBase, scale)
 
 	rc := C.gguf_cuda_rope_heads(&b.drv, b.ctx, b.fnRoPE, (*C.float)(unsafe.Pointer(&v[0])), (*C.float)(unsafe.Pointer(&cos[0])), (*C.float)(unsafe.Pointer(&sin[0])), C.int(nHeads), C.int(headDim), C.int(half))
 	if rc != 0 {
@@ -1932,6 +2215,22 @@ func (b *Backend) SwiGLUInPlace(gate, up []float32) error {
 	}
 
 	return nil
+}
+
+// SoftcapInPlace applies Gemma2 softcap on a host buffer (logits after LogitsFromDevice).
+func (b *Backend) SoftcapInPlace(x []float32, softcap float32) error {
+	compute.SoftcapInPlace(x, softcap)
+	return nil
+}
+
+// SetAttnSoftcap sets softcap applied to attention scores before softmax in fused QKV (0 = off).
+func (b *Backend) SetAttnSoftcap(softcap float32) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if softcap < 0 {
+		softcap = 0
+	}
+	b.drv.attn_softcap = C.float(softcap)
 }
 
 func (b *Backend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {

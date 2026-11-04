@@ -27,8 +27,10 @@ type Model struct {
 	lmHeadName   string
 	lmHeadBias   []float32
 
-	fused  *gpuresid.Runner // lm_head on GPU (see initResidency)
-	decode gpuresid.DecodeFlags
+	fused      *gpuresid.Runner // GPU residency / lm_head (see initResidency)
+	layerQuant []bool
+	residency  bool // device-resident residual across layers
+	decode     gpuresid.DecodeFlags
 }
 
 type layerBias struct {
@@ -162,8 +164,18 @@ func (m *Model) Config() Config {
 // ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
+	m.decode.Clear()
 	if m.dev != nil {
 		m.dev.KVCacheReset()
+	}
+
+	// Re-arm logits/residency flags cleared by decode.Clear when still eligible
+	if m.fused != nil && gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
+		m.decode.LogitsOnGPU = true
+	}
+
+	if m.residency {
+		m.decode.LogitsOnGPU = true
 	}
 }
 
@@ -200,17 +212,9 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	} else {
 		for i, id := range tokenIDs {
 			pos := startPos + i
-			if err := m.embed(id); err != nil {
+			if err := m.forwardToken(id, pos); err != nil {
 				return nil, err
 			}
-
-			for layer := range m.cfg.NumLayers {
-				if err := m.forwardBlock(layer, pos); err != nil {
-					return nil, fmt.Errorf("phi2: layer %d pos %d: %w", layer, pos, err)
-				}
-			}
-
-			m.cache.Advance()
 		}
 
 		if err := m.logitsFinish(); err != nil {
@@ -256,6 +260,23 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	return out, nil
 }
 
+func (m *Model) forwardToken(tokenID, pos int) error {
+	if err := m.embed(tokenID); err != nil {
+		return err
+	}
+
+	m.uploadHidden()
+
+	for layer := range m.cfg.NumLayers {
+		if err := m.forwardBlock(layer, pos); err != nil {
+			return fmt.Errorf("phi2: layer %d pos %d: %w", layer, pos, err)
+		}
+	}
+	m.cache.Advance()
+
+	return nil
+}
+
 func (m *Model) embed(tokenID int) error {
 	return dispatch.EmbedTokenInto(m.weights, m.scratch.x, m.cfg.EmbeddingDim, tokenID)
 }
@@ -264,6 +285,22 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
 	lb := m.layerBias[layer]
+
+	if m.decode.ResidDevice {
+		err := m.forwardBlockDevice(layer, pos)
+		if err == nil {
+			return nil
+		}
+
+		if m.decode.CPUKVHollow {
+			m.ResetCache()
+			return fmt.Errorf("phi2: layer %d residency failed without CPU KV mirror: %w", layer, err)
+		}
+
+		if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {
+			return rerr
+		}
+	}
 
 	// one LayerNorm on residual; attn and FFN in parallel
 	if err := compute.LayerNormInto(m.scratch.h, m.scratch.x, ln.attnW, ln.attnB, m.cfg.LayerNormEps); err != nil {
@@ -372,6 +409,30 @@ func (m *Model) logitsFinish() error {
 
 // logitsFromHidden: out_norm + lm_head for hidden state x [embd]
 func (m *Model) logitsFromHidden(x []float32) error {
+	if m.decode.ResidDevice && m.fused != nil {
+		if err := m.logitsDevice(); err == nil {
+			m.decode.ResidDevice = false
+			compute.AddBiasInPlace(m.scratch.logits, m.lmHeadBias)
+			return nil
+		}
+
+		if err := m.syncHiddenFromDevice(); err != nil {
+			return err
+		}
+
+		x = m.scratch.x
+		m.decode.LogitsOnGPU = false
+	}
+
+	if m.decode.LogitsOnGPU && m.fused != nil && !m.decode.ResidDevice {
+		if err := m.logitsDeviceFromHost(x); err == nil {
+			compute.AddBiasInPlace(m.scratch.logits, m.lmHeadBias)
+			return nil
+		}
+
+		m.decode.LogitsOnGPU = false
+	}
+
 	if err := compute.LayerNormInto(m.scratch.h, x, m.outNorm.w, m.outNorm.b, m.cfg.LayerNormEps); err != nil {
 		return err
 	}

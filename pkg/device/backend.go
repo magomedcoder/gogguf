@@ -82,14 +82,29 @@ type Backend interface {
 	// RMSNormInto writes RMS normalization to dst (GPU or CPU)
 	RMSNormInto(dst, x, weight []float32, eps float32) error
 
+	// LayerNormBiasInto writes (x-mean)/sqrt(var+eps)*weight + bias to dst (Phi-2)
+	LayerNormBiasInto(dst, x, weight, bias []float32, eps float32) error
+
+	// GELUInPlace applies tanh-approx GELU in-place (Phi-2 FFN)
+	GELUInPlace(x []float32) error
+
 	// ApplyRoPEHeads applies NeoX/Qwen RoPE to nHeads heads in v (in-place)
 	ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error
+
+	// ApplyRoPEHeadsScaled like ApplyRoPEHeads with YaRN / LongRoPE cos/sin (RoPECosSinScaled)
+	ApplyRoPEHeadsScaled(v []float32, nHeads, headDim, pos int, freqBase float32, scale compute.RoPEScale) error
 
 	// ApplyRoPEHeadsNorm applies Llama RoPE (adjacent dim pairs) to nHeads heads in v
 	ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error
 
 	// SwiGLUInPlace computes silu(gate)*up, result in gate
 	SwiGLUInPlace(gate, up []float32) error
+
+	// SoftcapInPlace x = softcap * tanh(x / softcap) (Gemma2 logits); softcap==0 is a no-op
+	SoftcapInPlace(x []float32, softcap float32) error
+
+	// SetAttnSoftcap sets softcap applied to attention scores before softmax (Gemma2). 0 = off.
+	SetAttnSoftcap(softcap float32)
 
 	// FFNSwiGLUCached gate/up/down matmul + SwiGLU; on CUDA activations stay on GPU
 	FFNSwiGLUCached(gateName, upName, downName string, gateW, upW, downW, x, out []float32, embd, ffn int) error
@@ -119,6 +134,10 @@ type Backend interface {
 	// If hidden resident (HiddenUpload), x is not uploaded to GPU and stays on device: host buffer x is not updated in that case.
 	AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error
 
+	// AttnFFNResidualGeGLUQuantCached like AttnFFNResidualQuantCached but GeGLU (Gemma).
+	// When postAttnNormName / postFFNNormName are non-empty, RMSNorm is applied to the branch output before each residual add (Gemma2 post-norms).
+	AttnFFNResidualGeGLUQuantCached(t dtype.DType, woName, ffnNormName, postAttnNormName, postFFNNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, postAttnNorm, postFFNNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error
+
 	// QKVRoPEAttentionQuantCached QKV+RoPE+attn for quantized weights.
 	// If hidden resident, h computed on GPU as RMSNorm(resid, attnNorm) and host h is not read.
 	// mode - RoPE layout; empty qNormName/kNormName - layer without QK-norm (Llama / Mistral).
@@ -139,6 +158,15 @@ type Backend interface {
 
 	// LogitsFromDevice computes RMSNorm(resident hidden) + lm_head on GPU; only logits are copied to host. Use headF32 for FP32 head, else headRaw.
 	LogitsFromDevice(t dtype.DType, normName string, norm []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error
+
+	// LayerNormResidInto computes LayerNorm+bias of resident hidden into host dst (Phi-2 residency).
+	LayerNormResidInto(dst, weight, bias []float32, weightName, biasName string, eps float32) error
+
+	// ResidAdd adds host delta into resident hidden (d_resid += delta); residual stays on device.
+	ResidAdd(delta []float32) error
+
+	// LogitsFromDeviceLayerNorm computes LayerNorm+bias(resident hidden) + lm_head on GPU; only logits are copied to host (Phi-2).
+	LogitsFromDeviceLayerNorm(t dtype.DType, normWName, normBName string, normW, normB []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error
 
 	// AttentionScoresInto writes scaled dot-product attention to dst
 	AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error

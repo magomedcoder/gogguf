@@ -77,8 +77,22 @@ func (CPUBackend) RMSNormInto(dst, x, weight []float32, eps float32) error {
 	return compute.RMSNormInto(dst, x, weight, eps)
 }
 
+func (CPUBackend) LayerNormBiasInto(dst, x, weight, bias []float32, eps float32) error {
+	return compute.LayerNormInto(dst, x, weight, bias, eps)
+}
+
+func (CPUBackend) GELUInPlace(x []float32) error {
+	compute.GELUInPlace(x)
+	return nil
+}
+
 func (CPUBackend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error {
 	compute.ApplyRoPEHeads(v, nHeads, headDim, pos, freqBase)
+	return nil
+}
+
+func (CPUBackend) ApplyRoPEHeadsScaled(v []float32, nHeads, headDim, pos int, freqBase float32, scale compute.RoPEScale) error {
+	compute.ApplyRoPEHeadsPartialScaled(v, nHeads, headDim, headDim, pos, freqBase, scale)
 	return nil
 }
 
@@ -91,6 +105,13 @@ func (CPUBackend) SwiGLUInPlace(gate, up []float32) error {
 	compute.SwiGLUInPlace(gate, up)
 	return nil
 }
+
+func (CPUBackend) SoftcapInPlace(x []float32, softcap float32) error {
+	compute.SoftcapInPlace(x, softcap)
+	return nil
+}
+
+func (CPUBackend) SetAttnSoftcap(float32) {}
 
 func (CPUBackend) FFNSwiGLUCached(_, _, _ string, gateW, upW, downW, x, out []float32, embd, ffn int) error {
 	gate := make([]float32, ffn)
@@ -309,9 +330,23 @@ func (CPUBackend) FFNGeGLUQuantCached(t dtype.DType, _, _, _ string, gateRaw, up
 }
 
 func (CPUBackend) AttnFFNResidualQuantCached(t dtype.DType, _, _, _, _, _ string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	return attnFFNResidualQuantCachedCPU(t, woRaw, gateRaw, upRaw, downRaw, ffnNorm, nil, nil, x, attn, embd, attnDim, ffn, eps, false)
+}
+
+func (CPUBackend) AttnFFNResidualGeGLUQuantCached(t dtype.DType, _, _, _, _, _, _, _ string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, postAttnNorm, postFFNNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	return attnFFNResidualQuantCachedCPU(t, woRaw, gateRaw, upRaw, downRaw, ffnNorm, postAttnNorm, postFFNNorm, x, attn, embd, attnDim, ffn, eps, true)
+}
+
+func attnFFNResidualQuantCachedCPU(t dtype.DType, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, postAttnNorm, postFFNNorm, x, attn []float32, embd, attnDim, ffn int, eps float32, geglu bool) error {
 	h := make([]float32, embd)
 	if err := matMulQuantInto(t, woRaw, embd, attnDim, attn, h); err != nil {
 		return err
+	}
+
+	if len(postAttnNorm) >= embd {
+		if err := compute.RMSNormInto(h, h, postAttnNorm, eps); err != nil {
+			return err
+		}
 	}
 
 	compute.AddInPlace(x, h)
@@ -320,8 +355,20 @@ func (CPUBackend) AttnFFNResidualQuantCached(t dtype.DType, _, _, _, _, _ string
 		return err
 	}
 
-	if err := (CPUBackend{}).FFNSwiGLUQuantCached(t, "", "", "", gateRaw, upRaw, downRaw, h, h, embd, ffn); err != nil {
+	var err error
+	if geglu {
+		err = (CPUBackend{}).FFNGeGLUQuantCached(t, "", "", "", gateRaw, upRaw, downRaw, h, h, embd, ffn)
+	} else {
+		err = (CPUBackend{}).FFNSwiGLUQuantCached(t, "", "", "", gateRaw, upRaw, downRaw, h, h, embd, ffn)
+	}
+	if err != nil {
 		return err
+	}
+
+	if len(postFFNNorm) >= embd {
+		if err := compute.RMSNormInto(h, h, postFFNNorm, eps); err != nil {
+			return err
+		}
 	}
 
 	compute.AddInPlace(x, h)
@@ -387,6 +434,18 @@ func (CPUBackend) HiddenDownload([]float32) error {
 }
 
 func (CPUBackend) LogitsFromDevice(dtype.DType, string, []float32, string, []byte, []float32, []float32, int, int, float32) error {
+	return ErrHiddenUnavailable
+}
+
+func (CPUBackend) LayerNormResidInto([]float32, []float32, []float32, string, string, float32) error {
+	return ErrHiddenUnavailable
+}
+
+func (CPUBackend) ResidAdd([]float32) error {
+	return ErrHiddenUnavailable
+}
+
+func (CPUBackend) LogitsFromDeviceLayerNorm(dtype.DType, string, string, []float32, []float32, string, []byte, []float32, []float32, int, int, float32) error {
 	return ErrHiddenUnavailable
 }
 

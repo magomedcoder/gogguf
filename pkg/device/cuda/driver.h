@@ -135,6 +135,10 @@ typedef struct {
 	CUdevice device;  // CUdevice handle of this context (for peer queries)
 	// fn_attn_flash: fused attn_flash kernel (set by Go after module load; NULL = unfused qk/softmax/v path)
 	CUfunction fn_attn_flash;
+	// fn_softcap: Gemma2 softcap on attention scores (set by Go; NULL = softcap unavailable)
+	CUfunction fn_softcap;
+	// attn_softcap: softcap scale applied before softmax in gguf_cuda_attention_device (0 = off)
+	float attn_softcap;
 } cuda_driver_t;
 
 #define GGUF_CUDA_MIN_CC 60
@@ -158,6 +162,8 @@ typedef struct gguf_layer_graph_entry {
 	int kind;
 	CUdeviceptr d_wo;
 	CUdeviceptr d_ffn_norm;
+	CUdeviceptr d_post_attn_norm; // Gemma2 post-attention RMSNorm (0 = skip)
+	CUdeviceptr d_post_ffn_norm;  // Gemma2 post-FFN RMSNorm (0 = skip)
 	CUdeviceptr d_gate_w;
 	CUdeviceptr d_up_w;
 	CUdeviceptr d_down_w;
@@ -188,6 +194,7 @@ typedef struct {
 	CUdeviceptr d_out;
 	CUdeviceptr d_aux;   // FFN up
 	CUdeviceptr d_resid; // residual stream (layer residency)
+	CUdeviceptr d_moe_h; // MoE: RMSNorm(resid) snapshot (expert/router input)
 	float *h_vec;
 	float *h_out;
 	float *h_resid; // staging for residual HtoD(x)
@@ -195,6 +202,8 @@ typedef struct {
 	int out_cap;
 	int aux_cap;
 	int resid_cap;
+	int moe_h_cap;
+	int moe_h_len; // valid floats in d_moe_h (0 = unset)
 	CUstream stream;
 	gguf_matmul_graph_entry_t *graphs;
 	gguf_layer_graph_entry_t *layer_graphs;
@@ -319,35 +328,33 @@ int gguf_cuda_matmul_mat_f32_device(cuda_driver_t *drv, CUcontext ctx, CUfunctio
 int gguf_cuda_matmul_mat_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_mat, CUfunction fn_vec, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch);
 
 // gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down (CUDA Graph when has_graphs)
+// x==NULL and pool->moe_h_len==embd: read input from d_moe_h (MoE snapshot).
 int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
+
+// gguf_cuda_attn_out_norm_device: WO(attn)+resid+= + RMSNorm(resid)->d_moe_h (MoE prep after QKV).
+// pool->resid_on_device / skip_attn_htod as in residual path; keeps resid on device.
+int gguf_cuda_attn_out_norm_device( cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_rmsnorm, CUfunction fn_add, gguf_matmul_pool_t *pool, CUdeviceptr d_wo, CUdeviceptr d_ffn_norm, const float *x, const float *attn, int embd, int attn_dim, float eps, int *resid_dirty);
+
+// gguf_cuda_moe_hidden_norm: RMSNorm(d_resid)->d_moe_h (attn residual already applied).
+int gguf_cuda_moe_hidden_norm( cuda_driver_t *drv, CUcontext ctx, CUfunction fn_rmsnorm, gguf_matmul_pool_t *pool, CUdeviceptr d_ffn_norm, int embd, float eps );
+
+// gguf_cuda_matmul_vec_from_moe_h: matmul with vec = d_moe_h; DtoH out only (router logits).
+int gguf_cuda_matmul_vec_from_moe_h(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, float *out, int rows, int cols);
+
+// gguf_cuda_ffn_swiglu_moe_accum: FFN from d_moe_h; resid += scale * result (no DtoH).
+int gguf_cuda_ffn_swiglu_moe_accum( cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, CUfunction fn_add, CUfunction fn_add_scaled, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, float scale, int embd, int ffn );
+
+// gguf_cuda_residual_add_scaled: resid += scale * src (host src uploaded to d_vec).
+int gguf_cuda_residual_add_scaled( cuda_driver_t *drv, CUcontext ctx, CUfunction fn_add, CUfunction fn_add_scaled, gguf_matmul_pool_t *pool, const float *src, float scale, int n );
 
 // gguf_cuda_attn_ffn_residual_device: WO + residual + RMSNorm + FFN + residual (CUDA Graph)
 // 2*HtoD + 1*DtoH; if pool->skip_attn_htod - attn already in d_vec (1*HtoD x + 1*DtoH).
 // pool->resid_on_device: x already in d_resid (HtoD not needed, x may be NULL);
 // pool->keep_resid_device: result stays in d_resid (no DtoH, x_out may be NULL).
 // resid_dirty (may be NULL): 1 = d_resid changed before error.
-int gguf_cuda_attn_ffn_residual_device(
-    cuda_driver_t *drv,
-    CUcontext ctx,
-    CUfunction fn_matmul,
-    CUfunction fn_rmsnorm,
-    CUfunction fn_swiglu,
-    CUfunction fn_add,
-    gguf_matmul_pool_t *pool,
-    CUdeviceptr d_wo,
-    CUdeviceptr d_ffn_norm,
-    CUdeviceptr d_gate_w,
-    CUdeviceptr d_up_w,
-    CUdeviceptr d_down_w,
-    const float *x,
-    const float *attn,
-    float *x_out,
-    int embd,
-    int attn_dim,
-    int ffn,
-    float eps,
-    int *resid_dirty
-);
+// d_post_attn_norm / d_post_ffn_norm: optional Gemma2 post-norms (0 = skip); when set,
+// RMSNorm is applied to the branch output before each residual add.
+int gguf_cuda_attn_ffn_residual_device( cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_rmsnorm, CUfunction fn_swiglu, CUfunction fn_add, gguf_matmul_pool_t *pool, CUdeviceptr d_wo, CUdeviceptr d_ffn_norm, CUdeviceptr d_post_attn_norm, CUdeviceptr d_post_ffn_norm, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, const float *attn, float *x_out, int embd, int attn_dim, int ffn, float eps, int *resid_dirty );
 
 // gguf_cuda_hidden_upload puts hidden state in d_resid (one HtoD per token)
 int gguf_cuda_hidden_upload(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, const float *x, int n);
@@ -372,22 +379,25 @@ int gguf_cuda_peer_enable(cuda_driver_t *drv, CUcontext ctx, CUcontext peer_ctx)
 int gguf_cuda_hidden_copy_peer(cuda_driver_t *src_drv, CUcontext src_ctx, gguf_matmul_pool_t *src_pool, cuda_driver_t *dst_drv, CUcontext dst_ctx, gguf_matmul_pool_t *dst_pool, int n);
 
 // gguf_cuda_logits_from_device: RMSNorm(d_resid) + lm_head matmul on GPU, DtoH only logits
-int gguf_cuda_logits_from_device(
-    cuda_driver_t *drv,
-    CUcontext ctx,
-    CUfunction fn_matmul,
-    CUfunction fn_rmsnorm,
-    gguf_matmul_pool_t *pool,
-    CUdeviceptr d_out_norm,
-    CUdeviceptr d_head,
-    float *logits,
-    int vocab,
-    int embd,
-    float eps
-);
+int gguf_cuda_logits_from_device( cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_rmsnorm, gguf_matmul_pool_t *pool, CUdeviceptr d_out_norm, CUdeviceptr d_head, float *logits, int vocab, int embd, float eps );
 
 // gguf_cuda_rmsnorm RMSNorm on GPU
 int gguf_cuda_rmsnorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *x, const float *weight, float *out, int n, float eps);
+
+// gguf_cuda_layernorm LayerNorm+bias on GPU: (x-mean)/sqrt(var+eps)*w + b
+int gguf_cuda_layernorm(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, const float *x, const float *weight, const float *bias, float *out, int n, float eps);
+
+// gguf_cuda_gelu tanh-approx GELU in-place on a host buffer
+int gguf_cuda_gelu(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, float *x, int n);
+
+// gguf_cuda_layernorm_resid: LayerNorm+bias of d_resid into d_vec, then DtoH dst (Phi-2 residency)
+int gguf_cuda_layernorm_resid(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_ln, gguf_matmul_pool_t *pool, CUdeviceptr d_weight, CUdeviceptr d_bias, float *dst, int n, float eps);
+
+// gguf_cuda_resid_add: d_resid += delta (host), residual stays on device
+int gguf_cuda_resid_add(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_add, gguf_matmul_pool_t *pool, const float *delta, int n);
+
+// gguf_cuda_logits_from_device_layernorm: LayerNorm+bias(d_resid) + lm_head; DtoH only logits (Phi-2)
+int gguf_cuda_logits_from_device_layernorm( cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_ln, gguf_matmul_pool_t *pool, CUdeviceptr d_out_norm_w, CUdeviceptr d_out_norm_b, CUdeviceptr d_head, float *logits, int vocab, int embd, float eps );
 
 // gguf_cuda_rope_heads RoPE for nHeads heads (cos/sin on CPU, rotate on GPU)
 int gguf_cuda_rope_heads(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, float *v, const float *cos_tbl, const float *sin_tbl, int nheads, int head_dim, int half);

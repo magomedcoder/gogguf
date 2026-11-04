@@ -20,7 +20,7 @@ import (
 //   - mla_attn kernel (one block per head): q_nope absorb through k_b, QK over latent K with online softmax, weighted latent V, projection through v_b - one launch for all heads.
 //   - k_b / v_b are uploaded once as FP32 device matrices (weight cache + LRU, see weight_cache.go) via a loader that is only invoked on a cache miss, so the hot path does not call Store.Floats.
 //
-// Host keeps: MLA projections (matmul on GPU through MatMulInto), YaRN/partial RoPE of q_pe and k_pe (CPU, applied before the call), RMSNorms. Limits: kvLora <= 1024, kvLora+rope <= 1280, seqLen <= maxSeq.
+// Host keeps: MLA projections (matmul on GPU through MatMulInto), RMSNorms. YaRN/partial RoPE of q_pe/k_pe uses ApplyRoPEHeadsScaled (rope_heads + RoPECosSinScaled) on device before the call, with CPU fallback. Limits: kvLora <= 1024, kvLora+rope <= 1280, seqLen <= maxSeq.
 
 // HasMLA reports whether the mla_attn kernel is loaded.
 func (b *Backend) HasMLA() bool { return b.hasMLA }

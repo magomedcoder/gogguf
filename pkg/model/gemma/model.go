@@ -31,7 +31,7 @@ type Model struct {
 	gpuLayers  []gpuresid.Tensors // layer weight names for fused paths
 	layerQuant []bool             // layer fully in supported fused quant
 
-	residency bool // fused QKV+attention decode (Gemma 1 only; hidden stays on host, see initResidency)
+	residency bool // device-resident hidden across layers (see initResidency)
 	decode    gpuresid.DecodeFlags
 }
 
@@ -126,6 +126,8 @@ func (m *Model) Config() Config { return m.cfg }
 func (m *Model) ResetCache() {
 	m.cache.Reset()
 	m.decode.GPUKVStale = false
+	m.decode.CPUKVHollow = false
+	m.decode.ResidDevice = false
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -163,16 +165,9 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 	} else {
 		for i, id := range tokenIDs {
 			pos := startPos + i
-			if err := m.embed(id); err != nil {
+			if err := m.forwardToken(id, pos); err != nil {
 				return nil, err
 			}
-
-			for layer := range m.cfg.NumLayers {
-				if err := m.forwardBlock(layer, pos); err != nil {
-					return nil, fmt.Errorf("gemma: layer %d pos %d: %w", layer, pos, err)
-				}
-			}
-			m.cache.Advance()
 		}
 
 		if err := m.logitsFinish(); err != nil {
@@ -219,6 +214,23 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 	return out, nil
 }
 
+func (m *Model) forwardToken(tokenID, pos int) error {
+	if err := m.embed(tokenID); err != nil {
+		return err
+	}
+
+	m.uploadHidden()
+
+	for layer := range m.cfg.NumLayers {
+		if err := m.forwardBlock(layer, pos); err != nil {
+			return fmt.Errorf("gemma: layer %d pos %d: %w", layer, pos, err)
+		}
+	}
+	m.cache.Advance()
+
+	return nil
+}
+
 func (m *Model) embed(tokenID int) error {
 	if err := m.embedRaw(tokenID); err != nil {
 		return err
@@ -235,6 +247,24 @@ func (m *Model) embedRaw(tokenID int) error {
 func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
+	onGPU := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
+	usedQKVResidency := false
+
+	if m.decode.ResidDevice {
+		err := m.forwardBlockDevice(layer, pos, ln)
+		if err == nil {
+			return nil
+		}
+
+		if m.decode.CPUKVHollow {
+			m.ResetCache()
+			return fmt.Errorf("gemma: layer %d residency failed without CPU KV mirror: %w", layer, err)
+		}
+
+		if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {
+			return rerr
+		}
+	}
 
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
@@ -242,14 +272,20 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 	qDim := m.cfg.NumHeads * m.cfg.HeadDim
 	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
-	onGPU := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
-	usedQKVResidency := false
 
 	m.prepareSWAAppend(layer, 1)
 
-	// Gemma 1 only (m.residency): fused QKV+RoPE+attention reads the GPU KV-cache, so it must be complete
-	if m.residency && onGPU && !m.decode.GPUKVStale {
-		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn); err == nil {
+	// fused QKV+RoPE+attention reads the GPU KV-cache, so it must be complete
+	if m.residency && onGPU && !m.decode.GPUKVStale && gpuresid.QKVResidencyEnabled() {
+		seqLen := m.cache.Len() + 1
+		if m.cfg.IsSWALayer(layer) && m.cfg.SlidingWindow > 0 {
+			have := m.cache.LayerLen(layer)
+			seqLen = have + 1
+			if seqLen > m.cfg.SlidingWindow {
+				seqLen = m.cfg.SlidingWindow
+			}
+		}
+		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn, seqLen); err == nil {
 			if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
 				return err
 			}
@@ -291,6 +327,13 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 
 		if err := m.attentionScoresInto(m.scratch.attn, m.scratch.q, k, v, m.scratch.scores, attnSeq, layer); err != nil {
 			return err
+		}
+	}
+
+	// fused AttnFFN (WO + residual + GeGLU) when residency flags allow and attn is on host
+	if onGPU && gpuresid.AttnFFNResidencyEnabled() && m.fused != nil {
+		if err := m.attnFFNGPU(layer, ln, m.scratch.x, m.scratch.attn); err == nil {
+			return nil
 		}
 	}
 
@@ -396,13 +439,25 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 }
 
 func (m *Model) logitsFinish() error {
+	if m.decode.ResidDevice && m.fused != nil {
+		if err := m.logitsDevice(); err == nil {
+			m.decode.ResidDevice = false
+			return nil
+		}
+
+		if err := m.syncHiddenFromDevice(); err != nil {
+			return err
+		}
+		m.recoverLogits()
+	}
+
 	return m.logitsFromLast(m.scratch.x)
 }
 
 // logitsFromLast: lm_head on GPU (hidden uploaded once) when enabled, else on host
 func (m *Model) logitsFromLast(x []float32) error {
 	if m.decode.LogitsOnGPU && m.fused != nil {
-		if err := m.logitsDevice(x); err == nil {
+		if err := m.logitsDeviceFromHost(x); err == nil {
 			return nil
 		}
 

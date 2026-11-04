@@ -40,6 +40,38 @@ func TestRoPEHeadsGPU(t *testing.T) {
 	}
 }
 
+func TestRoPEHeadsScaledYaRNGPU(t *testing.T) {
+	b, err := Open()
+	if err != nil {
+		t.Skip("CUDA unavailable:", err)
+	}
+
+	if !b.hasRoPE {
+		t.Skip("CUDA rope kernel unavailable")
+	}
+
+	defer b.Close()
+
+	headDim := 4
+	nHeads := 1
+	scale := compute.RoPEScale{FreqScale: 0.25, AttnFactor: 1.3}
+	v := []float32{1, 0.25, -0.5, 0.75}
+	want := make([]float32, len(v))
+	copy(want, v)
+
+	compute.ApplyRoPEPartialScaled(want, 5, 10000, headDim, scale)
+
+	if err := b.ApplyRoPEHeadsScaled(v, nHeads, headDim, 5, 10000, scale); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(v[i]-want[i])) > 1e-4 {
+			t.Fatalf("[%d] dev = %v cpu=%v", i, v[i], want[i])
+		}
+	}
+}
+
 func TestRoPEHeadsNormGPU(t *testing.T) {
 	b, err := Open()
 	if err != nil {

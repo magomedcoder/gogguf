@@ -101,8 +101,20 @@ func (b *Backend) RMSNormInto(_, _, _ []float32, _ float32) error {
 	return unavailable("RMSNormInto")
 }
 
+func (b *Backend) LayerNormBiasInto(_, _, _, _ []float32, _ float32) error {
+	return unavailable("LayerNormBiasInto")
+}
+
+func (b *Backend) GELUInPlace([]float32) error {
+	return unavailable("GELUInPlace")
+}
+
 func (b *Backend) ApplyRoPEHeads([]float32, int, int, int, float32) error {
 	return unavailable("ApplyRoPEHeads")
+}
+
+func (b *Backend) ApplyRoPEHeadsScaled([]float32, int, int, int, float32, compute.RoPEScale) error {
+	return unavailable("ApplyRoPEHeadsScaled")
 }
 
 func (b *Backend) ApplyRoPEHeadsNorm([]float32, int, int, int, float32) error {
@@ -112,6 +124,14 @@ func (b *Backend) ApplyRoPEHeadsNorm([]float32, int, int, int, float32) error {
 func (b *Backend) SwiGLUInPlace(_, _ []float32) error {
 	return unavailable("SwiGLUInPlace")
 }
+
+// SoftcapInPlace runs on host (logits already DtoH); no Metal kernel required
+func (b *Backend) SoftcapInPlace(x []float32, softcap float32) error {
+	compute.SoftcapInPlace(x, softcap)
+	return nil
+}
+
+func (b *Backend) SetAttnSoftcap(float32) {}
 
 func (b *Backend) FFNSwiGLUCached(_, _, _ string, _, _, _, _, _ []float32, _, _ int) error {
 	return unavailable("FFNSwiGLUCached")
@@ -149,6 +169,10 @@ func (b *Backend) AttnFFNResidualQuantCached(_ dtype.DType, _, _, _, _, _ string
 	return unavailable("AttnFFNResidualQuantCached")
 }
 
+func (b *Backend) AttnFFNResidualGeGLUQuantCached(_ dtype.DType, _, _, _, _, _, _, _ string, _, _, _, _ []byte, _, _, _, _, _ []float32, _, _, _ int, _ float32) error {
+	return unavailable("AttnFFNResidualGeGLUQuantCached")
+}
+
 func (b *Backend) QKVRoPEAttentionQuantCached(_ dtype.DType, _ compute.RoPEMode, _, _, _, _, _, _ string, _, _, _ []byte, _, _, _, _, _, _, _, _, _ []float32, _, _, _, _, _, _, _ int, _ float32) error {
 	return unavailable("QKVRoPEAttentionQuantCached")
 }
@@ -172,6 +196,18 @@ func (b *Backend) HiddenDownload([]float32) error {
 
 func (b *Backend) LogitsFromDevice(dtype.DType, string, []float32, string, []byte, []float32, []float32, int, int, float32) error {
 	return unavailable("LogitsFromDevice")
+}
+
+func (b *Backend) LayerNormResidInto([]float32, []float32, []float32, string, string, float32) error {
+	return unavailable("LayerNormResidInto")
+}
+
+func (b *Backend) ResidAdd([]float32) error {
+	return unavailable("ResidAdd")
+}
+
+func (b *Backend) LogitsFromDeviceLayerNorm(dtype.DType, string, string, []float32, []float32, string, []byte, []float32, []float32, int, int, float32) error {
+	return unavailable("LogitsFromDeviceLayerNorm")
 }
 
 func (b *Backend) AttentionScoresInto(_, _, _, _, _ []float32, _, _, _, _ int) error {

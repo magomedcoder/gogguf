@@ -1513,7 +1513,7 @@ Q8K_EXIT:
 const matmulKernelsBody = matmulVecKernel + matmulMatF32Kernel + matmulQ8Kernel + matmulMatQ8Kernel + matmulQ4Kernel + matmulQ4KKernel + matmulQ5KKernel + matmulQ6KKernel +
 	matmulQ41Kernel + matmulQ50Kernel + matmulQ51Kernel + matmulQ2KKernel + matmulQ3KKernel + matmulQ8KKernel
 
-// opsKernelsBody - RMSNorm, RoPE, SwiGLU, attention, softmax, add.
+// opsKernelsBody - RMSNorm, LayerNorm, RoPE, SwiGLU, GeGLU, GELU, attention, softmax, add.
 // Comments inside PTX must be ASCII only: ptxas rejects non-ASCII.
 const opsKernelsBody = `
 // rmsnorm: 1 block - sum on tid0, apply in parallel (stride)
@@ -1583,6 +1583,105 @@ RN_APPLY:
     bra RN_APPLY;
 
 RN_EXIT:
+    ret;
+}
+
+// layernorm: (x-mean)/sqrt(var+eps)*w + b -> out (Phi-2 / GPT-2 style)
+// 1 block: tid0 computes mean and inv_std, then all threads apply (same pattern as rmsnorm)
+.visible .entry layernorm(
+    .param .u64 param_x,
+    .param .u64 param_weight,
+    .param .u64 param_bias,
+    .param .u64 param_out,
+    .param .u32 param_n,
+    .param .f32 param_eps
+)
+{
+    .reg .pred      %p<3>;
+    .reg .b32       %r<10>;
+    .reg .b64       %rd<18>;
+    .reg .f32       %f<12>;
+    .shared .align 4 .b32 mean_s;
+    .shared .align 4 .b32 inv_s;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ntid.x;
+    ld.param.u32    %r3, [param_n];
+    ld.param.u64    %rd1, [param_x];
+    ld.param.u64    %rd2, [param_weight];
+    ld.param.u64    %rd3, [param_bias];
+    ld.param.u64    %rd4, [param_out];
+    ld.param.f32    %f1, [param_eps];
+
+    setp.ne.u32     %p0, %r1, 0;
+    @%p0            bra LN_WAIT;
+
+    // mean = sum(x)/n
+    mov.f32         %f2, 0f00000000;
+    mov.u32         %r4, 0;
+
+LN_SUM:
+    setp.ge.u32     %p1, %r4, %r3;
+    @%p1            bra LN_MEAN;
+    mul.wide.u32    %rd5, %r4, 4;
+    add.u64         %rd6, %rd1, %rd5;
+    ld.global.f32   %f3, [%rd6];
+    add.f32         %f2, %f2, %f3;
+    add.u32         %r4, %r4, 1;
+    bra LN_SUM;
+
+LN_MEAN:
+    cvt.rn.f32.u32  %f4, %r3;
+    div.rn.f32      %f5, %f2, %f4;
+    st.shared.f32   [mean_s], %f5;
+
+    // var = sum((x-mean)^2)/n; inv = rsqrt(var+eps)
+    mov.f32         %f2, 0f00000000;
+    mov.u32         %r4, 0;
+
+LN_VAR:
+    setp.ge.u32     %p1, %r4, %r3;
+    @%p1            bra LN_INV;
+    mul.wide.u32    %rd5, %r4, 4;
+    add.u64         %rd6, %rd1, %rd5;
+    ld.global.f32   %f3, [%rd6];
+    sub.f32         %f3, %f3, %f5;
+    fma.rn.f32      %f2, %f3, %f3, %f2;
+    add.u32         %r4, %r4, 1;
+    bra LN_VAR;
+
+LN_INV:
+    div.rn.f32      %f2, %f2, %f4;
+    add.f32         %f2, %f2, %f1;
+    rsqrt.approx.f32 %f6, %f2;
+    st.shared.f32   [inv_s], %f6;
+
+LN_WAIT:
+    bar.sync        0;
+    ld.shared.f32   %f5, [mean_s];
+    ld.shared.f32   %f6, [inv_s];
+    mov.u32         %r4, %r1;
+
+LN_APPLY:
+    setp.ge.u32     %p2, %r4, %r3;
+    @%p2            bra LN_EXIT;
+    mul.wide.u32    %rd5, %r4, 4;
+    add.u64         %rd6, %rd1, %rd5;
+    ld.global.f32   %f3, [%rd6];
+    sub.f32         %f3, %f3, %f5;
+    mul.f32         %f3, %f3, %f6;
+    add.u64         %rd7, %rd2, %rd5;
+    ld.global.f32   %f7, [%rd7];
+    mul.f32         %f3, %f3, %f7;
+    add.u64         %rd8, %rd3, %rd5;
+    ld.global.f32   %f8, [%rd8];
+    add.f32         %f3, %f3, %f8;
+    add.u64         %rd9, %rd4, %rd5;
+    st.global.f32   [%rd9], %f3;
+    add.u32         %r4, %r4, %r2;
+    bra LN_APPLY;
+
+LN_EXIT:
     ret;
 }
 
@@ -1832,6 +1931,116 @@ SG_EXIT:
     st.global.f32   [%rd4], %f17;
 
 GG_EXIT:
+    ret;
+}
+
+// gelu: standalone tanh-approx GELU in-place (Phi-2 FFN; same math as geglu without *up)
+.visible .entry gelu(
+    .param .u64 param_x,
+    .param .u32 param_n
+)
+{
+    .reg .pred      %p<1>;
+    .reg .b32       %r<8>;
+    .reg .b64       %rd<6>;
+    .reg .f32       %f<18>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_n];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra GL_EXIT;
+
+    ld.param.u64    %rd1, [param_x];
+    mul.wide.u32    %rd2, %r4, 4;
+    add.u64         %rd3, %rd1, %rd2;
+    ld.global.f32   %f1, [%rd3];
+
+    // inner = 0.7978845608 * (g + 0.044715*g^3)
+    mul.f32         %f3, %f1, %f1;
+    mul.f32         %f3, %f3, %f1;
+    mov.f32         %f4, 0f3D372713;
+    mul.f32         %f3, %f3, %f4;
+    add.f32         %f3, %f3, %f1;
+    mov.f32         %f5, 0f3F4C422A;
+    mul.f32         %f3, %f3, %f5;
+
+    // e = exp(2*inner) = ex2(2*inner*log2(e))
+    add.f32         %f6, %f3, %f3;
+    mov.f32         %f7, 0f3FB8AA3B;
+    mul.f32         %f6, %f6, %f7;
+    ex2.approx.f32  %f8, %f6;
+
+    // tanh = 1 - 2/(e+1)
+    mov.f32         %f9, 0f3F800000;
+    add.f32         %f10, %f8, %f9;
+    mov.f32         %f11, 0f40000000;
+    div.rn.f32      %f12, %f11, %f10;
+    sub.f32         %f13, %f9, %f12;
+
+    // gelu(g) = 0.5*g*(1+tanh)
+    add.f32         %f14, %f13, %f9;
+    mul.f32         %f15, %f1, %f14;
+    mov.f32         %f16, 0f3F000000;
+    mul.f32         %f15, %f15, %f16;
+    st.global.f32   [%rd3], %f15;
+
+GL_EXIT:
+    ret;
+}
+
+// softcap: x = softcap * tanh(x / softcap) (Gemma2 attention scores / logits)
+// tanh(z) = 1 - 2/(exp(2z)+1), exp via ex2.approx (same as geglu)
+.visible .entry softcap(
+    .param .u64 param_x,
+    .param .u32 param_n,
+    .param .f32 param_softcap
+)
+{
+    .reg .pred      %p<1>;
+    .reg .b32       %r<8>;
+    .reg .b64       %rd<6>;
+    .reg .f32       %f<16>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_n];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra SC_EXIT;
+
+    ld.param.u64    %rd1, [param_x];
+    ld.param.f32    %f1, [param_softcap];
+
+    mul.wide.u32    %rd2, %r4, 4;
+    add.u64         %rd3, %rd1, %rd2;
+    ld.global.f32   %f2, [%rd3];
+
+    // z = x / softcap
+    div.rn.f32      %f3, %f2, %f1;
+
+    // e = exp(2z) = ex2(2z * log2(e))
+    add.f32         %f4, %f3, %f3;
+    mov.f32         %f5, 0f3FB8AA3B;
+    mul.f32         %f4, %f4, %f5;
+    ex2.approx.f32  %f6, %f4;
+
+    // tanh = 1 - 2/(e+1)
+    mov.f32         %f7, 0f3F800000;
+    add.f32         %f8, %f6, %f7;
+    mov.f32         %f9, 0f40000000;
+    div.rn.f32      %f10, %f9, %f8;
+    sub.f32         %f11, %f7, %f10;
+
+    mul.f32         %f12, %f11, %f1;
+    st.global.f32   [%rd3], %f12;
+
+SC_EXIT:
     ret;
 }
 
@@ -2570,6 +2779,43 @@ SM_EXIT:
     st.global.f32   [%rd4], %f1;
 
 AI_EXIT:
+    ret;
+}
+
+// add_scaled_inplace: a[i] += scale * b[i] (MoE expert accumulate into residual)
+.visible .entry add_scaled_inplace(
+    .param .u64 param_a,
+    .param .u64 param_b,
+    .param .f32 param_scale,
+    .param .u32 param_n
+)
+{
+    .reg .pred      %p<2>;
+    .reg .b32       %r<8>;
+    .reg .b64       %rd<10>;
+    .reg .f32       %f<5>;
+
+    mov.u32         %r1, %tid.x;
+    mov.u32         %r2, %ctaid.x;
+    mov.u32         %r3, %ntid.x;
+    mad.lo.u32      %r4, %r2, %r3, %r1;
+
+    ld.param.u32    %r5, [param_n];
+    setp.ge.u32     %p0, %r4, %r5;
+    @%p0            bra ASI_EXIT;
+
+    ld.param.u64    %rd1, [param_a];
+    ld.param.u64    %rd2, [param_b];
+    ld.param.f32    %f3, [param_scale];
+    mul.wide.u32    %rd3, %r4, 4;
+    add.u64         %rd4, %rd1, %rd3;
+    add.u64         %rd5, %rd2, %rd3;
+    ld.global.f32   %f1, [%rd4];
+    ld.global.f32   %f2, [%rd5];
+    mad.rn.f32      %f1, %f3, %f2, %f1;
+    st.global.f32   [%rd4], %f1;
+
+ASI_EXIT:
     ret;
 }
 

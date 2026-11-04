@@ -77,3 +77,65 @@ func (c *MLACache) Reset() {
 		c.layers[i].n = 0
 	}
 }
+
+// MHACache stores full per-head K/V for legacy attn_kv_b (not absorbed MLA latent cache).
+// K head = qk_nope+rope, V head = v_head (may differ).
+type MHACache struct {
+	layers []mlaLayer
+	kDim   int
+	vDim   int
+	maxSeq int
+}
+
+func NewMHACache(cfg Config) *MHACache {
+	headK := cfg.QKNopeDim + cfg.RopeDim
+	kDim := cfg.NumHeads * headK
+	vDim := cfg.NumHeads * cfg.VHeadDim
+	layers := make([]mlaLayer, cfg.NumLayers)
+	for i := range layers {
+		layers[i].k = make([]float32, cfg.ContextLength*kDim)
+		layers[i].v = make([]float32, cfg.ContextLength*vDim)
+	}
+
+	return &MHACache{
+		layers: layers,
+		kDim:   kDim,
+		vDim:   vDim,
+		maxSeq: cfg.ContextLength,
+	}
+}
+
+func (c *MHACache) Append(layer int, k, v []float32) error {
+	if layer < 0 || layer >= len(c.layers) {
+		return fmt.Errorf("deepseek2: invalid MHA cache layer %d", layer)
+	}
+
+	l := &c.layers[layer]
+	if l.n >= c.maxSeq {
+		return fmt.Errorf("deepseek2: MHA KV overflow layer=%d maxSeq=%d", layer, c.maxSeq)
+	}
+
+	copy(l.k[l.n*c.kDim:(l.n+1)*c.kDim], k)
+	copy(l.v[l.n*c.vDim:(l.n+1)*c.vDim], v)
+	l.n++
+
+	return nil
+}
+
+func (c *MHACache) KLayer(layer int) []float32 {
+	l := &c.layers[layer]
+
+	return l.k[:l.n*c.kDim]
+}
+
+func (c *MHACache) VLayer(layer int) []float32 {
+	l := &c.layers[layer]
+
+	return l.v[:l.n*c.vDim]
+}
+
+func (c *MHACache) Reset() {
+	for i := range c.layers {
+		c.layers[i].n = 0
+	}
+}

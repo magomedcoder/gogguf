@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
+	"github.com/magomedcoder/gogguf/pkg/exec/moe"
 )
 
 // initFused sets up fused GPU layer paths. Mistral / Qwen2: NeoX RoPE, no QK-norm
@@ -56,18 +57,18 @@ func (m *Model) initFused() {
 }
 
 // initResidency enables device-resident hidden state.
-// MoE layers run on host (experts), so residency is only for dense models.
-//
-// MoE (P1 deferred): full device-resident MoE layers need batched expert dispatch (router top-k, then per-expert FFN and accumulation on device) and n_batch>1 support.
-// Until then MoE layers keep the per-token ExpertFFN path (n_batch=1, hidden state on host); only out_norm + lm_head may run on GPU via gpuresid.LogitsFromHost when ngl covers every layer.
+// MoE (n_batch=1): QKVAttn + AttnOutNorm + router DtoH(n_expert) + ExpertFFNAccumulate (+ shared expert).
+// PrefillBatchSize stays 1 for MoE; n_batch>1 expert dispatch remains deferred.
 func (m *Model) initResidency() {
 	if m.fused == nil {
 		return
 	}
 
 	if m.cfg.isMoE() {
-		m.initMoELogits()
-		return
+		if !m.moeGPU || !gpuresid.MoEResidSupported(m.dev) {
+			m.initMoELogits()
+			return
+		}
 	}
 
 	if !gpuresid.AllLayersOffloaded(m.ngl, m.cfg.NumLayers) {
@@ -75,9 +76,15 @@ func (m *Model) initResidency() {
 	}
 	// SWA: fused QKV attends over the full GPU KV-cache; it does not apply the window
 	if m.cfg.SlidingWindow > 0 && m.cfg.SlidingWindow < m.cfg.ContextLength {
+		if m.cfg.isMoE() {
+			m.initMoELogits()
+		}
 		return
 	}
 	if !gpuresid.CanEnableResidency(m.dev, m.layerQuant) {
+		if m.cfg.isMoE() {
+			m.initMoELogits()
+		}
 		return
 	}
 	m.residency = true
@@ -105,7 +112,7 @@ func (m *Model) uploadHidden() {
 	m.decode.ResidDevice = true
 }
 
-// forwardBlockDevice runs the layer on GPU over resident hidden state.
+// forwardBlockDevice runs a dense layer on GPU over resident hidden state.
 // Skips host k/v/attn mirrors (GPU KV + d_vec are source of truth) to cut decode PCIe.
 func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 	if err := m.qkvAttnGPU(layer, pos, ln, nil, nil, nil, nil); err != nil {
@@ -118,6 +125,62 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 	m.decode.CPUKVHollow = true
 
 	return m.attnFFNGPU(layer, ln, nil, nil)
+}
+
+// forwardBlockDeviceMoE: QKVAttn resid + WO/norm snapshot + router top-k + ExpertFFNAccumulate (+ shared)
+func (m *Model) forwardBlockDeviceMoE(layer, pos int, ln layerNorms, lt layerTensors) error {
+	if err := m.qkvAttnGPU(layer, pos, ln, nil, nil, nil, nil); err != nil {
+		return err
+	}
+
+	if err := m.cache.Bump(layer, 1); err != nil {
+		return err
+	}
+	m.decode.CPUKVHollow = true
+
+	if err := m.fused.AttnOutNorm(m.gpuLayers[layer], m.fusedDims, ln.ffnNorm, nil, nil); err != nil {
+		return err
+	}
+
+	embd := m.cfg.EmbeddingDim
+	nExp := m.cfg.ExpertCount
+	ffn := m.cfg.expertFFN()
+	if err := m.fused.MatMulFromMoEHidden(lt.gateInp, nExp, embd, m.scratch.router[:nExp]); err != nil {
+		return err
+	}
+
+	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, m.cfg.MoENormWeights, m.cfg.ExpertWeightScale)
+	for i, ei := range idxs {
+		if err := m.fused.ExpertFFNAccumulate(lt.gateExps, lt.upExps, lt.downExps, ei, weights[i], embd, ffn); err != nil {
+			return err
+		}
+	}
+
+	return m.sharedExpertDevice(lt)
+}
+
+// sharedExpertDevice adds the shared expert into d_resid from the MoE snapshot
+func (m *Model) sharedExpertDevice(lt layerTensors) error {
+	if lt.gateShexp == "" {
+		return nil
+	}
+
+	embd := m.cfg.EmbeddingDim
+	shared := m.cfg.SharedFFN
+	if shared <= 0 {
+		shared = m.cfg.FFNHidden
+	}
+
+	gateScale := float32(1)
+	if lt.gateInpShexp != "" {
+		var gateInp [1]float32
+		if err := m.fused.MatMulFromMoEHidden(lt.gateInpShexp, 1, embd, gateInp[:]); err != nil {
+			return err
+		}
+		gateScale = siluDiv(gateInp[0])
+	}
+
+	return m.fused.FFNNamedAccumulate(lt.gateShexp, lt.upShexp, lt.downShexp, gateScale, embd, shared)
 }
 
 // qkvAttnGPU: QKV + RoPE + KV append + attention on GPU.

@@ -106,6 +106,7 @@ var (
 var (
 	AttentionScoresInto            = attention.AttentionScoresInto
 	AttentionScoresIntoSoftcap     = attention.AttentionScoresIntoSoftcap
+	AttentionScoresHVInto          = attention.AttentionScoresHVInto
 	AttentionScoresBatchCausalInto = attention.AttentionScoresBatchCausalInto
 	AttentionMLAAbsorbedInto       = attention.AttentionMLAAbsorbedInto
 	SoftmaxInPlace                 = attention.SoftmaxInPlace

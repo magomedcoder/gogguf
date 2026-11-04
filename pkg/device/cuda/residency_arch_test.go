@@ -10,6 +10,79 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/dtype"
 )
 
+// fused AttnFFN residual with GeGLU (Gemma) on Q8_0 matches CPU compute path
+func TestAttnFFNResidualGeGLUQuantQ8(t *testing.T) {
+	b, err := Open()
+	if err != nil {
+		t.Skip(err)
+	}
+	defer b.Close()
+
+	if !b.hasGeGLU || !b.hasRMS || !b.hasAdd {
+		t.Skip("no geglu/rmsnorm/add kernels")
+	}
+
+	embd, attnDim, ffn := 64, 64, 128
+	eps := float32(1e-6)
+	woRaw, wo := makeQ8Matrix(t, embd, attnDim, 1)
+	gateRaw, gate := makeQ8Matrix(t, ffn, embd, 2)
+	upRaw, up := makeQ8Matrix(t, ffn, embd, 3)
+	downRaw, down := makeQ8Matrix(t, embd, ffn, 4)
+
+	x := make([]float32, embd)
+	attn := make([]float32, attnDim)
+	ffnNorm := make([]float32, embd)
+	for i := range x {
+		x[i] = float32(i%11)*0.05 - 0.2
+		ffnNorm[i] = 1
+	}
+
+	for i := range attn {
+		attn[i] = float32(i%7)*0.03 - 0.1
+	}
+
+	want := append([]float32(nil), x...)
+	h := make([]float32, embd)
+	if err := compute.MatMulVecInto(wo, embd, attnDim, attn, h); err != nil {
+		t.Fatal(err)
+	}
+
+	compute.AddInPlace(want, h)
+	normed := make([]float32, embd)
+	if err := compute.RMSNormInto(normed, want, ffnNorm, eps); err != nil {
+		t.Fatal(err)
+	}
+
+	gateV, err := compute.MatMulVec(gate, ffn, embd, normed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	upV, err := compute.MatMulVec(up, ffn, embd, normed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	compute.GeGLUInPlace(gateV, upV)
+	downV, err := compute.MatMulVec(down, embd, ffn, gateV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compute.AddInPlace(want, downV)
+
+	got := append([]float32(nil), x...)
+	if err := b.AttnFFNResidualGeGLUQuantCached(dtype.Q8_0, "wo", "norm", "", "", "g", "u", "d",
+		woRaw, gateRaw, upRaw, downRaw, ffnNorm, nil, nil, got, attn, embd, attnDim, ffn, eps); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(got[i]-want[i])) > 3e-3 {
+			t.Fatalf("x[%d]=%v want %v", i, got[i], want[i])
+		}
+	}
+}
+
 // fused FFN GeGLU (Gemma) on Q8_0 weights matches CPU path
 func TestFFNGeGLUQuantQ8(t *testing.T) {
 	b, err := Open()

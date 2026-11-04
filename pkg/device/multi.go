@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/dtype"
 )
 
@@ -354,8 +355,20 @@ func (m *MultiBackend) RMSNormInto(dst, x, weight []float32, eps float32) error 
 	return m.current().RMSNormInto(dst, x, weight, eps)
 }
 
+func (m *MultiBackend) LayerNormBiasInto(dst, x, weight, bias []float32, eps float32) error {
+	return m.current().LayerNormBiasInto(dst, x, weight, bias, eps)
+}
+
+func (m *MultiBackend) GELUInPlace(x []float32) error {
+	return m.current().GELUInPlace(x)
+}
+
 func (m *MultiBackend) ApplyRoPEHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error {
 	return m.current().ApplyRoPEHeads(v, nHeads, headDim, pos, freqBase)
+}
+
+func (m *MultiBackend) ApplyRoPEHeadsScaled(v []float32, nHeads, headDim, pos int, freqBase float32, scale compute.RoPEScale) error {
+	return m.current().ApplyRoPEHeadsScaled(v, nHeads, headDim, pos, freqBase, scale)
 }
 
 func (m *MultiBackend) ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error {
@@ -364,6 +377,16 @@ func (m *MultiBackend) ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int,
 
 func (m *MultiBackend) SwiGLUInPlace(gate, up []float32) error {
 	return m.current().SwiGLUInPlace(gate, up)
+}
+
+func (m *MultiBackend) SoftcapInPlace(x []float32, softcap float32) error {
+	return m.current().SoftcapInPlace(x, softcap)
+}
+
+func (m *MultiBackend) SetAttnSoftcap(softcap float32) {
+	for _, d := range m.devs {
+		d.SetAttnSoftcap(softcap)
+	}
 }
 
 func (m *MultiBackend) FFNSwiGLUCached(gateName, upName, downName string, gateW, upW, downW, x, out []float32, embd, ffn int) error {
@@ -392,6 +415,10 @@ func (m *MultiBackend) FFNGeGLUQuantCached(t dtype.DType, gateName, upName, down
 
 func (m *MultiBackend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
 	return m.current().AttnFFNResidualQuantCached(t, woName, ffnNormName, gateName, upName, downName, woRaw, gateRaw, upRaw, downRaw, ffnNorm, x, attn, embd, attnDim, ffn, eps)
+}
+
+func (m *MultiBackend) AttnFFNResidualGeGLUQuantCached(t dtype.DType, woName, ffnNormName, postAttnNormName, postFFNNormName, gateName, upName, downName string, woRaw, gateRaw, upRaw, downRaw []byte, ffnNorm, postAttnNorm, postFFNNorm, x, attn []float32, embd, attnDim, ffn int, eps float32) error {
+	return m.current().AttnFFNResidualGeGLUQuantCached(t, woName, ffnNormName, postAttnNormName, postFFNNormName, gateName, upName, downName, woRaw, gateRaw, upRaw, downRaw, ffnNorm, postAttnNorm, postFFNNorm, x, attn, embd, attnDim, ffn, eps)
 }
 
 // QKVRoPEAttentionCached routes layer to its device (boundaries - hidden transfer)
@@ -473,6 +500,72 @@ func (m *MultiBackend) HiddenDownload(dst []float32) error {
 
 func (m *MultiBackend) LogitsFromDevice(t dtype.DType, normName string, norm []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error {
 	return m.current().LogitsFromDevice(t, normName, norm, headName, headRaw, headF32, logits, vocab, embd, eps)
+}
+
+func (m *MultiBackend) LayerNormResidInto(dst, weight, bias []float32, weightName, biasName string, eps float32) error {
+	return m.current().LayerNormResidInto(dst, weight, bias, weightName, biasName, eps)
+}
+
+func (m *MultiBackend) ResidAdd(delta []float32) error {
+	return m.current().ResidAdd(delta)
+}
+
+func (m *MultiBackend) AttnOutResidualNormQuantCached(t dtype.DType, woName, ffnNormName string, woRaw []byte, ffnNorm, x, attn []float32, embd, attnDim int, eps float32) error {
+	mb, ok := AsMoEResidBackend(m.current())
+	if !ok {
+		return ErrHiddenUnavailable
+	}
+
+	return mb.AttnOutResidualNormQuantCached(t, woName, ffnNormName, woRaw, ffnNorm, x, attn, embd, attnDim, eps)
+}
+
+func (m *MultiBackend) MoEHiddenNorm(ffnNormName string, ffnNorm []float32, embd int, eps float32) error {
+	mb, ok := AsMoEResidBackend(m.current())
+	if !ok {
+		return ErrHiddenUnavailable
+	}
+
+	return mb.MoEHiddenNorm(ffnNormName, ffnNorm, embd, eps)
+}
+
+func (m *MultiBackend) MatMulVecFromMoEHiddenQuant(t dtype.DType, name string, raw []byte, rows, cols int, out []float32) error {
+	mb, ok := AsMoEResidBackend(m.current())
+	if !ok {
+		return ErrHiddenUnavailable
+	}
+
+	return mb.MatMulVecFromMoEHiddenQuant(t, name, raw, rows, cols, out)
+}
+
+func (m *MultiBackend) MatMulVecFromMoEHiddenF32(name string, matrix []float32, rows, cols int, out []float32) error {
+	mb, ok := AsMoEResidBackend(m.current())
+	if !ok {
+		return ErrHiddenUnavailable
+	}
+
+	return mb.MatMulVecFromMoEHiddenF32(name, matrix, rows, cols, out)
+}
+
+func (m *MultiBackend) FFNSwiGLUMoEAccumulateQuant(t dtype.DType, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, scale float32, embd, ffn int) error {
+	mb, ok := AsMoEResidBackend(m.current())
+	if !ok {
+		return ErrHiddenUnavailable
+	}
+
+	return mb.FFNSwiGLUMoEAccumulateQuant(t, gateName, upName, downName, gateRaw, upRaw, downRaw, scale, embd, ffn)
+}
+
+func (m *MultiBackend) ResidualAddScaled(src []float32, scale float32) error {
+	mb, ok := AsMoEResidBackend(m.current())
+	if !ok {
+		return ErrHiddenUnavailable
+	}
+
+	return mb.ResidualAddScaled(src, scale)
+}
+
+func (m *MultiBackend) LogitsFromDeviceLayerNorm(t dtype.DType, normWName, normBName string, normW, normB []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error {
+	return m.current().LogitsFromDeviceLayerNorm(t, normWName, normBName, normW, normB, headName, headRaw, headF32, logits, vocab, embd, eps)
 }
 
 func (m *MultiBackend) AttentionScoresInto(dst, q, k, v, scores []float32, seqLen, nHeads, nKVHeads, headDim int) error {

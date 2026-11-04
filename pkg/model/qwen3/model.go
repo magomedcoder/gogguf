@@ -327,10 +327,15 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 	gate := m.scratch.gate[:ffn]
 	up := m.scratch.up[:ffn]
 
-	// entire layer on device - attn_norm, QKV, attention, WO, FFN, and both residuals.
+	// entire layer on device - attn_norm, QKV, attention, WO, FFN/MoE, and residuals.
 	// host x is not read or updated.
 	if m.decode.ResidDevice {
-		err := m.forwardBlockDevice(layer, pos, ln)
+		var err error
+		if lt.moe {
+			err = m.forwardBlockDeviceMoE(layer, pos, ln, lt)
+		} else {
+			err = m.forwardBlockDevice(layer, pos, ln)
+		}
 		if err == nil {
 			return nil
 		}

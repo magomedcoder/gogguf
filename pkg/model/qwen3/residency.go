@@ -5,6 +5,7 @@ import (
 
 	"github.com/magomedcoder/gogguf/pkg/device"
 	"github.com/magomedcoder/gogguf/pkg/exec/gpuresid"
+	"github.com/magomedcoder/gogguf/pkg/exec/moe"
 )
 
 // initFused sets up shared fused GPU path wiring: Qwen3 - NeoX RoPE + QK-norm
@@ -52,16 +53,21 @@ func (m *Model) initFused() {
 	}
 }
 
-// initResidency enables device-resident hidden state: all layers on GPU required, fused QKV/residual paths and a single supported weight quant across all layers
-// MoE (P1 deferred): full device-resident MoE layers need batched expert dispatch (router top-k, then per-expert FFN and accumulation on device) and n_batch>1 support.
-// Until then MoE layers keep the per-token ExpertFFN path (n_batch=1, hidden state on host); only out_norm + lm_head may run on GPU via gpuresid.LogitsFromHost when ngl covers every layer.
+// initResidency enables device-resident hidden state: all layers on GPU required, fused QKV/residual paths and a single supported weight quant across all layers.
+// MoE (n_batch=1): QKVAttn + AttnOutNorm + router DtoH(n_expert) + ExpertFFNAccumulate into d_resid.
+// PrefillBatchSize stays 1 for MoE; n_batch>1 expert dispatch remains deferred.
 func (m *Model) initResidency() {
-	if m.cfg.ExpertCount > 0 {
-		if m.fused != nil && gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
-			m.decode.LogitsOnGPU = true
-		}
-
+	if m.fused == nil {
 		return
+	}
+
+	if m.cfg.ExpertCount > 0 {
+		if !m.moeGPU || !gpuresid.MoEResidSupported(m.dev) {
+			if gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName) {
+				m.decode.LogitsOnGPU = true
+			}
+			return
+		}
 	}
 
 	if !gpuresid.AllLayersOffloaded(m.ngl, m.cfg.NumLayers) {
@@ -78,7 +84,7 @@ func (m *Model) initResidency() {
 	m.decode.LogitsOnGPU = true
 }
 
-// forwardBlockDevice runs the layer on GPU over resident hidden state.
+// forwardBlockDevice runs a dense layer on GPU over resident hidden state.
 // Skips host k/v/attn mirrors (GPU KV + d_vec are source of truth) to cut decode PCIe.
 func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 	if err := m.qkvAttnGPU(layer, pos, ln, nil, nil, nil, nil); err != nil {
@@ -91,6 +97,38 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 	m.decode.CPUKVHollow = true
 
 	return m.attnFFNGPU(layer, ln, nil, nil)
+}
+
+// forwardBlockDeviceMoE: QKVAttn resid + WO/norm snapshot + router top-k on host + ExpertFFNAccumulate.
+func (m *Model) forwardBlockDeviceMoE(layer, pos int, ln layerNorms, lt layerTensors) error {
+	if err := m.qkvAttnGPU(layer, pos, ln, nil, nil, nil, nil); err != nil {
+		return err
+	}
+
+	if err := m.cache.Bump(layer, 1); err != nil {
+		return err
+	}
+	m.decode.CPUKVHollow = true
+
+	if err := m.fused.AttnOutNorm(m.gpuLayers[layer], m.fusedDims, ln.ffnNorm, nil, nil); err != nil {
+		return err
+	}
+
+	embd := m.cfg.EmbeddingDim
+	nExp := m.cfg.ExpertCount
+	ffn := m.cfg.expertFFN()
+	if err := m.fused.MatMulFromMoEHidden(lt.gateInp, nExp, embd, m.scratch.router[:nExp]); err != nil {
+		return err
+	}
+
+	idxs, weights := moe.TopKSoftmax(m.scratch.router[:nExp], m.cfg.ExpertUsedCount, m.cfg.MoENormWeights, m.cfg.ExpertWeightScale)
+	for i, ei := range idxs {
+		if err := m.fused.ExpertFFNAccumulate(lt.gateExps, lt.upExps, lt.downExps, ei, weights[i], embd, ffn); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // tryRecoverGPUKV rebuilds device KV from the CPU mirror without ResetCache (session stays).

@@ -22,13 +22,17 @@ type Model struct {
 	gpuMaxSeq    int
 	nBatch       int              // chunk prefill size (1 = per token); dense models only
 	fused        *gpuresid.Runner // fused GPU paths: FFN, MoE experts
-	moeGPU       []bool           // layer can run experts on GPU
+	fusedDims    gpuresid.Dims
+	gpuLayers    []gpuresid.Tensors
+	layerQuant   []bool
+	moeGPU       []bool // layer can run experts on GPU
+	residency    bool
 	scratch      scratch
 	layerNorms   []layerNorms
 	layerTensors []layerTensors
 	outNorm      []float32
 	lmHeadName   string
-	decode       gpuresid.DecodeFlags // LogitsOnGPU: out_norm + lm_head on GPU from final host hidden state
+	decode       gpuresid.DecodeFlags
 }
 
 // Load creates DeepSeek from weights
@@ -88,27 +92,6 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Mode
 	return m, nil
 }
 
-// initFused sets up GPU layer paths. DeepSeek v1: RoPE NORM, experts via ExpertFFN.
-//
-// MoE (P1 deferred): full device-resident MoE layers need batched expert dispatch (router top-k, then per-expert FFN and accumulation on device) and n_batch>1 support.
-// Until then MoE layers keep the per-token ExpertFFN path (n_batch=1, hidden state on host); only out_norm + lm_head may run on GPU via gpuresid.LogitsFromHost when ngl covers every layer.
-func (m *Model) initFused() {
-	if m.dev == nil || m.ngl <= 0 {
-		return
-	}
-
-	m.fused = gpuresid.New(m.weights, m.dev, device.RoPENorm)
-	m.decode.LogitsOnGPU = gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName)
-	m.moeGPU = make([]bool, m.cfg.NumLayers)
-	for i, lt := range m.layerTensors {
-		if !lt.moe {
-			continue
-		}
-
-		m.moeGPU[i] = m.fused.MoESupported(lt.gateExps, lt.upExps, lt.downExps)
-	}
-}
-
 func (m *Model) layerOnGPU(layer int) bool {
 	return m.fused != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers)
 }
@@ -132,6 +115,7 @@ func (m *Model) Config() Config {
 // ResetCache clears the KV-cache
 func (m *Model) ResetCache() {
 	m.cache.Reset()
+	m.decode.Clear()
 	if m.dev != nil {
 		m.dev.KVCacheReset()
 	}
@@ -202,6 +186,10 @@ func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
 		}
 	}
 
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return nil, err
+	}
+
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, m.outNorm, m.cfg.RMSNormEps); err != nil {
 		return nil, err
 	}
@@ -215,6 +203,8 @@ func (m *Model) forwardToken(tokenID, pos int) error {
 	if err := m.embedToken(tokenID); err != nil {
 		return err
 	}
+
+	m.uploadHidden()
 
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
 		if err := m.forwardBlock(layer, pos); err != nil {
@@ -232,6 +222,27 @@ func (m *Model) embedToken(tokenID int) error {
 func (m *Model) forwardBlock(layer int, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
+
+	if m.decode.ResidDevice {
+		var err error
+		if lt.moe {
+			err = m.forwardBlockDeviceMoE(layer, pos, ln, lt)
+		} else {
+			err = m.forwardBlockDevice(layer, pos, ln)
+		}
+		if err == nil {
+			return nil
+		}
+
+		if m.decode.CPUKVHollow {
+			m.ResetCache()
+			return fmt.Errorf("deepseek: layer %d residency failed without CPU KV mirror: %w", layer, err)
+		}
+
+		if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {
+			return rerr
+		}
+	}
 
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
 		return err
@@ -470,8 +481,19 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 	return dispatch.MatMulRawInto(m.weights, name, rows, cols, vec, out)
 }
 
-// logitsFromLast: lm_head on GPU (hidden uploaded once) when enabled, else on host
+// logitsFromLast: resid device / host lm_head on GPU when enabled, else on host
 func (m *Model) logitsFromLast(x []float32) error {
+	if m.decode.ResidDevice && m.decode.LogitsOnGPU && m.fused != nil {
+		if err := m.logitsDevice(); err == nil {
+			return nil
+		}
+		m.decode.LogitsOnGPU = false
+	}
+
+	if err := m.syncHiddenFromDevice(); err != nil {
+		return err
+	}
+
 	if m.decode.LogitsOnGPU && m.fused != nil {
 		err := m.fused.LogitsFromHost(x, "output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 		if err == nil {
