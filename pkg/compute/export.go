@@ -61,6 +61,8 @@ var (
 	MatMulVecInto       = matmul.MatMulVecInto
 	MatMulVecQ8_0       = matmul.MatMulVecQ8_0
 	MatMulVecQ8_0Into   = matmul.MatMulVecQ8_0Into
+	MatMulVecQ8_1       = matmul.MatMulVecQ8_1
+	MatMulVecQ8_1Into   = matmul.MatMulVecQ8_1Into
 	MatMulVecQ4_0       = matmul.MatMulVecQ4_0
 	MatMulVecQ4_0Into   = matmul.MatMulVecQ4_0Into
 	MatMulVecQ4_1       = matmul.MatMulVecQ4_1
@@ -83,6 +85,7 @@ var (
 	MatMulVecQ8_KInto   = matmul.MatMulVecQ8_KInto
 	MatMulMatInto       = matmul.MatMulMatInto
 	MatMulMatQ8_0Into   = matmul.MatMulMatQ8_0Into
+	MatMulMatQ8_1Into   = matmul.MatMulMatQ8_1Into
 	MatMulMatViaVecInto = matmul.MatMulMatViaVecInto
 	MatMulColMajorInto  = attention.MatMulColMajorInto
 
@@ -90,6 +93,7 @@ var (
 	EmbeddingQ4_0     = matmul.EmbeddingQ4_0
 	EmbeddingQ4_K     = matmul.EmbeddingQ4_K
 	EmbeddingQ8_0Into = matmul.EmbeddingQ8_0Into
+	EmbeddingQ8_1Into = matmul.EmbeddingQ8_1Into
 	EmbeddingQ4_0Into = matmul.EmbeddingQ4_0Into
 	EmbeddingQ4_1Into = matmul.EmbeddingQ4_1Into
 	EmbeddingQ5_0Into = matmul.EmbeddingQ5_0Into

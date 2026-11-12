@@ -15,6 +15,7 @@ func MatMulGPUInto(b device.Backend, store *weights.Store, name string, rows, co
 
 	switch info.Type {
 	case dtype.Q8_0,
+		dtype.Q8_1,
 		dtype.Q4_0,
 		dtype.Q4_1,
 		dtype.Q5_0,

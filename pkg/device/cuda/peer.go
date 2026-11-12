@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unsafe"
 )
 
 // ErrPeerUnavailable P2P between two CUDA devices is not possible (driver, topology or GOGGUF_CUDA_P2P=0)
@@ -117,6 +118,11 @@ func (b *Backend) enablePeerLocked(dst *Backend) error {
 // After success dst holds the resident hidden state and b's residency is cleared (same contract as HiddenDownload+HiddenUpload).
 // On error b keeps its residency, so the caller can fall back to the host path.
 func (b *Backend) PeerCopyResidTo(dst *Backend, n int) error {
+	return b.PeerCopyResidToOverlap(dst, n, nil)
+}
+
+// PeerCopyResidToOverlap is PeerCopyResidTo with optional micro-batch overlap: while the async peer copy runs into dst's alt resid buffer, overlapHost (n floats) is HtoD'd into b's alt resid so the departing GPU can start the next token's early layers immediately after.
+func (b *Backend) PeerCopyResidToOverlap(dst *Backend, n int, overlapHost []float32) error {
 	if n <= 0 {
 		return fmt.Errorf("cuda: PeerCopyResidTo: n=%d", n)
 	}
@@ -140,14 +146,36 @@ func (b *Backend) PeerCopyResidTo(dst *Backend, n int) error {
 		return err
 	}
 
-	rc := C.gguf_cuda_hidden_copy_peer(&b.drv, b.ctx, &b.matmulPool, &dst.drv, dst.ctx, &dst.matmulPool, C.int(n))
+	rc := C.gguf_cuda_hidden_copy_peer_begin(&b.drv, b.ctx, &b.matmulPool, &dst.drv, dst.ctx, &dst.matmulPool, C.int(n))
 	if rc != 0 {
 		dst.clearResidencyLocked()
 
-		return fmt.Errorf("cuda: peer copy %s -> %s: code %d", b.name, dst.name, int(rc))
+		return fmt.Errorf("cuda: peer copy begin %s -> %s: code %d", b.name, dst.name, int(rc))
 	}
 
-	b.clearResidencyLocked()
+	// Overlap window: next micro-batch residual HtoD on src while peer copy fills dst alt.
+	overlapped := false
+	if len(overlapHost) == n {
+		orc := C.gguf_cuda_hidden_upload_alt(&b.drv, b.ctx, &b.matmulPool, (*C.float)(unsafe.Pointer(&overlapHost[0])), C.int(n))
+		if orc == 0 {
+			overlapped = true
+			b.hiddenResident = true
+			b.matmulPool.keep_resid_device = 1
+			b.lastVecAddr = 0
+			b.lastVecLen = 0
+		}
+	}
+
+	rc = C.gguf_cuda_hidden_copy_peer_finish(&dst.drv, dst.ctx, &dst.matmulPool, C.int(n))
+	if rc != 0 {
+		dst.clearResidencyLocked()
+
+		return fmt.Errorf("cuda: peer copy finish %s -> %s: code %d", b.name, dst.name, int(rc))
+	}
+
+	if !overlapped {
+		b.clearResidencyLocked()
+	}
 
 	dst.matmulPool.keep_resid_device = 1
 	dst.hiddenResident = true

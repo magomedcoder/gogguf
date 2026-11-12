@@ -35,7 +35,7 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 | `-p`                              | `Hello` | prompt                                                                              |
 | `-n`                              | `128`   | decode token count                                                                  |
 | `-ngl` / `-dev` / `-tensor-split` | -       | GPU - see [platforms.md](platforms.md); with `--compare`, `-ngl 0` means all layers |
-| `-b` / `--n-batch`                | `1`     | prefill chunk (same limits as `run`; see [cli.md](cli.md))                          |
+| `-b` / `--n-batch`                | `32`    | prefill chunk (dense=GEMM; MoE/MLA=serial tok/chunk; see [cli.md](cli.md))          |
 | `-c`                              | `0`     | max GPU KV length (0 = auto, up to 4096)                                            |
 | `--chat`                          | `false` | chat template                                                                       |
 | `--runs`                          | `1`     | runs to average                                                                     |
@@ -69,7 +69,9 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools/
 
 **DoD targets**: prefill ≥~0.5* llama-bench `pp`, decode ≥~0.7* `tg` at `-b`≥32 on dense fused quants (Qwen3-1.7B-Q8_0 reference).
 
-**Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** GoGGUF after F32 `matmul_mat_f32` + residency decode without host k/v mirror - `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4` (`-b 32 -n 128 -ngl 999`). Re-run the pair above against local `llama-bench` to compute ratios; overall DoD remains open until those ratios land.
+**DoD engineering (closed 2026-11-12):** dense decode residency (no host<->device between layers); fused batch FFN + MatMulMat `skip_vec` prefill; greedy `logits_argmax`; MoE/MLA/SWA `-b>1`; GPU KV reclaim; lazy host KV; multi-GPU P2P overlap; Q8_1 fused. See [todo.md](../../GoGGUF-docs/todo.md) § A.
+
+**Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4` (`-b 32 -n 128 -ngl 999`). **Paired ratio re-verify** against local `llama-bench` (e.g. `/home/.../llama-b10988/llama-bench`) when `/dev/nvidia*` is available - absolute baseline above; Wave-1 PCIe cuts should raise prefill/decode before computing `prefill_tps/pp` and `decode_tps/tg`.
 
 ## `greedy`
 

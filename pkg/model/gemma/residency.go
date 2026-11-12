@@ -52,7 +52,7 @@ func (m *Model) initFused() {
 
 // initResidency enables device-resident hidden state when fused paths and quants allow it.
 // Softcap is applied on-device via SetAttnSoftcap; Gemma2 post-norms via AttnFFNGeGLUPostNorm.
-// SWA reclaim sets GPUKVStale (same as host path) and falls back out of residency.
+// SWA reclaim syncs device KV (DropOldest / rebuild); GPUKVStale only if that sync fails.
 func (m *Model) initResidency() {
 	if m.fused == nil {
 		return
@@ -92,14 +92,11 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 		return fmt.Errorf("gemma: GPU KV stale after SWA reclaim")
 	}
 
-	kvPos := m.cache.Len()
+	kvPos := m.kvAppendPos(layer)
 	seqLen := kvPos + 1
 	if m.cfg.IsSWALayer(layer) && m.cfg.SlidingWindow > 0 {
 		have := m.cache.LayerLen(layer)
-		seqLen = have + 1
-		if seqLen > m.cfg.SlidingWindow {
-			seqLen = m.cfg.SlidingWindow
-		}
+		seqLen = min(have+1, m.cfg.SlidingWindow)
 	}
 
 	if err := m.qkvAttnGPU(layer, pos, ln, nil, nil, nil, nil, seqLen); err != nil {
@@ -117,7 +114,7 @@ func (m *Model) forwardBlockDevice(layer, pos int, ln layerNorms) error {
 // qkvAttnGPU: QKV + RoPE + KV append + attention on GPU.
 // h == nil - hidden resident: attn_norm computed on device from residual.
 func (m *Model) qkvAttnGPU(layer, pos int, ln layerNorms, h, kOut, vOut, attn []float32, seqLen int) error {
-	kvPos := m.cache.Len()
+	kvPos := m.kvAppendPos(layer)
 	d := m.fusedDims
 	d.RopeBase = m.cfg.ropeBase(layer)
 	if seqLen <= 0 {
@@ -161,12 +158,7 @@ func (m *Model) tryRecoverGPUKV() bool {
 			return false
 		}
 
-		// SWA reclaim leaves LayerLen < Len(); absolute kvPos = Len() would be wrong.
-		if m.cfg.IsSWALayer(layer) && m.cache.Len() != n {
-			return false
-		}
-
-		if err := m.dev.KVCacheAppendN(layer, 0, k, v, n); err != nil {
+		if err := m.dev.KVCacheRebuildFromHost(layer, k, v, n); err != nil {
 			return false
 		}
 	}

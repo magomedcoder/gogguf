@@ -81,7 +81,7 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 
 	m.prepareSWAAppend(layer, batch)
 
-	pastLen := m.cache.Len()
+	pastLen := m.kvAppendPos(layer)
 	if err := m.cache.AppendN(layer, k, v, batch); err != nil {
 		return err
 	}

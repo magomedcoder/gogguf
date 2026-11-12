@@ -121,7 +121,7 @@ func (e *Engine) LoadOptions() Options {
 	return e.opts
 }
 
-// PrefillBatchSize returns the model's effective n_batch (1 for MoE/MLA/SWA serial).
+// PrefillBatchSize returns the model's effective n_batch (MoE/MLA/SWA may use serial-per-token inside chunks)
 func (e *Engine) PrefillBatchSize() int {
 	if e == nil || e.Model == nil {
 		return 1

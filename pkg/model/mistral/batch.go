@@ -7,8 +7,22 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/exec/prefill"
 )
 
-// forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
-// With -ngl matmul uses MatMulMat*Cached (quant GEMM / batched device launches); attention - device.AttentionScoresKVBatch over GPU KV (one launch with CUDA attn_flash); otherwise CPU GEMM + CPU causal attn.
+// forwardBatchMoESerial - MoE prefill with n_batch>1: loop each token through resid MoE (forwardBlockDeviceMoE / host experts).
+func (m *Model) forwardBatchMoESerial(tokenIDs []int, startPos int, needLogits bool) error {
+	for i, tok := range tokenIDs {
+		if err := m.forwardToken(tok, startPos+i, false); err != nil {
+			return err
+		}
+	}
+	if !needLogits {
+		return nil
+	}
+	return m.logitsFinish()
+}
+
+// forwardBatch - multi-token prefill (n_batch): one layer pass per chunk (dense / SWA).
+// With -ngl matmul uses MatMulMat*Cached; attention is windowed-causal (SWA skip on CPU; full-window GPU AttentionScoresKVBatch when safe).
+// SWA reclaim still sets GPUKVStale until A4.
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
 	embd := m.cfg.EmbeddingDim
 	return prefill.Run("mistral", m.nBatch, m.cfg.NumLayers, startPos, tokenIDs, needLogits,
@@ -111,17 +125,42 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	return nil
 }
 
-// attentionBatchCausalInto: causal multi-query attention for batch.
-// On GPU - device.AttentionScoresKVBatch (queries see past+i+1); else CPU reference.
+// attentionBatchCausalInto: causal multi-query attention for batch (query i sees past+i+1 keys).
+// SWA: same key range as serial attentionKV (skip oldest outside the window).
+// GPU AttentionScoresKVBatch only when the window covers the full sequence and KV is not stale.
 func (m *Model) attentionBatchCausalInto(attn, q []float32, layer, pastLen, batch int) error {
-	if m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.decode.GPUKVStale {
-		// single launch (fused attn_flash on CUDA) when the backend supports it, else per-query loop
+	qDim := m.cfg.NumHeads * m.cfg.HeadDim
+	kvDim := m.cfg.NumKVHeads * m.cfg.HeadDim
+	w := m.cfg.SlidingWindow
+	swa := w > 0
+
+	maxSeq := pastLen + batch
+	gpuOK := m.dev != nil && device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) && !m.decode.GPUKVStale
+	if gpuOK && (!swa || maxSeq <= w) {
 		if err := device.AttentionScoresKVBatch(m.dev, layer, attn, q, batch, pastLen, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err == nil {
 			return nil
 		}
 	}
 
-	return compute.AttentionScoresBatchCausalInto(attn, q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, pastLen, batch, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim)
+	if !swa {
+		return compute.AttentionScoresBatchCausalInto(attn, q, m.cache.KLayer(layer), m.cache.VLayer(layer), m.scratch.scores, pastLen, batch, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim)
+	}
+
+	kLayer := m.cache.KLayer(layer)
+	vLayer := m.cache.VLayer(layer)
+	for i := range batch {
+		seqLen := pastLen + i + 1
+		skip := 0
+		if seqLen > w {
+			skip = seqLen - 1 - w
+		}
+		off := i * qDim
+		if err := compute.AttentionScoresInto(attn[off:off+qDim], q[off:off+qDim], kLayer[skip*kvDim:], vLayer[skip*kvDim:], m.scratch.scores, seqLen-skip, m.cfg.NumHeads, m.cfg.NumKVHeads, m.cfg.HeadDim); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // matmulBatchInto: W * X[batch] via MatMulMat*Cached on GPU or CPU MatMulMat*.

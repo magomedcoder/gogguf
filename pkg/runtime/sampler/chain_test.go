@@ -9,6 +9,14 @@ func TestGreedy(t *testing.T) {
 	if got := Greedy(logits); got != 1 {
 		t.Fatalf("Greedy = %d, want 1", got)
 	}
+
+	if !IsGreedy(Greedy) || !IsGreedy(nil) {
+		t.Fatal("IsGreedy(Greedy/nil)")
+	}
+
+	if IsGreedy(New(Config{Temp: 0.8, Seed: 1})) {
+		t.Fatal("IsGreedy(temp sampler)")
+	}
 }
 
 func TestNewDeterministicWithSeed(t *testing.T) {

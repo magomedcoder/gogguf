@@ -15,6 +15,7 @@ func TestQuantBytes(t *testing.T) {
 		want int
 	}{
 		{dtype.Q8_0, 4, 64, 4 * (64 / quant.QK8_0) * quant.BlockQ8_0Size},
+		{dtype.Q8_1, 4, 64, 4 * (64 / quant.QK8_1) * quant.BlockQ8_1Size},
 		{dtype.Q4_0, 2, 64, 2 * (64 / quant.QK4_0) * quant.BlockQ4_0Size},
 		{dtype.Q4_1, 2, 64, 2 * (64 / quant.QK4_1) * quant.BlockQ4_1Size},
 		{dtype.Q5_0, 1, 32, quant.BlockQ5_0Size},
@@ -42,7 +43,7 @@ func TestQuantBytesErrors(t *testing.T) {
 		t.Fatal("expected error for cols not divisible by QK_K")
 	}
 
-	if _, err := QuantBytes(dtype.Q8_1, 2, 256); err == nil {
+	if _, err := QuantBytes(dtype.IQ2_XXS, 2, 256); err == nil {
 		t.Fatal("expected error for unsupported type")
 	}
 

@@ -364,3 +364,59 @@ func matMulVecQ6_KRows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksP
 
 	return nil
 }
+
+// MatMulVecQ8_1 multiplies Q8_1 matrix [rows*cols] by float32 vector [cols]
+func MatMulVecQ8_1(raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := MatMulVecQ8_1Into(raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// MatMulVecQ8_1Into writes Q8_1 matmul to out [rows]
+func MatMulVecQ8_1Into(raw []byte, rows, cols int, vec, out []float32) error {
+	if len(vec) != cols {
+		return fmt.Errorf("compute: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	if cols%quant.QK8_1 != 0 {
+		return fmt.Errorf("compute: cols=%d not divisible by %d", cols, quant.QK8_1)
+	}
+
+	blocksPerRow := cols / quant.QK8_1
+	want := rows * blocksPerRow * quant.BlockQ8_1Size
+	if len(raw) < want {
+		return fmt.Errorf("compute: Q8_1 matrix too short")
+	}
+
+	if len(out) < rows {
+		return fmt.Errorf("compute: out too short")
+	}
+
+	return cvec.ParallelForRowsErr(rows, func(rowStart, rowEnd int) error {
+		return matMulVecQ8_1Rows(raw, vec, out, rowStart, rowEnd, blocksPerRow)
+	})
+}
+
+func matMulVecQ8_1Rows(raw []byte, vec, out []float32, rowStart, rowEnd, blocksPerRow int) error {
+	for r := rowStart; r < rowEnd; r++ {
+		var sum float32
+		rowOff := r * blocksPerRow * quant.BlockQ8_1Size
+		for b := range blocksPerRow {
+			block := raw[rowOff+b*quant.BlockQ8_1Size:]
+			vecOff := b * quant.QK8_1
+			dot, errDot := quant.DotBlockQ8_1(block, vec[vecOff:vecOff+quant.QK8_1])
+			if errDot != nil {
+				return errDot
+			}
+
+			sum += dot
+		}
+
+		out[r] = sum
+	}
+
+	return nil
+}

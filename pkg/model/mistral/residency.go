@@ -57,8 +57,8 @@ func (m *Model) initFused() {
 }
 
 // initResidency enables device-resident hidden state.
-// MoE (n_batch=1): QKVAttn + AttnOutNorm + router DtoH(n_expert) + ExpertFFNAccumulate (+ shared expert).
-// PrefillBatchSize stays 1 for MoE; n_batch>1 expert dispatch remains deferred.
+// MoE: QKVAttn + AttnOutNorm + router DtoH(n_expert) + ExpertFFNAccumulate (+ shared) per token.
+// PrefillBatchSize>1 loops tokens through this path. SWA disables full fused residency (windowed host/batch attn).
 func (m *Model) initResidency() {
 	if m.fused == nil {
 		return

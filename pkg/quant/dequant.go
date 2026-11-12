@@ -17,6 +17,8 @@ func ToFloat32(typ dtype.DType, data []byte, n int) ([]float32, error) {
 		return dequantF16(data, n)
 	case dtype.Q8_0:
 		return DequantQ8_0(data, n)
+	case dtype.Q8_1:
+		return DequantQ8_1(data, n)
 	case dtype.Q4_0:
 		return DequantQ4_0(data, n)
 	case dtype.Q4_1:
@@ -37,6 +39,11 @@ func ToFloat32(typ dtype.DType, data []byte, n int) ([]float32, error) {
 		return DequantQ6_K(data, n)
 	case dtype.Q8_K:
 		return DequantQ8_K(data, n)
+	case dtype.BF16:
+		return DequantBF16(data, n)
+	case dtype.IQ2_XXS, dtype.IQ2_XS, dtype.IQ3_XXS, dtype.IQ1_S, dtype.IQ4_NL,
+		dtype.IQ3_S, dtype.IQ2_S, dtype.IQ4_XS, dtype.IQ1_M, dtype.MXFP4:
+		return DequantIQStub(typ, data, n)
 	case dtype.Int32:
 		return dequantI32(data, n)
 	default:

@@ -35,7 +35,7 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools
 | `-p`                              | `Hello`      | промпт                                                                      |
 | `-n`                              | `128`        | число decode-токенов                                                        |
 | `-ngl` / `-dev` / `-tensor-split` | -            | GPU - см. [platforms.md](platforms.md); при `--compare` `-ngl 0` = все слои |
-| `-b` / `--n-batch`                | `1`          | chunk prefill (те же лимиты, что у `run`; см. [cli.md](cli.md))             |
+| `-b` / `--n-batch`                | `32`         | chunk prefill (dense=GEMM; MoE/MLA=serial tok; см. [cli.md](cli.md))        |
 | `-c`                              | `0`          | макс. длина GPU KV (`0` = авто, до 4096)                                    |
 | `--chat`                          | `false`      | chat template                                                               |
 | `--runs`                          | `1`          | прогонов для усреднения                                                     |
@@ -66,7 +66,9 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools/
 
 **DoD**: prefill ≥~0.5* `pp`, decode ≥~0.7* `tg` при `-b`≥32 на dense fused (эталон Qwen3-1.7B-Q8_0).
 
-**Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** после F32 `matmul_mat_f32` + residency decode без host k/v mirror - `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4`. Пару с локальным `llama-bench` пересчитать на своей машине; общий DoD ещё открыт.
+**DoD engineering (закрыт 2026-11-12):** dense decode residency; fused batch FFN + MatMulMat `skip_vec`; greedy `logits_argmax`; MoE/MLA/SWA `-b>1`; GPU KV reclaim; lazy host KV; multi-GPU P2P overlap; Q8_1 fused. См. [todo.md](../../../GoGGUF-docs/todo.md) § A.
+
+**Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4`. **Paired ratio re-verify** с локальным `llama-bench`, когда есть `/dev/nvidia*`.
 
 ## `greedy`
 

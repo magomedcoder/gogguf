@@ -7,7 +7,7 @@ type KVCache struct {
 	*mempool.KV
 }
 
-// NewKVCache creates an empty KV-cache with capacity ContextLength
+// NewKVCache creates an empty KV-cache (lazy init up to ContextLength; see mempool.NewKV).
 func NewKVCache(cfg Config) *KVCache {
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
 	return &KVCache{

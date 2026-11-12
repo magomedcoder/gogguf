@@ -18,6 +18,7 @@ type Model struct {
 	weights      *weights.Store
 	dev          device.Backend
 	ngl          int
+	nBatch       int
 	fused        *gpuresid.Runner
 	moeGPU       []bool
 	layerQuant   []bool
@@ -41,10 +42,8 @@ type Model struct {
 // Load creates DeepSeek2 from weights. GPU runs MLA projections, FFN, and experts.
 // With a device.MLABackend (CUDA) absorbed MLA attention also runs on GPU over a latent KV cache (kvLora+rope K, kvLora V) for the first ngl layers; k_b/v_b are uploaded once as FP32 device buffers.
 // CPU attention remains the fallback (error / unsupported backend / seq > gpuMaxSeq).
-// MLA / MoE: serial only - n_batch is accepted for API symmetry and forced to 1
+// PrefillBatchSize may be >1: serial per-token MLA+MoE inside each chunk (not absorbed MLA GEMM-batched).
 func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Model, error) {
-	_ = nBatch // n_batch=1: batch prefill is not implemented for absorbed MLA
-
 	cfg, err := ParseConfig(w.Reader())
 	if err != nil {
 		return nil, err
@@ -69,11 +68,14 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Mode
 		ngl = cfg.NumLayers
 	}
 
+	nBatch = min(max(nBatch, 1), 512)
+
 	m := &Model{
 		cfg:          cfg,
 		weights:      w,
 		dev:          g,
 		ngl:          ngl,
+		nBatch:       nBatch,
 		cache:        NewMLACache(cfg),
 		scratch:      newScratch(cfg),
 		layerNorms:   layerNorms,
@@ -260,17 +262,43 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("deepseek2: empty input")
 	}
 
-	for i, tok := range tokenIDs {
-		if err := m.forwardToken(tok, startPos+i); err != nil {
+	// n_batch>1: serial per-token MLA+MoE inside each chunk (PrefillBatchSize reports nBatch)
+	if m.nBatch > 1 && len(tokenIDs) > 1 {
+		for i := 0; i < len(tokenIDs); {
+			end := min(i+m.nBatch, len(tokenIDs))
+			needLogits := end == len(tokenIDs)
+			if err := m.forwardBatchSerial(tokenIDs[i:end], startPos+i, needLogits); err != nil {
+				return nil, err
+			}
+			i = end
+		}
+	} else {
+		for i, tok := range tokenIDs {
+			if err := m.forwardToken(tok, startPos+i); err != nil {
+				return nil, err
+			}
+		}
+
+		if err := m.logitsFinish(); err != nil {
 			return nil, err
 		}
 	}
 
-	if err := m.logitsFinish(); err != nil {
-		return nil, err
+	return m.scratch.logits, nil
+}
+
+// forwardBatchSerial runs MLA+MoE one token at a time within a prefill chunk
+func (m *Model) forwardBatchSerial(tokenIDs []int, startPos int, needLogits bool) error {
+	for i, tok := range tokenIDs {
+		if err := m.forwardToken(tok, startPos+i); err != nil {
+			return err
+		}
+	}
+	if !needLogits {
+		return nil
 	}
 
-	return m.scratch.logits, nil
+	return m.logitsFinish()
 }
 
 func (m *Model) Embed(tokenIDs []int) ([]float32, error) {
@@ -305,6 +333,16 @@ func (m *Model) forwardToken(tokenID, pos int) error {
 		return err
 	}
 
+	// Upload once per token; MLA resid path keeps d_resid without per-layer syncHidden
+	if m.residency && m.dev != nil {
+		if err := m.dev.HiddenUpload(m.scratch.x); err != nil {
+			m.residency = false
+			m.decode.ResidDevice = false
+		} else {
+			m.decode.ResidDevice = true
+		}
+	}
+
 	for layer := 0; layer < m.cfg.NumLayers; layer++ {
 		if err := m.forwardBlock(layer, pos); err != nil {
 			return err
@@ -324,9 +362,14 @@ func (m *Model) forwardBlock(layer, pos int) error {
 	ln := m.layerNorms[layer]
 	lt := m.layerTensors[layer]
 
-	// MLA projections read host hidden; pull resid back before attention
-	if err := m.syncHiddenFromDevice(); err != nil {
-		return err
+	// ResidDevice: MLA reads via MoEHiddenNorm snapshot + ResidAdd; no per-layer syncHidden
+	if m.decode.ResidDevice && m.residency && m.layerOnGPU(layer) {
+		if err := m.forwardBlockMLAResid(layer, pos, ln, lt); err == nil {
+			return nil
+		} else if rerr := m.recoverHiddenFromDevice(layer, err); rerr != nil {
+			return rerr
+		}
+		// host path below with downloaded x
 	}
 
 	if err := compute.RMSNormInto(m.scratch.h, m.scratch.x, ln.attnNorm, m.cfg.RMSNormEps); err != nil {
@@ -339,7 +382,7 @@ func (m *Model) forwardBlock(layer, pos int) error {
 
 	compute.AddInPlace(m.scratch.x, m.scratch.tmp) // attn output is in tmp after wo
 
-	// Device-resident MoE/dense FFN after MLA (n_batch=1)
+	// Device-resident MoE/dense FFN after host MLA (upload once if resid not active)
 	if m.residency && m.layerOnGPU(layer) {
 		var err error
 		if lt.moe {
@@ -414,16 +457,29 @@ func (m *Model) ffnDense(lt layerTensors, layer int) error {
 }
 
 func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
+	return m.mlaAttnEx(layer, pos, lt, ln, false)
+}
+
+// mlaAttnEx runs MLA; fromMoEHidden reads Q/KV projections from the MoE RMSNorm snapshot (resid on device)
+func (m *Model) mlaAttnEx(layer, pos int, lt layerTensors, ln layerNorms, fromMoEHidden bool) error {
 	cfg := m.cfg
 	headK := cfg.QKNopeDim + cfg.RopeDim
 
+	proj := func(name string, rows, cols int, out []float32) error {
+		if fromMoEHidden {
+			return m.fused.MatMulFromMoEHidden(name, rows, cols, out)
+		}
+
+		return m.matmulInto(name, rows, cols, m.scratch.h, out, layer)
+	}
+
 	// Q projection
 	if lt.liteQ {
-		if err := m.matmulInto(lt.q, cfg.NumHeads*headK, cfg.EmbeddingDim, m.scratch.h, m.scratch.qFull, layer); err != nil {
+		if err := proj(lt.q, cfg.NumHeads*headK, cfg.EmbeddingDim, m.scratch.qFull); err != nil {
 			return err
 		}
 	} else {
-		if err := m.matmulInto(lt.qA, cfg.QLoraRank, cfg.EmbeddingDim, m.scratch.h, m.scratch.qLora[:cfg.QLoraRank], layer); err != nil {
+		if err := proj(lt.qA, cfg.QLoraRank, cfg.EmbeddingDim, m.scratch.qLora[:cfg.QLoraRank]); err != nil {
 			return err
 		}
 
@@ -440,7 +496,7 @@ func (m *Model) mlaAttn(layer, pos int, lt layerTensors, ln layerNorms) error {
 	}
 
 	// KV compression + k_pe
-	if err := m.matmulInto(lt.kvAMQA, cfg.qkDim(), cfg.EmbeddingDim, m.scratch.h, m.scratch.kvPe, layer); err != nil {
+	if err := proj(lt.kvAMQA, cfg.qkDim(), cfg.EmbeddingDim, m.scratch.kvPe); err != nil {
 		return err
 	}
 

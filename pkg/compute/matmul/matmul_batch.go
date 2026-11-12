@@ -98,3 +98,10 @@ func MatMulMatViaVecInto(batch int, rows, cols int, x, out []float32, mul func(v
 
 	return nil
 }
+
+// MatMulMatQ8_1Into - W[Q8_1] * X[batch] -> out[batch*rows]
+func MatMulMatQ8_1Into(raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	return MatMulMatViaVecInto(batch, rows, cols, x, out, func(vec, dst []float32) error {
+		return MatMulVecQ8_1Into(raw, rows, cols, vec, dst)
+	})
+}

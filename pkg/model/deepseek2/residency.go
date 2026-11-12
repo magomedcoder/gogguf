@@ -10,7 +10,7 @@ import (
 )
 
 // initFused sets up GPU layer paths. MLA attention uses the dedicated device MLA cache.
-// MoE (n_batch=1): after host/GPU MLA + WO residual, MoEHiddenNorm + ExpertFFNAccumulate into d_resid.
+// Resid path: upload once per token; MoEHiddenNorm(attn_norm) + MLA from snapshot + ResidAdd + MoE/FFN accumulate (no per-layer syncHidden).
 func (m *Model) initFused() {
 	if m.dev == nil || m.ngl <= 0 {
 		return
@@ -44,7 +44,12 @@ func (m *Model) initResidency(moeOK bool) {
 		return
 	}
 
-	if m.cfg.ExpertCount > 0 && (!moeOK || !gpuresid.MoEResidSupported(m.dev)) {
+	// MLA resid + MoE/FFN accumulate need MoEResidBackend (MoEHiddenNorm / ResidAdd / ExpertFFNAccumulate)
+	if !gpuresid.MoEResidSupported(m.dev) {
+		return
+	}
+
+	if m.cfg.ExpertCount > 0 && !moeOK {
 		return
 	}
 
@@ -52,7 +57,6 @@ func (m *Model) initResidency(moeOK bool) {
 		return
 	}
 
-	// MLA keeps attention inputs on host; MoE/dense FFN still use HiddenResident flags
 	if !m.dev.HiddenResident() || !gpuresid.HiddenResidencyEnabled() {
 		return
 	}
@@ -67,12 +71,33 @@ func (m *Model) initResidency(moeOK bool) {
 	m.decode.LogitsOnGPU = gpuresid.CanLogitsFromDevice(m.dev, m.ngl, m.cfg.NumLayers) && m.fused.HeadOnGPU(m.lmHeadName)
 }
 
-// forwardBlockDevice: MLA already applied on host into x; run dense FFN into d_resid
-func (m *Model) forwardBlockDevice(layer int, ln layerNorms, lt layerTensors) error {
-	if err := m.dev.HiddenUpload(m.scratch.x); err != nil {
+// forwardBlockMLAResid: resid already on device - MoEHiddenNorm(attn) + MLA from snapshot + ResidAdd(wo) + FFN/MoE accumulate
+func (m *Model) forwardBlockMLAResid(layer, pos int, ln layerNorms, lt layerTensors) error {
+	p := fmt.Sprintf("blk.%d.", layer)
+	embd := m.cfg.EmbeddingDim
+	if err := m.fused.MoEHiddenNorm(p+"attn_norm.weight", ln.attnNorm, embd, m.cfg.RMSNormEps); err != nil {
 		return err
 	}
-	m.decode.ResidDevice = true
+
+	if err := m.mlaAttnEx(layer, pos, lt, ln, true); err != nil {
+		return err
+	}
+
+	if err := m.fused.ResidualAddScaled(m.scratch.tmp[:embd], 1); err != nil {
+		return err
+	}
+
+	if lt.moe {
+		return m.forwardBlockDeviceMoE(layer, ln, lt)
+	}
+	return m.forwardBlockDevice(layer, ln, lt)
+}
+
+// forwardBlockDevice: attention residual on device (or uploaded); dense FFN accumulates into d_resid
+func (m *Model) forwardBlockDevice(layer int, ln layerNorms, lt layerTensors) error {
+	if err := m.ensureResidUploaded(); err != nil {
+		return err
+	}
 
 	p := fmt.Sprintf("blk.%d.", layer)
 	if err := m.fused.MoEHiddenNorm(p+"ffn_norm.weight", ln.ffnNorm, m.cfg.EmbeddingDim, m.cfg.RMSNormEps); err != nil {
@@ -82,12 +107,11 @@ func (m *Model) forwardBlockDevice(layer int, ln layerNorms, lt layerTensors) er
 	return m.fused.FFNNamedAccumulate(lt.ffnGate, lt.ffnUp, lt.ffnDown, 1, m.cfg.EmbeddingDim, m.cfg.FFNHidden)
 }
 
-// forwardBlockDeviceMoE: MLA already applied; MoE experts accumulate into d_resid
+// forwardBlockDeviceMoE: attention residual on device; MoE experts accumulate into d_resid.
 func (m *Model) forwardBlockDeviceMoE(layer int, ln layerNorms, lt layerTensors) error {
-	if err := m.dev.HiddenUpload(m.scratch.x); err != nil {
+	if err := m.ensureResidUploaded(); err != nil {
 		return err
 	}
-	m.decode.ResidDevice = true
 
 	p := fmt.Sprintf("blk.%d.", layer)
 	embd := m.cfg.EmbeddingDim
@@ -122,6 +146,21 @@ func (m *Model) forwardBlockDeviceMoE(layer int, ln layerNorms, lt layerTensors)
 			return err
 		}
 	}
+
+	return nil
+}
+
+// ensureResidUploaded uploads host x only when resid is not already on device
+func (m *Model) ensureResidUploaded() error {
+	if m.decode.ResidDevice {
+		return nil
+	}
+
+	if err := m.dev.HiddenUpload(m.scratch.x); err != nil {
+		return err
+	}
+
+	m.decode.ResidDevice = true
 
 	return nil
 }

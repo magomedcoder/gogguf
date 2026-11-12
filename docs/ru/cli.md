@@ -55,7 +55,7 @@
 | `--thinking`        | `false`      | режим размышления Qwen3 (с `--chat`)                                                       |
 | `-i`                | `false`      | интерактивный REPL (stdin)                                                                 |
 | `-ngl`              | `0`          | слои на GPU (`0` = CPU; нужна сборка `-tags cuda` + `N > 0`): [platforms.md](platforms.md) |
-| `-b` / `--n-batch`  | `32`         | chunk prefill; dense batch/GEMM; MoE/MLA/SWA serial (`1`)                                  |
+| `-b` / `--n-batch`  | `32`         | chunk prefill; dense=GEMM; MoE/MLA=serial tok/chunk; SWA=windowed                          |
 | `-dev`              | пусто        | устройство(а) GPU - см. [platforms.md](platforms.md)                                       |
 | `-tensor-split`     | пусто        | multi-GPU split - см. [platforms.md](platforms.md)                                         |
 
@@ -111,7 +111,7 @@ CGO_ENABLED=1 go build -tags cuda -o build/gogguf ./cmd/gogguf
 | `--host`                 | `127.0.0.1:8000` | адрес HTTP-сервера                                                                   |
 | `-ngl`                   | `0`              | слои на GPU (`0` = CPU); нужна `-tags cuda` + `N > 0` - [platforms.md](platforms.md) |
 | `-dev` / `-tensor-split` | пусто            | multi-GPU - см. [platforms.md](platforms.md)                                         |
-| `-b` / `--n-batch`       | `32`             | chunk prefill (dense batch/GEMM; MoE/MLA/SWA serial)                                 |
+| `-b` / `--n-batch`       | `32`             | chunk prefill (dense GEMM; MoE/MLA serial tok/chunk; SWA windowed)                   |
 | `--api-key`              | пусто            | auth Bearer / X-API-Key                                                              |
 | `--rate-limit`           | `0`              | запросов в минуту на IP (`0` = без лимита)                                           |
 

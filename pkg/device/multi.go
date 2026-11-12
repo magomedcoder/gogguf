@@ -13,10 +13,12 @@ import (
 )
 
 // MultiBackend distributes transformer layers across multiple devices: layers 0..n1-1 on first GPU, n1..n2-1 on second, etc.
-// At device boundaries the resident hidden state moves device-to-device when the pair supports P2P (CUDA cuMemcpyPeer, see PeerHiddenFunc); otherwise via host (HiddenDownload + HiddenUpload). Within one device's range residual stays resident.
+// At device boundaries the resident hidden state moves device-to-device when the pair supports P2P (CUDA cuMemcpyPeer / PeerAsync into a double-buffered resid, see PeerHiddenFunc); otherwise via host (HiddenDownload + HiddenUpload). Within one device's range residual stays resident.
 //
 // Limitation: each device's weights and KV are cached independently, so total VRAM is sum per device, not shared.
-// Layers run sequentially: a boundary peer copy replaces the host bounce but does not overlap with compute on the other device (a token's layers form a strict dependency chain; real overlap would need micro-batch pipelining across tokens/sequences).
+// True tensor-parallel (splitting a single matmul across GPUs) is out of scope. Pipeline overlap shipped here is for
+// sequential layer-split: async P2P into an alternate resid buffer, optionally overlapping a queued next-token
+// HtoD on the departing GPU (QueueNextResid) while the peer copy finishes - micro-batch / pipeline style, not TP.
 type MultiBackend struct {
 	devs  []Backend
 	split []float64
@@ -25,6 +27,7 @@ type MultiBackend struct {
 	peerBroken map[[2]int]bool // pairs whose peer copy failed once: host bounce from then on
 	peerCopies int             // boundary moves done over P2P
 	hostCopies int             // boundary moves done via host
+	overlapH2D int             // boundary moves that also overlapped next-token HtoD on src
 
 	mu        sync.Mutex
 	bounds    []int // bounds[i] - first layer of device i, len = len(devs)+1
@@ -32,13 +35,15 @@ type MultiBackend struct {
 	cur       int       // index of device with current hidden state
 	hidden    []float32 // buffer for hidden transfer at device boundaries
 	hiddenLen int
+	nextResid []float32 // optional next micro-batch resid for overlap during peer copy (QueueNextResid)
 }
 
 var _ Backend = (*MultiBackend)(nil)
 
 // PeerHiddenFunc copies the resident hidden state (n floats) from src to dst without touching host memory.
-// Returns nil when src's residency moved to dst (src residency cleared, dst active). Any error means "not moved": src still holds the hidden state and MultiBackend falls back to HiddenDownload + HiddenUpload.
-type PeerHiddenFunc func(src, dst Backend, n int) error
+// overlapHost, when len==n, may be HtoD'd into src's alternate resid while the peer copy runs (micro-batch overlap).
+// Returns nil when src's residency moved to dst (src residency cleared unless overlap left next resid on src; dst active). Any error means "not moved": src still holds the hidden state and MultiBackend falls back to HiddenDownload + HiddenUpload.
+type PeerHiddenFunc func(src, dst Backend, n int, overlapHost []float32) error
 
 // defaultPeerHidden is set by build-tagged files (cuda_open.go) when a peer-capable backend exists
 var defaultPeerHidden PeerHiddenFunc
@@ -58,6 +63,34 @@ func (m *MultiBackend) TransferStats() (peer, host int) {
 	defer m.mu.Unlock()
 
 	return m.peerCopies, m.hostCopies
+}
+
+// OverlapStats reports how many peer boundary moves also overlapped a queued next-token HtoD on the source GPU.
+func (m *MultiBackend) OverlapStats() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.overlapH2D
+}
+
+// QueueNextResid stages a host residual for micro-batch overlap: during the next P2P boundary move, the peer copy of the current resid can run while this vector is uploaded onto the departing GPU's alt buffer.
+// Cleared after a successful overlapped peer move (or when length mismatches).
+func (m *MultiBackend) QueueNextResid(x []float32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(x) == 0 {
+		m.nextResid = nil
+		return
+	}
+
+	if cap(m.nextResid) < len(x) {
+		m.nextResid = make([]float32, len(x))
+	} else {
+		m.nextResid = m.nextResid[:len(x)]
+	}
+
+	copy(m.nextResid, x)
 }
 
 // NewMultiBackend combines devices into one Backend with layer split.
@@ -238,12 +271,22 @@ func (m *MultiBackend) route(layer int) (Backend, int, error) {
 }
 
 // moveHiddenLocked transfers resident hidden state from current device to dst.
-// Prefers a device-to-device copy (P2P); falls back to the host bounce when peers are unsupported or the copy fails.
+// Prefers a device-to-device copy (P2P, optionally overlapping QueueNextResid HtoD on src); falls back to the host bounce when peers are unsupported or the copy fails.
 func (m *MultiBackend) moveHiddenLocked(dst int) error {
-	src := m.devs[m.cur]
+	srcIdx := m.cur
+	src := m.devs[srcIdx]
 	if m.hiddenLen > 0 && src.HiddenActive() {
-		if m.tryPeerLocked(m.cur, dst) {
+		var overlap []float32
+		if len(m.nextResid) == m.hiddenLen {
+			overlap = m.nextResid
+		}
+
+		if m.tryPeerLocked(srcIdx, dst, overlap) {
 			m.peerCopies++
+			if overlap != nil {
+				m.overlapH2D++
+				m.nextResid = nil
+			}
 			m.cur = dst
 
 			return nil
@@ -271,12 +314,12 @@ func (m *MultiBackend) moveHiddenLocked(dst int) error {
 }
 
 // tryPeerLocked attempts the P2P hidden move src -> dst; false = caller must use the host path (src residency untouched)
-func (m *MultiBackend) tryPeerLocked(src, dst int) bool {
+func (m *MultiBackend) tryPeerLocked(src, dst int, overlap []float32) bool {
 	if m.peer == nil || m.peerBroken[[2]int{src, dst}] {
 		return false
 	}
 
-	if err := m.peer(m.devs[src], m.devs[dst], m.hiddenLen); err != nil {
+	if err := m.peer(m.devs[src], m.devs[dst], m.hiddenLen, overlap); err != nil {
 		if m.peerBroken == nil {
 			m.peerBroken = make(map[[2]int]bool)
 		}
@@ -309,6 +352,10 @@ func (m *MultiBackend) MatMulVecCached(name string, matrix []float32, rows, cols
 
 func (m *MultiBackend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	return m.current().MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
+}
+
+func (m *MultiBackend) MatMulVecQ8_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return m.current().MatMulVecQ8_1Cached(name, raw, rows, cols, vec)
 }
 
 func (m *MultiBackend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
@@ -502,6 +549,18 @@ func (m *MultiBackend) LogitsFromDevice(t dtype.DType, normName string, norm []f
 	return m.current().LogitsFromDevice(t, normName, norm, headName, headRaw, headF32, logits, vocab, embd, eps)
 }
 
+func (m *MultiBackend) LogitsArgmaxFromDevice(t dtype.DType, normName string, norm []float32, headName string, headRaw []byte, headF32 []float32, vocab, embd int, eps float32) (int, float32, error) {
+	return LogitsArgmaxFromDevice(m.current(), t, normName, norm, headName, headRaw, headF32, vocab, embd, eps)
+}
+
+func (m *MultiBackend) FFNSwiGLUMatCached(gateName, upName, downName string, gateW, upW, downW, x, out []float32, embd, ffn, batch int) error {
+	return FFNSwiGLUMatCachedFP32(m.current(), gateName, upName, downName, gateW, upW, downW, x, out, embd, ffn, batch)
+}
+
+func (m *MultiBackend) FFNSwiGLUMatQuantCached(t dtype.DType, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn, batch int) error {
+	return FFNSwiGLUMatQuantCached(m.current(), t, gateName, upName, downName, gateRaw, upRaw, downRaw, x, out, embd, ffn, batch)
+}
+
 func (m *MultiBackend) LayerNormResidInto(dst, weight, bias []float32, weightName, biasName string, eps float32) error {
 	return m.current().LayerNormResidInto(dst, weight, bias, weightName, biasName, eps)
 }
@@ -618,6 +677,24 @@ func (m *MultiBackend) KVCacheAppendN(layer, pos int, k, v []float32, n int) err
 	}
 
 	return dev.KVCacheAppendN(local, pos, k, v, n)
+}
+
+func (m *MultiBackend) KVCacheDropOldest(layer, n int) error {
+	dev, local, err := m.route(layer)
+	if err != nil {
+		return err
+	}
+
+	return dev.KVCacheDropOldest(local, n)
+}
+
+func (m *MultiBackend) KVCacheRebuildFromHost(layer int, k, v []float32, n int) error {
+	dev, local, err := m.route(layer)
+	if err != nil {
+		return err
+	}
+
+	return dev.KVCacheRebuildFromHost(local, k, v, n)
 }
 
 func (m *MultiBackend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error {

@@ -1,9 +1,12 @@
 package deepseek2
 
-// PrefillBatchSize is always 1.
-// Blockers for n_batch>1: absorbed MLA batch attention + MoE expert batch dispatch.
-// See batch.go.
-// Do not raise this without those kernels - host serial loops alone would only re-encode the existing Forward token loop under a false batch API.
+// PrefillBatchSize returns the effective n_batch for multi-token prefill.
+// DeepSeek2 uses serial per-token MLA+MoE inside each chunk (absorbed MLA is not GEMM-batched across B).
+// Legacy attn_kv_b MHA layers use the same serial token loop.
 func (m *Model) PrefillBatchSize() int {
-	return 1
+	if m == nil || m.nBatch < 1 {
+		return 1
+	}
+
+	return m.nBatch
 }

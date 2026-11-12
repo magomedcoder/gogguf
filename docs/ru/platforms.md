@@ -43,7 +43,7 @@ Residency: по умолчанию вкл.; выкл. только через `L
 CUDA_VISIBLE_DEVICES=1 ./build/gogguf run -m model.gguf -ngl 28 -p "Hi"
 ```
 
-Multi-GPU (`-dev 0,1`): слои делятся; на границах устройств hidden идёт через **P2P** (`cuMemcpyPeer`), иначе host bounce. Слои по-прежнему последовательно. Отключить P2P: `GOGGUF_CUDA_P2P=0`.
+Multi-GPU (`-dev 0,1`): слои делятся последовательно (не tensor-parallel). На границах - **async P2P** в double-buffer resid (`cuMemcpyPeerAsync`), иначе host bounce. Опционально: `QueueNextResid` HtoD на уходящем GPU пока идёт peer copy. Отключить P2P: `GOGGUF_CUDA_P2P=0`.
 
 `tools bench` с `-ngl` пишет устройство и VRAM (`VRAM: used / total MB`, или `vram_*_mb` при `--json`).
 
@@ -62,7 +62,7 @@ Docker только CPU: [build.md](build.md).
 
 Лучший случай: **Qwen3 dense**, `-ngl` = все слои, fused-кванты (Q8_0 / Q4_0/1 / Q5_0/1 / Q2_K...Q8_K) - почти весь transformer + logits на GPU.
 
-Слабее / частично: MoE / DeepSeek2 MLA остаются `n_batch=1`; F32 batch GEMM ещё loop-B (quant GEMM есть).  
+Слабее / частично: MoE / DeepSeek2 MLA - serial-per-token внутри `-b` чанков; F32 batch GEMM ещё loop-B (quant GEMM есть).  
 Всегда CPU: tokenizer, sampling, HTTP.  
 Default CLI `-b` = **32** для dense prefill.  
 Подробнее: [build.md](build.md) (раздел CUDA) и [models.md](models.md).
@@ -136,7 +136,7 @@ Ctrl+C останавливает `serve`.
 ## Планируется (GPU)
 
 - Metal kernels (wiring `-tags metal` есть); smoke CUDA на реальной Windows-машине  
-- Параллельный multi-GPU pipeline (P2P уже предпочтителен)  
+- True tensor-parallel / более глубокий pipeline-parallel по последовательностям  
 - Batched MoE / оставшиеся gaps residency  
 
 Флаги CLI: [cli.md](cli.md). Библиотека: [library.md](library.md).

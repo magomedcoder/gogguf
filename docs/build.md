@@ -33,9 +33,9 @@ For **Qwen3 dense** with `-ngl` = all layers (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K w
 | `output_norm` + `lm_head`                                  | GPU                      | `LogitsFromDevice`, one DtoH of `vocab` floats |
 | sampling, KV mirror, HTTP                                  | CPU                      | `attn`/`k`/`v` of a layer still go DtoH        |
 
-Partly on GPU: F32 batch still device-offset vec launches; MoE / DeepSeek2 MLA / SWA force `n_batch=1`; other arches may lack full residency. Quant prefill uses `MatMulMat*` (Q8_0 single-launch PTX).  
-**`gpuKVStale`:** if GPU KV append fails, fused GPU attention is skipped until `ResetCache()` / a new session.  
-Fused native: Q8_0, Q4_0/1, Q5_0/1, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K/Q8_K (`FusedQuantSupported`). Other types (e.g. Q8_1, IQ-*) fall back to FP32 and disable residency.
+Partly on GPU: F32 batch still device-offset vec launches; MoE / DeepSeek2 MLA accept `-b>1` via serial per-token resid inside chunks; Mistral SWA `-b>1` with windowed causal attn (reclaim still sets `gpuKVStale` until A4). Quant prefill uses `MatMulMat*` (Q8_0 single-launch PTX).  
+**`gpuKVStale`:** if GPU KV append fails or SWA reclaim drops host KV, fused GPU attention is skipped until `ResetCache()` / a new session.  
+Fused native: Q8_0, Q8_1, Q4_0/1, Q5_0/1, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K/Q8_K (`FusedQuantSupported`). IQ-*/MXFP4 are dtype-registered for Load with CPU dequant stubs (no residency). BF16 dequants on CPU via Floats path.
 
 Flags (`-ngl`, `-dev`, Docker GPU, macOS/Windows): **[platforms.md](platforms.md)**.
 

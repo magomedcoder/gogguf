@@ -170,3 +170,46 @@ func TestKVFromArena(t *testing.T) {
 		t.Fatal(c.VLayer(1))
 	}
 }
+
+func TestKVLazyInitCap(t *testing.T) {
+	c := NewKV(1, 100_000, 2, nil)
+	if c.MaxSeq() != 100_000 {
+		t.Fatalf("MaxSeq=%d", c.MaxSeq())
+	}
+
+	if c.Cap() != DefaultKVInitCap {
+		t.Fatalf("Cap=%d want %d", c.Cap(), DefaultKVInitCap)
+	}
+
+	short := NewKV(1, 128, 2, nil)
+	if short.Cap() != 128 {
+		t.Fatalf("short Cap=%d", short.Cap())
+	}
+}
+
+func TestKVGrowOnAppend(t *testing.T) {
+	c := NewKV(1, 10_000, 2, nil)
+	if c.Cap() != DefaultKVInitCap {
+		t.Fatalf("init Cap=%d", c.Cap())
+	}
+
+	for i := range DefaultKVInitCap + 3 {
+		if err := c.Append(0, []float32{float32(i), 1}, []float32{0, 0}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		c.Advance()
+	}
+
+	if c.Cap() < DefaultKVInitCap+3 {
+		t.Fatalf("Cap after grow=%d", c.Cap())
+	}
+
+	if c.LayerLen(0) != DefaultKVInitCap+3 {
+		t.Fatalf("LayerLen=%d", c.LayerLen(0))
+	}
+
+	got := c.KLayer(0)
+	if got[0] != 0 || got[2*(DefaultKVInitCap)] != float32(DefaultKVInitCap) {
+		t.Fatalf("K after grow corrupt at boundaries")
+	}
+}

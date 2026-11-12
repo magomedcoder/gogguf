@@ -63,6 +63,7 @@ func (c *weightCache) init() {
 const (
 	kindF32 = "f32"
 	kindQ8  = "q8_0"
+	kindQ81 = "q8_1"
 	kindQ4  = "q4_0"
 	kindQ4K = "q4_k"
 	kindQ5K = "q5_k"
@@ -80,6 +81,8 @@ func quantKind(t dtype.DType) string {
 	switch t {
 	case dtype.Q8_0:
 		return kindQ8
+	case dtype.Q8_1:
+		return kindQ81
 	case dtype.Q4_0:
 		return kindQ4
 	case dtype.Q4_K:
@@ -105,7 +108,7 @@ func quantKind(t dtype.DType) string {
 	return ""
 }
 
-var allWeightKinds = []string{kindF32, kindQ8, kindQ4, kindQ4K, kindQ5K, kindQ6K, kindQ41, kindQ50, kindQ51, kindQ2K, kindQ3K, kindQ8K}
+var allWeightKinds = []string{kindF32, kindQ8, kindQ81, kindQ4, kindQ4K, kindQ5K, kindQ6K, kindQ41, kindQ50, kindQ51, kindQ2K, kindQ3K, kindQ8K}
 
 // loadWeightCacheEnv applies optional env limits (called from OpenDevice)
 func (b *Backend) loadWeightCacheEnv() {
@@ -192,6 +195,8 @@ func (b *Backend) freeWeight(kind, name string) bool {
 		switch kind {
 		case kindQ8:
 			cache = b.matricesQ8
+		case kindQ81:
+			cache = b.matricesQ81
 		case kindQ4:
 			cache = b.matricesQ4
 		case kindQ4K:

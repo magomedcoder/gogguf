@@ -65,3 +65,80 @@ func TestKVCacheAttention(t *testing.T) {
 		}
 	}
 }
+
+func TestKVCacheDropOldest(t *testing.T) {
+	b, err := Open()
+	if err != nil {
+		t.Skip("CUDA unavailable:", err)
+	}
+
+	if !b.hasAttn {
+		t.Skip("CUDA attention kernels unavailable")
+	}
+
+	defer b.Close()
+
+	seqLen := 4
+	nHeads := 2
+	nKVHeads := 1
+	headDim := 4
+	kvDim := nKVHeads * headDim
+
+	if err := b.KVCacheInit(1, seqLen, kvDim, nHeads, headDim); err != nil {
+		t.Fatal(err)
+	}
+
+	kHost := make([]float32, seqLen*kvDim)
+	vHost := make([]float32, seqLen*kvDim)
+	for pos := range seqLen {
+		off := pos * kvDim
+		for i := range headDim {
+			kHost[off+i] = float32(pos+1) * 0.1
+			vHost[off+i] = float32(i+1) * 0.2 * float32(pos+1)
+		}
+		if err := b.KVCacheAppend(0, pos, kHost[off:off+kvDim], vHost[off:off+kvDim]); err != nil {
+			t.Fatalf("append pos=%d: %v", pos, err)
+		}
+	}
+
+	drop := 1
+	if err := b.KVCacheDropOldest(0, drop); err != nil {
+		t.Fatal(err)
+	}
+
+	keep := seqLen - drop
+	q := []float32{1, 0, 0, 1, 0.5, 0.5, 0.5, 0.5}
+	dst := make([]float32, nHeads*headDim)
+	want := make([]float32, len(dst))
+	scores := make([]float32, keep)
+	kKeep := kHost[drop*kvDim:]
+	vKeep := vHost[drop*kvDim:]
+	if err := compute.AttentionScoresInto(want, q, kKeep, vKeep, scores, keep, nHeads, nKVHeads, headDim); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := b.AttentionScoresKV(0, dst, q, keep, nHeads, nKVHeads, headDim); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(dst[i]-want[i])) > 1e-4 {
+			t.Fatalf("[%d] after drop gpu=%v cpu=%v", i, dst[i], want[i])
+		}
+	}
+
+	// rebuild from host compact window and check again
+	if err := b.KVCacheRebuildFromHost(0, kKeep, vKeep, keep); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := b.AttentionScoresKV(0, dst, q, keep, nHeads, nKVHeads, headDim); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range want {
+		if math.Abs(float64(dst[i]-want[i])) > 1e-4 {
+			t.Fatalf("[%d] after rebuild gpu=%v cpu=%v", i, dst[i], want[i])
+		}
+	}
+}

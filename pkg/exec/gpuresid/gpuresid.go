@@ -131,10 +131,7 @@ func (r *Runner) QKVAttn(t Tensors, d Dims, qNorm, kNorm, attnNorm, h, attn, kOu
 
 // ropeTables builds cos/sin of length HeadDim/2 for the GPU rope_heads kernel
 func (r *Runner) ropeTables(d Dims, pos int) (cos, sin []float32) {
-	half := d.HeadDim / 2
-	if half < 0 {
-		half = 0
-	}
+	half := max(d.HeadDim/2, 0)
 	if cap(r.cos) < half {
 		r.cos = make([]float32, half)
 		r.sin = make([]float32, half)
@@ -150,10 +147,7 @@ func (r *Runner) ropeTables(d Dims, pos int) (cos, sin []float32) {
 		nRot--
 	}
 
-	nHalf := nRot / 2
-	if nHalf > half {
-		nHalf = half
-	}
+	nHalf := min(nRot/2, half)
 
 	if nHalf > 0 {
 		compute.RoPECosSinScaled(cos[:nHalf], sin[:nHalf], nRot, pos, d.RopeBase, d.RopeScale)
@@ -344,6 +338,8 @@ func (r *Runner) matMulQuant(t dtype.DType, name string, raw []byte, rows, cols 
 	switch t {
 	case dtype.Q8_0:
 		return r.g.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
+	case dtype.Q8_1:
+		return r.g.MatMulVecQ8_1Cached(name, raw, rows, cols, vec)
 	case dtype.Q4_0:
 		return r.g.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
 	case dtype.Q4_K:
@@ -388,9 +384,28 @@ func (r *Runner) SoftcapLogits(logits []float32, softcap float32) error {
 
 // LogitsDevice out_norm + lm_head on GPU over resident hidden
 func (r *Runner) LogitsDevice(normName string, norm []float32, headName string, logits []float32, vocab, embd int, eps float32) error {
-	info, err := r.w.Info(headName)
+	t, raw, f32, err := r.headWeights(headName)
 	if err != nil {
 		return err
+	}
+
+	return r.g.LogitsFromDevice(t, normName, norm, headName, raw, f32, logits, vocab, embd, eps)
+}
+
+// LogitsArgmaxDevice out_norm + lm_head + argmax; DtoH only {idx,val} when backend supports it
+func (r *Runner) LogitsArgmaxDevice(normName string, norm []float32, headName string, vocab, embd int, eps float32) (int, float32, error) {
+	t, raw, f32, err := r.headWeights(headName)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return device.LogitsArgmaxFromDevice(r.g, t, normName, norm, headName, raw, f32, vocab, embd, eps)
+}
+
+func (r *Runner) headWeights(headName string) (dtype.DType, []byte, []float32, error) {
+	info, err := r.w.Info(headName)
+	if err != nil {
+		return 0, nil, nil, err
 	}
 
 	t := info.Type
@@ -398,17 +413,15 @@ func (r *Runner) LogitsDevice(normName string, norm []float32, headName string, 
 	var f32 []float32
 	if device.FusedQuantSupported(t) {
 		if raw, err = r.w.Raw(headName); err != nil {
-			return err
+			return 0, nil, nil, err
 		}
 	} else {
 		if f32, err = r.w.Floats(headName); err != nil {
-			return err
+			return 0, nil, nil, err
 		}
-
 		t = dtype.F32
 	}
-
-	return r.g.LogitsFromDevice(t, normName, norm, headName, raw, f32, logits, vocab, embd, eps)
+	return t, raw, f32, nil
 }
 
 // LogitsDeviceLayerNorm LayerNorm+bias(resident hidden) + lm_head on GPU (Phi-2)

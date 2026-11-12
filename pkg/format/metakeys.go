@@ -1,6 +1,6 @@
 package format
 
-// Common GGUF metadata keys. 
+// Common GGUF metadata keys.
 // Strings still contain "ggml" where the file format requires it.
 const (
 	MetaArchitecture = "general.architecture"

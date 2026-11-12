@@ -7,8 +7,23 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/exec/prefill"
 )
 
-// forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
-// With -ngl matmul uses MatMulMat*Cached (quant GEMM / batched device launches); attention - device.AttentionScoresKVBatch over GPU KV (one launch with CUDA attn_flash); otherwise CPU GEMM + CPU causal attn.
+// forwardBatchMoESerial - MoE prefill with n_batch>1: loop each token through the resid MoE path
+// (forwardBlockDeviceMoE / host experts). Correct numerics; experts are not GEMM-batched across B.
+func (m *Model) forwardBatchMoESerial(tokenIDs []int, startPos int, needLogits bool) error {
+	for i, tok := range tokenIDs {
+		if err := m.forwardToken(tok, startPos+i, false); err != nil {
+			return err
+		}
+	}
+	if !needLogits {
+		return nil
+	}
+	return m.logitsFinish()
+}
+
+// forwardBatch - multi-token prefill (n_batch): one layer pass per chunk (dense).
+// With residency + GPU KV: MatMulMat reuses uploaded X (skip_vec) for Q/K/V and gate/up;
+// FFN uses fused device path (one HtoD + one DtoH). Last-token residual is uploaded for decode.
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
 	embd := m.cfg.EmbeddingDim
 	return prefill.Run("qwen3", m.nBatch, m.cfg.NumLayers, startPos, tokenIDs, needLogits,
@@ -78,10 +93,12 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 	gate := m.scratch.gate[:batch*ffn]
 	up := m.scratch.up[:batch*ffn]
 
+	// Host RMSNorm for the whole batch (per-token GPU RMSNorm loses to PCIe).
 	if err := compute.RMSNormBatchInto(h, x, ln.attnNorm, m.cfg.RMSNormEps, batch, embd); err != nil {
 		return err
 	}
 
+	// Q/K/V share h: MatMulMat skip_vec reuses one HtoD of h across the three GEMMs.
 	if err := m.matmulBatchInto(lt.attnQ, qDim, embd, h, q, batch, layer); err != nil {
 		return err
 	}
@@ -147,18 +164,19 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 		compute.AddInPlace(x[off:off+embd], h[off:off+embd])
 	}
 
-	if onGPU {
-		for i := range batch {
-			off := i * embd
-			if err := m.dev.RMSNormInto(h[off:off+embd], x[off:off+embd], ln.ffnNorm, m.cfg.RMSNormEps); err != nil {
-				if err := compute.RMSNormBatchInto(h, x, ln.ffnNorm, m.cfg.RMSNormEps, batch, embd); err != nil {
-					return err
-				}
-				break
-			}
-		}
-	} else if err := compute.RMSNormBatchInto(h, x, ln.ffnNorm, m.cfg.RMSNormEps, batch, embd); err != nil {
+	if err := compute.RMSNormBatchInto(h, x, ln.ffnNorm, m.cfg.RMSNormEps, batch, embd); err != nil {
 		return err
+	}
+
+	// Fused batch FFN when residency/GPU path is active (keeps gate/up/SwiGLU/down on device).
+	if onGPU && m.residency && !m.decode.GPUKVStale {
+		if err := dispatch.FFNSwiGLUMatGPUInto(m.dev, m.weights, lt.ffnGate, lt.ffnUp, lt.ffnDown, h, h, embd, ffn, batch); err == nil {
+			for i := range batch {
+				off := i * embd
+				compute.AddInPlace(x[off:off+embd], h[off:off+embd])
+			}
+			return nil
+		}
 	}
 
 	if err := m.matmulBatchInto(lt.ffnGate, ffn, embd, h, gate, batch, layer); err != nil {
@@ -171,13 +189,7 @@ func (m *Model) forwardBlockBatch(layer, startPos, batch int) error {
 
 	for i := range batch {
 		off := i * ffn
-		if onGPU {
-			if err := m.dev.SwiGLUInPlace(gate[off:off+ffn], up[off:off+ffn]); err != nil {
-				compute.SwiGLUInPlace(gate[off:off+ffn], up[off:off+ffn])
-			}
-		} else {
-			compute.SwiGLUInPlace(gate[off:off+ffn], up[off:off+ffn])
-		}
+		compute.SwiGLUInPlace(gate[off:off+ffn], up[off:off+ffn])
 	}
 
 	if err := m.matmulBatchInto(lt.ffnDown, embd, ffn, gate, h, batch, layer); err != nil {

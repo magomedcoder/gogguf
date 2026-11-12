@@ -2,12 +2,16 @@ package mempool
 
 import "fmt"
 
-// KV - fixed CPU KV-cache: maxSeq*kvDim buffers, append-free writes.
+// DefaultKVInitCap is the initial per-layer token capacity when maxSeq is larger (CapMaxSeq-like: avoid allocating full context at load; grow on Append/EnsureRoom).
+const DefaultKVInitCap = 4096
+
+// KV - CPU KV-cache with lazy capacity: starts at min(maxSeq, DefaultKVInitCap), grows up to maxSeq.
 // Per-layer token counter (like append); Len/Advance are separate
 type KV struct {
 	layers []kvLayer
 	kvDim  int
-	maxSeq int
+	maxSeq int // hard limit (context / sliding window)
+	cap    int // allocated token slots per layer
 	length int
 }
 
@@ -18,7 +22,8 @@ type kvLayer struct {
 }
 
 // NewKV allocates KV for numLayers layers.
-// arena may be nil - then separate make
+// arena may be nil - then separate make.
+// Initial capacity is min(maxSeq, DefaultKVInitCap); buffers grow on Append/Bump/EnsureRoom as needed.
 func NewKV(numLayers, maxSeq, kvDim int, arena *Arena) *KV {
 	if numLayers < 0 {
 		numLayers = 0
@@ -32,7 +37,9 @@ func NewKV(numLayers, maxSeq, kvDim int, arena *Arena) *KV {
 		kvDim = 0
 	}
 
-	layerBytes := maxSeq * kvDim
+	initCap := min(maxSeq, DefaultKVInitCap)
+
+	layerBytes := initCap * kvDim
 	layers := make([]kvLayer, numLayers)
 	for i := range layers {
 		if arena != nil {
@@ -48,6 +55,7 @@ func NewKV(numLayers, maxSeq, kvDim int, arena *Arena) *KV {
 		layers: layers,
 		kvDim:  kvDim,
 		maxSeq: maxSeq,
+		cap:    initCap,
 	}
 }
 
@@ -71,6 +79,7 @@ func (c *KV) Bump(layer, n int) error {
 	if l.n+n > c.maxSeq {
 		return fmt.Errorf("mempool: KV overflow layer=%d have=%d add=%d maxSeq=%d", layer, l.n, n, c.maxSeq)
 	}
+	c.ensureCap(l.n + n)
 	l.n += n
 	return nil
 }
@@ -86,6 +95,9 @@ func (c *KV) AppendN(layer int, k, v []float32, n int) error {
 		return fmt.Errorf("mempool: KV overflow layer=%d have=%d add=%d maxSeq=%d", layer, l.n, n, c.maxSeq)
 	}
 
+	c.ensureCap(l.n + n)
+	l = &c.layers[layer]
+
 	for i := range n {
 		off := l.n * c.kvDim
 		src := i * c.kvDim
@@ -94,6 +106,42 @@ func (c *KV) AppendN(layer int, k, v []float32, n int) error {
 		l.n++
 	}
 	return nil
+}
+
+// ensureCap grows per-layer buffers so at least need token slots fit (capped at maxSeq)
+func (c *KV) ensureCap(need int) {
+	if need <= c.cap {
+		return
+	}
+
+	if need > c.maxSeq {
+		need = c.maxSeq
+	}
+
+	newCap := max(c.cap, 1)
+	for newCap < need {
+		newCap *= 2
+	}
+	if newCap > c.maxSeq {
+		newCap = c.maxSeq
+	}
+
+	newBytes := newCap * c.kvDim
+	for i := range c.layers {
+		c.layers[i].k = growFloats(c.layers[i].k, newBytes)
+		c.layers[i].v = growFloats(c.layers[i].v, newBytes)
+	}
+	c.cap = newCap
+}
+
+func growFloats(src []float32, n int) []float32 {
+	if n <= len(src) {
+		return src
+	}
+
+	dst := make([]float32, n)
+	copy(dst, src)
+	return dst
 }
 
 // Advance marks token completion.
@@ -189,6 +237,7 @@ func (c *KV) TokensStored() int {
 
 // EnsureRoom drops oldest tokens across all layers so TokensStored()+n fits in MaxSeq.
 // Returns how many tokens were dropped (0 if already enough room).
+// Does not grow capacity; reclaim is for sliding-window maxSeq.
 func (c *KV) EnsureRoom(n int) int {
 	if n < 1 {
 		return 0
@@ -196,6 +245,8 @@ func (c *KV) EnsureRoom(n int) int {
 
 	have := c.TokensStored()
 	if have+n <= c.maxSeq {
+		// may still need buffer growth before Append; EnsureRoom only enforces maxSeq
+		c.ensureCap(have + n)
 		return 0
 	}
 
@@ -205,9 +256,14 @@ func (c *KV) EnsureRoom(n int) int {
 	return drop
 }
 
-// MaxSeq returns the allocated token capacity per layer.
+// MaxSeq returns the hard token capacity limit per layer
 func (c *KV) MaxSeq() int {
 	return c.maxSeq
+}
+
+// Cap returns the currently allocated token slots per layer
+func (c *KV) Cap() int {
+	return c.cap
 }
 
 // Reset clears length and layer counters.

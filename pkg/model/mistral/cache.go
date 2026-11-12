@@ -7,8 +7,8 @@ type KVCache struct {
 	*mempool.KV
 }
 
-// NewKVCache creates an empty KV-cache.
-// SWA models allocate SlidingWindow slots and reclaim via EnsureRoom/DropOldest; otherwise capacity is ContextLength.
+// NewKVCache creates an empty KV-cache (lazy init; see mempool.NewKV).
+// SWA models use SlidingWindow as maxSeq and reclaim via EnsureRoom/DropOldest; otherwise maxSeq is ContextLength.
 func NewKVCache(cfg Config) *KVCache {
 	kvDim := cfg.NumKVHeads * cfg.HeadDim
 	return &KVCache{

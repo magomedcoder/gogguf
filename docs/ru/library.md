@@ -52,15 +52,15 @@ vec, tokens, err := engine.EmbedText("hello")
 
 ### `LoadOptions`
 
-| Поле                                                    | Смысл                                                                                   |
-|---------------------------------------------------------|-----------------------------------------------------------------------------------------|
-| `NGL`                                                   | слои на GPU (`0` = CPU)                                                                 |
-| `NBatch`                                                | chunk prefill; **`>1` только для Qwen3 dense** (другие arch игнор; MoE принудительно 1) |
-| `GPUMaxSeq`                                             | макс. длина GPU KV (`0` = auto, до 4096)                                                |
-| `GPUDevice` / `GPUDevices`                              | CUDA ordinal(s)                                                                         |
-| `TensorSplit`                                           | пропорции слоёв для multi-GPU                                                           |
-| `GPU`                                                   | готовый `device.Backend`; иначе CUDA открывается при `NGL > 0`                          |
-| `HiddenResidency` / `QKVResidency` / `AttnFFNResidency` | `*bool` вкл/выкл fused GPU paths; `nil` = вкл.                                          |
+| Поле                                                    | Смысл                                                                                  |
+|---------------------------------------------------------|----------------------------------------------------------------------------------------|
+| `NGL`                                                   | слои на GPU (`0` = CPU)                                                                |
+| `NBatch`                                                | chunk prefill; dense=GEMM; MoE/MLA=serial tok/chunk; SWA=windowed (`PrefillBatchSize`) |
+| `GPUMaxSeq`                                             | макс. длина GPU KV (`0` = auto, до 4096)                                               |
+| `GPUDevice` / `GPUDevices`                              | CUDA ordinal(s)                                                                        |
+| `TensorSplit`                                           | пропорции слоёв для multi-GPU                                                          |
+| `GPU`                                                   | готовый `device.Backend`; иначе CUDA открывается при `NGL > 0`                         |
+| `HiddenResidency` / `QKVResidency` / `AttnFFNResidency` | `*bool` вкл/выкл fused GPU paths; `nil` = вкл.                                         |
 
 Платформы GPU: [platforms.md](platforms.md). Hub env (`-hf`): [cli.md](cli.md#переменные-окружения-hugging-face).
 

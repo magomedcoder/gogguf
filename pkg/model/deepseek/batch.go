@@ -7,8 +7,22 @@ import (
 	"github.com/magomedcoder/gogguf/pkg/exec/prefill"
 )
 
-// forwardBatch - multi-token prefill (n_batch): one layer pass per chunk.
-// With -ngl matmul uses MatMulMat*Cached (quant GEMM / batched device launches); attention - device.AttentionScoresKVBatch over GPU KV (one launch with CUDA attn_flash); otherwise CPU GEMM + CPU causal attn.
+// forwardBatchMoESerial - MoE prefill with n_batch>1: loop each token through resid MoE (forwardBlockDeviceMoE / host experts).
+func (m *Model) forwardBatchMoESerial(tokenIDs []int, startPos int, needLogits bool) error {
+	for i, tok := range tokenIDs {
+		if err := m.forwardToken(tok, startPos+i); err != nil {
+			return err
+		}
+	}
+	if !needLogits {
+		return nil
+	}
+
+	return m.logitsFromLast(m.scratch.x)
+}
+
+// forwardBatch - multi-token prefill (n_batch): one layer pass per chunk (dense).
+// With -ngl matmul uses MatMulMat*Cached; attention - device.AttentionScoresKVBatch over GPU KV; otherwise CPU GEMM + CPU causal attn.
 func (m *Model) forwardBatch(tokenIDs []int, startPos int, needLogits bool) error {
 	embd := m.cfg.EmbeddingDim
 	return prefill.Run("deepseek", m.nBatch, m.cfg.NumLayers, startPos, tokenIDs, needLogits,

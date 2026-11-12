@@ -33,6 +33,8 @@ func MatMulMatRawInto(store *weights.Store, name string, rows, cols int, x []flo
 	switch info.Type {
 	case dtype.Q8_0:
 		return compute.MatMulMatQ8_0Into(raw, rows, cols, x, batch, out)
+	case dtype.Q8_1:
+		return compute.MatMulMatQ8_1Into(raw, rows, cols, x, batch, out)
 	case dtype.Q4_0,
 		dtype.Q4_1,
 		dtype.Q5_0,
@@ -65,6 +67,7 @@ func MatMulMatGPUInto(b device.Backend, store *weights.Store, name string, rows,
 
 	switch info.Type {
 	case dtype.Q8_0,
+		dtype.Q8_1,
 		dtype.Q4_0,
 		dtype.Q4_1,
 		dtype.Q5_0,

@@ -33,6 +33,10 @@ func (CPUBackend) MatMulVecQ8_0Cached(_ string, raw []byte, rows, cols int, vec 
 	return compute.MatMulVecQ8_0(raw, rows, cols, vec)
 }
 
+func (CPUBackend) MatMulVecQ8_1Cached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return compute.MatMulVecQ8_1(raw, rows, cols, vec)
+}
+
 func (CPUBackend) MatMulVecQ4_0Cached(_ string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	return compute.MatMulVecQ4_0(raw, rows, cols, vec)
 }
@@ -272,6 +276,8 @@ func matMulQuantInto(t dtype.DType, raw []byte, rows, cols int, vec, out []float
 	switch t {
 	case dtype.Q8_0:
 		return compute.MatMulVecQ8_0Into(raw, rows, cols, vec, out)
+	case dtype.Q8_1:
+		return compute.MatMulVecQ8_1Into(raw, rows, cols, vec, out)
 	case dtype.Q4_0:
 		return compute.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
 	case dtype.Q4_K:
@@ -464,6 +470,14 @@ func (CPUBackend) KVCacheAppend(int, int, []float32, []float32) error {
 }
 
 func (CPUBackend) KVCacheAppendN(int, int, []float32, []float32, int) error {
+	return nil
+}
+
+func (CPUBackend) KVCacheDropOldest(int, int) error {
+	return nil
+}
+
+func (CPUBackend) KVCacheRebuildFromHost(int, []float32, []float32, int) error {
 	return nil
 }
 

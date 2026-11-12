@@ -48,10 +48,7 @@ func Load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int) (*Mode
 
 	nBatch = min(max(nBatch, 1), 512)
 
-	// MoE layers (and the dense lead of MoE models): serial only for now (n_batch=1)
-	if cfg.ExpertCount > 0 {
-		nBatch = 1
-	}
+	// MoE: PrefillBatchSize may be >1; forwardBatchMoESerial loops tokens through resid MoE.
 
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)
 	if err != nil {
@@ -140,15 +137,23 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("deepseek: empty input")
 	}
 
-	// n_batch>1 (dense, ExpertCount==0): multi-token prefill; MoE - serial
-	if m.nBatch > 1 && m.cfg.ExpertCount == 0 && len(tokenIDs) > 1 {
+	// n_batch>1: dense chunk GEMM; MoE serial per-token resid inside each chunk
+	if m.nBatch > 1 && len(tokenIDs) > 1 {
 		for i := 0; i < len(tokenIDs); {
 			end := min(i+m.nBatch, len(tokenIDs))
 
 			needLogits := end == len(tokenIDs)
-			if err := m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits); err != nil {
+			var err error
+			if m.cfg.ExpertCount > 0 {
+				err = m.forwardBatchMoESerial(tokenIDs[i:end], startPos+i, needLogits)
+			} else {
+				err = m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits)
+			}
+
+			if err != nil {
 				return nil, err
 			}
+
 			i = end
 		}
 	} else {

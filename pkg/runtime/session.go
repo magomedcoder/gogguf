@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/magomedcoder/gogguf/pkg/model"
 	"github.com/magomedcoder/gogguf/pkg/runtime/sampler"
 )
 
@@ -18,6 +19,10 @@ type GenerationSession struct {
 	stopBuf      strings.Builder
 	stopReason   string // "stop" or "length"; empty until GenerateSteps
 	logprobs     []TokenLogprob
+
+	// deviceGreedy: next-token idx from LogitsArgmaxFromDevice (DtoH {idx,val} only)
+	deviceGreedyIdx int
+	deviceGreedyOK  bool
 }
 
 // StartGeneration encodes the prompt, runs prefill, and returns a decode session.
@@ -58,8 +63,20 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 		samp = sampler.Greedy
 	}
 
-	logits := s.prepareLogits(params)
-	next := samp(logits)
+	pureGreedy := sampler.IsGreedy(samp) && !params.Logprobs && !(params.RepeatPenalty > 0 && params.RepeatPenalty != 1) && params.PresencePenalty == 0 && len(params.LogitBias) == 0
+
+	var next int
+	if pureGreedy && s.deviceGreedyOK {
+		next = s.deviceGreedyIdx
+		s.deviceGreedyOK = false
+	} else {
+		s.deviceGreedyOK = false
+		logits := s.prepareLogits(params)
+		next = samp(logits)
+		if params.Logprobs {
+			s.recordLogprob(next, logits, params.TopLogprobs)
+		}
+	}
 	if next < 0 {
 		return -1, nil
 	}
@@ -67,10 +84,6 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 	eos := s.ctx.tok.EOS()
 	if eos >= 0 && next == eos {
 		return -1, nil
-	}
-
-	if params.Logprobs {
-		s.recordLogprob(next, logits, params.TopLogprobs)
 	}
 
 	s.generated = append(s.generated, next)
@@ -83,12 +96,27 @@ func (s *GenerationSession) DecodeStepWith(params GenerateParams) (int, error) {
 		return -1, fmt.Errorf("runtime: position %d >= context_length=%d", startPos, ctxLen)
 	}
 
+	if gm, ok := s.ctx.engine.Model.(model.GreedyArgmaxModel); ok {
+		gm.SetGreedyArgmax(pureGreedy)
+	}
+
 	logits, err := s.ctx.engine.Model.Forward([]int{next}, startPos)
 	if err != nil {
 		return -1, err
 	}
 
 	s.logits = logits
+	if pureGreedy {
+		if gm, ok := s.ctx.engine.Model.(model.GreedyArgmaxModel); ok {
+			if idx, ok := gm.TakeGreedyArgmax(); ok {
+				s.deviceGreedyIdx = idx
+				s.deviceGreedyOK = true
+			}
+		}
+	} else {
+		s.deviceGreedyOK = false
+	}
+
 	return next, nil
 }
 

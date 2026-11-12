@@ -326,7 +326,7 @@ func TestMultiBackendPlanAndName(t *testing.T) {
 
 // fakePeer mimics a P2P move between fakeDevice instances: no HiddenDownload/HiddenUpload counters change
 func fakePeer(calls *int, fail error) PeerHiddenFunc {
-	return func(src, dst Backend, n int) error {
+	return func(src, dst Backend, n int, _ []float32) error {
 		*calls++
 		if fail != nil {
 			return fail

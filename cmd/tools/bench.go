@@ -41,7 +41,7 @@ func runBench(args []string) error {
 	prompt := fs.String("p", "Hello", "prompt text")
 	maxTokens := fs.Int("n", 128, "number of decode tokens to measure")
 	ngl := fs.Int("ngl", 0, "number of transformer layers on GPU (CUDA, -tags cuda; macOS Metal -tags metal is scaffold, offload rejected)")
-	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense batch/GEMM; MoE/MLA serial")
+	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense=GEMM; MoE/MLA=serial tok/chunk")
 	fs.IntVar(nBatch, "n-batch", 32, "alias for -b")
 	ctxLen := fs.Int("c", 0, "max GPU KV-cache length (0 = auto, up to 4096)")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")

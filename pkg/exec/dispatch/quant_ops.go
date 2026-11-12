@@ -16,6 +16,7 @@ type QuantOps struct {
 
 var quantOps = map[dtype.DType]QuantOps{
 	dtype.Q8_0: {EmbedInto: compute.EmbeddingQ8_0Into, MatMulVecInto: compute.MatMulVecQ8_0Into},
+	dtype.Q8_1: {EmbedInto: compute.EmbeddingQ8_1Into, MatMulVecInto: compute.MatMulVecQ8_1Into},
 	dtype.Q4_0: {EmbedInto: compute.EmbeddingQ4_0Into, MatMulVecInto: compute.MatMulVecQ4_0Into},
 	dtype.Q4_1: {EmbedInto: compute.EmbeddingQ4_1Into, MatMulVecInto: compute.MatMulVecQ4_1Into},
 	dtype.Q5_0: {EmbedInto: compute.EmbeddingQ5_0Into, MatMulVecInto: compute.MatMulVecQ5_0Into},

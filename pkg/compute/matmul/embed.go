@@ -116,3 +116,17 @@ func EmbeddingQ4_K(raw []byte, dim, tokenID int) ([]float32, error) {
 
 	return out, nil
 }
+
+// EmbeddingQ8_1Into dequantizes a Q8_1 embedding row into dst
+func EmbeddingQ8_1Into(dst []float32, raw []byte, dim, tokenID int) error {
+	off, rowBytes, err := embeddingRowOffset(dim, tokenID, quant.BlockQ8_1Size, quant.QK8_1)
+	if err != nil {
+		return err
+	}
+
+	if off+rowBytes > len(raw) {
+		return fmt.Errorf("compute: tokenID=%d out of range", tokenID)
+	}
+
+	return quant.DequantQ8_1Into(dst, raw[off:off+rowBytes], dim)
+}

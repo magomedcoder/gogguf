@@ -33,9 +33,9 @@ CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
 | `output_norm` + `lm_head`                                  | GPU                      | `LogitsFromDevice`, один DtoH на `vocab` float |
 | sampling, зеркало KV, HTTP                                 | CPU                      | `attn`/`k`/`v` слоя пока уходят DtoH           |
 
-Частично на GPU: F32 batch - device-offset vec launches; MoE / DeepSeek2 MLA / SWA -> `n_batch=1`; не у всех arch полный residency. Quant prefill - `MatMulMat*` (Q8_0 single-launch PTX).  
+Частично на GPU: F32 batch - device-offset vec launches; MoE / DeepSeek2 MLA принимают `-b>1` через serial per-token resid в чанке; Mistral SWA `-b>1` с windowed causal attn (reclaim пока `gpuKVStale` до A4). Quant prefill - `MatMulMat*` (Q8_0 single-launch PTX).  
 **`gpuKVStale`:** при сбое GPU KV fused attention отключается до `ResetCache()` / новой сессии.  
-Fused native: Q8_0, Q4_0/1, Q5_0/1, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K/Q8_K (`FusedQuantSupported`). Остальные (Q8_1, IQ-*) -> FP32 и residency выкл.
+Fused native: Q8_0, Q8_1, Q4_0/1, Q5_0/1, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K/Q8_K (`FusedQuantSupported`). IQ-*/MXFP4 - dtype для Load, CPU dequant stub (без residency). BF16 - CPU Floats.
 
 Флаги (`-ngl`, `-dev`, Docker GPU, macOS/Windows): **[platforms.md](platforms.md)**.
 

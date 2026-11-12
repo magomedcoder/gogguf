@@ -74,7 +74,7 @@ func (b *Backend) launchQuantVec(t dtype.DType, fn C.CUfunction, ptr C.CUdevicep
 	dp := (*C.float)(unsafe.Pointer(&dst[0]))
 	r, c := C.int(rows), C.int(cols)
 	switch t {
-	case dtype.Q8_0:
+	case dtype.Q8_0, dtype.Q8_1:
 		return C.gguf_cuda_matmul_vec_q8_0_device(&b.drv, b.ctx, fn, &b.matmulPool, ptr, vp, dp, r, c)
 	case dtype.Q4_0:
 		return C.gguf_cuda_matmul_vec_q4_0_device(&b.drv, b.ctx, fn, &b.matmulPool, ptr, vp, dp, r, c)
@@ -103,6 +103,10 @@ func (b *Backend) launchQuantVec(t dtype.DType, fn C.CUfunction, ptr C.CUdevicep
 
 func (b *Backend) MatMulVecQ8_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
 	return b.matMulVecQuantCachedInto(dtype.Q8_0, name, raw, rows, cols, vec, dst)
+}
+
+func (b *Backend) MatMulVecQ8_1CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	return b.matMulVecQuantCachedInto(dtype.Q8_1, name, raw, rows, cols, vec, dst)
 }
 
 func (b *Backend) MatMulVecQ4_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error {

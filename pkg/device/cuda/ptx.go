@@ -2186,7 +2186,11 @@ AV_EXIT:
 // grid = (n_heads, n_queries), block = 256 threads (fixed), head_dim <= 256.
 // Block (h, qi) attends over seq = seq_base + qi positions of K/V (causal batch: seq_base = past_len + 1; single decode query: n_queries = 1, seq_base = seq_len).
 // q/out rows are [qi][h][head_dim]. K/V are [pos][kv_stride] with kv_off = (h/group)*head_dim.
-// Keys are processed in chunks of 256 (one position per thread); scores live in shared memory, running max/denominator use the flash-attention rescale (corr = exp(m_old - m_new)).
+//
+// Long-KV tiling (done-enough): keys are streamed in chunks of 256 (= block size, one pos/thread).
+// Shared af_s/af_q are 256 floats; a larger key chunk would need >256 threads or multi-pass score tiles
+// with no clear win over online softmax rescale (corr = exp(m_old - m_new)). Softcap / head_dim>256
+// fall back to unfused attn_qk + softmax + attn_v.
 .visible .entry attn_flash(
     .param .u64 param_q,
     .param .u64 param_k,

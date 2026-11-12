@@ -9,7 +9,7 @@ import (
 )
 
 // initFused sets up GPU layer paths. DeepSeek v1: RoPE NORM, experts via ExpertFFN.
-// MoE (n_batch=1): QKVAttn + AttnOutNorm + ExpertFFNAccumulate when residency enables.
+// MoE: QKVAttn + AttnOutNorm + ExpertFFNAccumulate when residency enables (per token; PrefillBatchSize>1 loops).
 func (m *Model) initFused() {
 	if m.dev == nil || m.ngl <= 0 {
 		return

@@ -41,8 +41,8 @@ func (b *Backend) MatMulMatCachedInto(name string, matrix []float32, rows, cols 
 		return err
 	}
 
-	b.lastVecAddr = 0
-	b.lastVecLen = 0
+	// Reuse d_vec when the same host X was just uploaded (Q->K->V / gate->up).
+	b.prepareVecUpload(x[:batch*cols])
 	var rc C.int
 	if b.hasMatF32 {
 		rc = C.gguf_cuda_matmul_mat_f32_device(
@@ -122,8 +122,7 @@ func (b *Backend) MatMulMatQ8_0CachedInto(name string, raw []byte, rows, cols in
 		b.trackWeight(kindQ8, name, gm.bytes)
 	}
 
-	b.lastVecAddr = 0
-	b.lastVecLen = 0
+	b.prepareVecUpload(x[:batch*cols])
 	var rc C.int
 	if b.hasMatQ8 {
 		rc = C.gguf_cuda_matmul_mat_q8_0_device(
@@ -155,6 +154,85 @@ func (b *Backend) MatMulMatQ8_0CachedInto(name string, raw []byte, rows, cols in
 	}
 	if rc != 0 {
 		return fmt.Errorf("cuda: MatMulMatQ8_0CachedInto %q: code %d", name, int(rc))
+	}
+
+	return nil
+}
+
+// MatMulMatQ8_1CachedInto uses matmul_mat_q8_1 (same GPU kernel as q8_0) when available, else batched vec launches
+func (b *Backend) MatMulMatQ8_1CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error {
+	if err := b.matMulMatValidate(rows, cols, batch, x, out); err != nil {
+		return err
+	}
+
+	if err := validateQ81MatMul(raw, rows, cols, x[:cols]); err != nil {
+		return err
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gm, ok := b.matricesQ81[name]
+	if ok {
+		b.touchWeight(kindQ81, name)
+	}
+
+	if !ok || gm.rows != rows || gm.cols != cols || gm.bytes != len(raw) {
+		if ok {
+			b.freeWeight(kindQ81, name)
+		}
+
+		var ptr C.CUdeviceptr
+		rc := b.withEvict(func() C.int {
+			return C.gguf_cuda_upload_q8_1(&b.drv, b.ctx, &ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+		})
+
+		if rc != 0 {
+			return uploadFail("q8_1", name, rc)
+		}
+
+		gm = gpuQ8Matrix{
+			ptr:   ptr,
+			rows:  rows,
+			cols:  cols,
+			bytes: len(raw),
+		}
+		b.matricesQ81[name] = gm
+		b.trackWeight(kindQ81, name, gm.bytes)
+	}
+
+	b.prepareVecUpload(x[:batch*cols])
+	var rc C.int
+	if b.hasMatQ8 {
+		rc = C.gguf_cuda_matmul_mat_q8_0_device(
+			&b.drv,
+			b.ctx,
+			b.fnMatQ8,
+			b.fnQ8,
+			&b.matmulPool,
+			gm.ptr,
+			(*C.float)(unsafe.Pointer(&x[0])),
+			(*C.float)(unsafe.Pointer(&out[0])),
+			C.int(rows),
+			C.int(cols),
+			C.int(batch),
+		)
+	} else {
+		rc = C.gguf_cuda_matmul_mat_device(
+			&b.drv,
+			b.ctx,
+			b.fnQ8,
+			&b.matmulPool,
+			gm.ptr,
+			(*C.float)(unsafe.Pointer(&x[0])),
+			(*C.float)(unsafe.Pointer(&out[0])),
+			C.int(rows),
+			C.int(cols),
+			C.int(batch),
+		)
+	}
+	if rc != 0 {
+		return fmt.Errorf("cuda: MatMulMatQ8_1CachedInto %q: code %d", name, int(rc))
 	}
 
 	return nil
@@ -196,8 +274,7 @@ func (b *Backend) matMulMatQuantCachedInto(name string, raw []byte, rows, cols, 
 		b.trackWeight(kind, name, gm.bytes)
 	}
 
-	b.lastVecAddr = 0
-	b.lastVecLen = 0
+	b.prepareVecUpload(x[:batch*cols])
 	rc := C.gguf_cuda_matmul_mat_device(
 		&b.drv,
 		b.ctx,

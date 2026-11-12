@@ -8,7 +8,7 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 | Архитектура        | `general.architecture` | Статус         | Примечания                                                       |
 |--------------------|------------------------|----------------|------------------------------------------------------------------|
 | **Qwen3**          | `qwen3`                | поддерживается | Основной эталон; full residency; `-b` batch prefill              |
-| **Qwen3-MoE**      | `qwen3moe`             | частично       | QK-norm + MoE; 30B-A3B, 235B-A22B; `n_batch` принудительно 1     |
+| **Qwen3-MoE**      | `qwen3moe`             | частично       | QK-norm + MoE; 30B-A3B, 235B-A22B; `-b>1` serial resid MoE       |
 | **Qwen2**          | `qwen2`                | частично       | Distill-Qwen и др.; NeoX через путь mistral                      |
 | **Qwen2-MoE**      | `qwen2moe`             | частично       | MoE + gated shared expert (A2.7B, 57B-A14B)                      |
 | **Llama 3**        | `llama`                | поддерживается | Forward + chat; golden Llama-3.2-1B; CUDA RoPE NORM              |
@@ -22,15 +22,15 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 
 ### Arch * GPU (CUDA `-tags cuda`, `-ngl`)
 
-| Arch                         | Dense residency     | `n_batch`       | Примечания                          |
-|------------------------------|---------------------|-----------------|-------------------------------------|
-| Qwen3 dense                  | full                | да (default 32) | fused QKV/AttnFFN/logits            |
-| Llama / Mistral              | QKV/AttnFFN         | да              | единый `CanEnableResidency`         |
-| Gemma 1 / Gemma2             | full GeGLU          | да              | softcap+post-norm; SWA reclaim A4   |
-| Phi-3                        | full QKV/AttnFFN    | да              | LongRoPE; fused qkv/ffn row-slices  |
-| Phi-2                        | LN+GELU resid       | да              | composed kernels; partial RoPE host |
-| MoE (Qwen3/Mixtral/DeepSeek) | ExpertFFNAccumulate | принудительно 1 | n_batch>1 -> A3                     |
-| DeepSeek2                    | MLA + MoE resid     | принудительно 1 | GPU YaRN; legacy attn_kv_b MHA      |
+| Arch                         | Dense residency     | `n_batch`       | Примечания                                  |
+|------------------------------|---------------------|-----------------|---------------------------------------------|
+| Qwen3 dense                  | full                | да (default 32) | fused QKV/AttnFFN/logits                    |
+| Llama / Mistral              | QKV/AttnFFN         | да              | единый `CanEnableResidency`                 |
+| Gemma 1 / Gemma2             | full GeGLU          | да              | softcap+post-norm; SWA reclaim A4           |
+| Phi-3                        | full QKV/AttnFFN    | да              | LongRoPE; fused qkv/ffn row-slices          |
+| Phi-2                        | LN+GELU resid       | да              | composed kernels; partial RoPE host         |
+| MoE (Qwen3/Mixtral/DeepSeek) | ExpertFFNAccumulate | да (serial tok) | PrefillBatchSize>1; experts не GEMM-batched |
+| DeepSeek2                    | MLA + MoE resid     | да (serial tok) | без per-layer syncHidden; legacy attn_kv_b  |
 
 \* TheBloke и convert.py часто ставят `general.architecture: llama` - gogguf определяет Mistral по `general.name` / sliding window.
 
@@ -50,7 +50,7 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 ### Возможности Qwen3
 
 - Prefill + autoregressive decode, KV-cache
-- **`n_batch` (`-b`)**: multi-token prefill для **dense** arch (default CLI **32**); MoE/MLA/SWA принудительно `1` (см. [cli.md](cli.md)). На GPU - quant `MatMulMat*` GEMM.
+- **`n_batch` (`-b`)**: multi-token prefill (default CLI **32**). Dense - chunk GEMM/attn; MoE/DeepSeek2 MLA - serial per-token resid в чанке (`PrefillBatchSize` = `-b`). Mistral SWA допускает `-b>1` с windowed causal attn (reclaim пока `GPUKVStale` до A4). См. [cli.md](cli.md).
 - Полная device residency при `-ngl` = все слои и нативных quant - запуск GPU: [platforms.md](platforms.md), детали: [build.md](build.md)
 - Tokenizer BPE (`tokenizer.ggml.model` / qwen2-стиль)
 - Chat template: Jinja из GGUF + fallback ChatML/Qwen
@@ -63,16 +63,22 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 | Тип                                | CPU     | Native GPU + residency |
 |------------------------------------|---------|------------------------|
 | F16, F32                           | dequant | путь FP32              |
-| Q8_0, Q4_0, Q4_1, Q5_0, Q5_1       | да      | fused                  |
+| BF16                               | dequant | Floats (без fused)     |
+| Q8_0, Q8_1, Q4_0, Q4_1, Q5_0, Q5_1 | да      | fused                  |
 | Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K | да      | fused                  |
 
-Также: Legacy / K-quants / без квантизации - Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K...Q8_K, F16, F32.
+Также: Legacy / K-quants / без квантизации - Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q8_1, Q2_K...Q8_K, F16, F32, BF16.
+
+### Реестр dtype (Load) без fused residency
+
+ID типов GGUF зарегистрированы для `Load` / `inspect` / mmap. CPU `ToFloat32` для IQ-* / MXFP4 - stub (ошибка). Не входят в `FusedQuantSupported`.
+
+- IQ-quants: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ4_NL, IQ4_XS
+- MXFP4
 
 ### Планируемые квантизации весов
 
-- Q8_1
-- IQ-quants: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ4_NL, IQ4_XS
-- BF16, MXFP4
+- Native fused CUDA / полный CPU dequant для IQ-* и MXFP4
 
 ## GGUF только чтение (без inference)
 
@@ -103,7 +109,7 @@ GoGGUF читает любой GGUF v2/v3 (`gogguf info`, `gogguf inspect`, mmap
 |------------------------------------------------|---------------------------------------------|
 | CUDA Graphs (matmul / layer)                   | сделано                                     |
 | Реестр архитектур (`pkg/model/<arch>/`)        | частично (`qwen3`, `llama`, `mistral`, ...) |
-| Multi-GPU (`-dev` / P2P, слои последовательно) | частично                                    |
+| Multi-GPU layer-split + async P2P / overlap    | да (без tensor-parallel)                    |
 | `forwardBatch` на dense arch                   | сделано                                     |
 | Quant GEMM (`MatMulMat*`, fused quants)        | сделано; F32 batch ещё loop-B               |
 

@@ -54,6 +54,8 @@ typedef CUresult (*PFN_cuCtxEnablePeerAccess)(CUcontext peerContext, unsigned in
 
 typedef CUresult (*PFN_cuMemcpyPeer)(CUdeviceptr dstDevice, CUcontext dstContext, CUdeviceptr srcDevice, CUcontext srcContext, size_t bytes);
 
+typedef CUresult (*PFN_cuMemcpyPeerAsync)(CUdeviceptr dstDevice, CUcontext dstContext, CUdeviceptr srcDevice, CUcontext srcContext, size_t bytes, CUstream stream);
+
 typedef CUresult (*PFN_cuMemcpyHtoDAsync_v2)(CUdeviceptr dst, const void *src, size_t bytes, CUstream stream);
 
 typedef CUresult (*PFN_cuMemcpyDtoHAsync_v2)(void *dst, CUdeviceptr src, size_t bytes, CUstream stream);
@@ -111,6 +113,7 @@ typedef struct {
 	PFN_cuDeviceCanAccessPeer cuDeviceCanAccessPeer; // optional (multi-GPU P2P)
 	PFN_cuCtxEnablePeerAccess cuCtxEnablePeerAccess; // optional
 	PFN_cuMemcpyPeer cuMemcpyPeer;                   // optional
+	PFN_cuMemcpyPeerAsync cuMemcpyPeerAsync;         // optional (overlap with compute / next HtoD)
 	PFN_cuMemcpyHtoDAsync_v2 cuMemcpyHtoDAsync;
 	PFN_cuMemcpyDtoHAsync_v2 cuMemcpyDtoHAsync;
 	PFN_cuGetErrorName cuGetErrorName;
@@ -194,6 +197,7 @@ typedef struct {
 	CUdeviceptr d_out;
 	CUdeviceptr d_aux;   // FFN up
 	CUdeviceptr d_resid; // residual stream (layer residency)
+	CUdeviceptr d_resid_alt; // double-buffer for async P2P / overlapped next-token HtoD
 	CUdeviceptr d_moe_h; // MoE: RMSNorm(resid) snapshot (expert/router input)
 	float *h_vec;
 	float *h_out;
@@ -205,6 +209,7 @@ typedef struct {
 	int moe_h_cap;
 	int moe_h_len; // valid floats in d_moe_h (0 = unset)
 	CUstream stream;
+	CUstream copy_stream; // dedicated stream for peer / HtoD overlap (NULL = use stream)
 	gguf_matmul_graph_entry_t *graphs;
 	gguf_layer_graph_entry_t *layer_graphs;
 	int skip_vec_htod; // 1 = vec already on GPU (set from Go)
@@ -253,6 +258,9 @@ int gguf_cuda_matmul_vec(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_
 
 // gguf_cuda_upload_q8_0 uploads Q8_0 matrix to GPU
 int gguf_cuda_upload_q8_0(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
+
+// gguf_cuda_upload_q8_1 uploads Q8_1 matrix to the same GPU layout as Q8_0 (fp32 scale + qs[32] per block)
+int gguf_cuda_upload_q8_1(cuda_driver_t *drv, CUcontext ctx, CUdeviceptr *d_matrix, const void *raw, size_t nbytes);
 
 // gguf_cuda_matmul_vec_q8_0_device matmul Q8_0 with weights already on GPU
 int gguf_cuda_matmul_vec_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *vec, float *out, int rows, int cols);
@@ -327,6 +335,10 @@ int gguf_cuda_matmul_mat_f32_device(cuda_driver_t *drv, CUcontext ctx, CUfunctio
 // gguf_cuda_matmul_mat_q8_0_device: single-launch matmul_mat_q8_0 (fn = that entry); batch==1 uses vec path.
 int gguf_cuda_matmul_mat_q8_0_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_mat, CUfunction fn_vec, gguf_matmul_pool_t *pool, CUdeviceptr d_matrix, const float *x, float *out, int rows, int cols, int batch);
 
+// gguf_cuda_ffn_swiglu_mat_device: batch FFN - one HtoD(x[B*embd]) + gate/up/SwiGLU/down on device + one DtoH(out).
+// fn_mat optional (matmul_mat_*); when NULL or batch==1 falls back to per-row vec launches via fn_matmul.
+int gguf_cuda_ffn_swiglu_mat_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_mat, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn, int batch);
+
 // gguf_cuda_ffn_swiglu_device FFN: gate/up matmul + SwiGLU + down (CUDA Graph when has_graphs)
 // x==NULL and pool->moe_h_len==embd: read input from d_moe_h (MoE snapshot).
 int gguf_cuda_ffn_swiglu_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_swiglu, gguf_matmul_pool_t *pool, CUdeviceptr d_gate_w, CUdeviceptr d_up_w, CUdeviceptr d_down_w, const float *x, float *out, int embd, int ffn);
@@ -365,6 +377,9 @@ int gguf_cuda_embed_gather_q8_0(cuda_driver_t *drv, CUcontext ctx, CUfunction fn
 // gguf_cuda_logits_argmax: argmax over device logits buffer; DtoH only {idx_as_f32, value}.
 int gguf_cuda_logits_argmax(cuda_driver_t *drv, CUcontext ctx, CUfunction fn, CUdeviceptr d_logits, int n, int *idx_out, float *val_out);
 
+// gguf_cuda_logits_argmax_from_device: RMSNorm(d_resid)+lm_head then argmax; DtoH only {idx,val} (greedy decode).
+int gguf_cuda_logits_argmax_from_device(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_matmul, CUfunction fn_rmsnorm, CUfunction fn_argmax, gguf_matmul_pool_t *pool, CUdeviceptr d_out_norm, CUdeviceptr d_head, int vocab, int embd, float eps, int *idx_out, float *val_out);
+
 // gguf_cuda_hidden_download copies resident hidden state from d_resid to host
 int gguf_cuda_hidden_download(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, float *dst, int n);
 
@@ -375,6 +390,13 @@ int gguf_cuda_peer_can_access(cuda_driver_t *a, cuda_driver_t *b);
 int gguf_cuda_peer_enable(cuda_driver_t *drv, CUcontext ctx, CUcontext peer_ctx);
 
 // gguf_cuda_hidden_copy_peer copies resident hidden d_resid (n floats) src pool -> dst pool via cuMemcpyPeer (no host bounce).
+// Uses async peer into dst d_resid_alt when available, then swaps (double-buffer).
+// gguf_cuda_hidden_copy_peer_begin launches the async peer (does not wait); finish waits and activates dst.
+// Between begin and finish the caller may HtoD the next micro-batch into src (overlap with the peer copy).
+int gguf_cuda_hidden_copy_peer_begin(cuda_driver_t *src_drv, CUcontext src_ctx, gguf_matmul_pool_t *src_pool, cuda_driver_t *dst_drv, CUcontext dst_ctx, gguf_matmul_pool_t *dst_pool, int n);
+int gguf_cuda_hidden_copy_peer_finish(cuda_driver_t *dst_drv, CUcontext dst_ctx, gguf_matmul_pool_t *dst_pool, int n);
+// gguf_cuda_hidden_upload_alt: HtoD into d_resid_alt on copy_stream (micro-batch overlap); after sync, swaps to d_resid.
+int gguf_cuda_hidden_upload_alt(cuda_driver_t *drv, CUcontext ctx, gguf_matmul_pool_t *pool, const float *x, int n);
 // On success dst pool holds the hidden state; the caller clears src residency. On failure src is untouched.
 int gguf_cuda_hidden_copy_peer(cuda_driver_t *src_drv, CUcontext src_ctx, gguf_matmul_pool_t *src_pool, cuda_driver_t *dst_drv, CUcontext dst_ctx, gguf_matmul_pool_t *dst_pool, int n);
 
@@ -416,6 +438,7 @@ typedef struct {
 	CUdeviceptr d_v;
 	int max_seq;
 	int kv_dim;
+	int n; // tokens currently stored (compact [0..n) after append/drop/rebuild)
 } gguf_kv_layer_t;
 
 typedef struct {
@@ -465,6 +488,15 @@ int gguf_cuda_kv_append(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cach
 
 // gguf_cuda_kv_append_n copies K/V of n tokens starting at pos (batch prefill)
 int gguf_cuda_kv_append_n(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int pos, const float *k, const float *v, int n);
+
+// gguf_cuda_kv_drop_oldest shifts layer K/V left by n tokens (SWA reclaim; works without host mirror)
+int gguf_cuda_kv_drop_oldest(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, int n);
+
+// gguf_cuda_kv_rebuild replaces layer K/V from host [0..n) (compact rewrite after reclaim)
+int gguf_cuda_kv_rebuild(cuda_driver_t *drv, CUcontext ctx, gguf_kv_cache_t *cache, int layer, const float *k, const float *v, int n);
+
+// gguf_cuda_kv_reset clears per-layer token counts (buffers kept)
+void gguf_cuda_kv_reset(gguf_kv_cache_t *cache);
 
 // gguf_cuda_kv_attention attention with K/V already on GPU
 int gguf_cuda_kv_attention(cuda_driver_t *drv, CUcontext ctx, CUfunction fn_qk, CUfunction fn_v, CUfunction fn_softmax, gguf_kv_cache_t *cache, gguf_attn_pool_t *pool, int layer, float *dst, const float *q, int seq_len, int n_heads, int n_kv_heads, int head_dim);

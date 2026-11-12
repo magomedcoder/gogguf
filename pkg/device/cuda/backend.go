@@ -117,6 +117,7 @@ type Backend struct {
 	mu          sync.Mutex
 	matrices    map[string]gpuMatrix
 	matricesQ8  map[string]gpuQ8Matrix
+	matricesQ81 map[string]gpuQ8Matrix
 	matricesQ4  map[string]gpuQ8Matrix
 	matricesQ4K map[string]gpuQ8Matrix
 	matricesQ5K map[string]gpuQ8Matrix
@@ -160,6 +161,7 @@ func OpenDevice(device int) (*Backend, error) {
 		device:      device,
 		matrices:    make(map[string]gpuMatrix),
 		matricesQ8:  make(map[string]gpuQ8Matrix),
+		matricesQ81: make(map[string]gpuQ8Matrix),
 		matricesQ4:  make(map[string]gpuQ8Matrix),
 		matricesQ4K: make(map[string]gpuQ8Matrix),
 		matricesQ5K: make(map[string]gpuQ8Matrix),
@@ -447,6 +449,11 @@ func (b *Backend) Close() error {
 	}
 	b.matricesQ8 = nil
 
+	for _, m := range b.matricesQ81 {
+		C.gguf_cuda_free(&b.drv, m.ptr)
+	}
+	b.matricesQ81 = nil
+
 	for _, m := range b.matricesQ4 {
 		C.gguf_cuda_free(&b.drv, m.ptr)
 	}
@@ -602,6 +609,16 @@ func (b *Backend) MatMulVecCachedInto(name string, matrix []float32, rows, cols 
 func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	out := make([]float32, rows)
 	if err := b.MatMulVecQ8_0CachedInto(name, raw, rows, cols, vec, out); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// MatMulVecQ8_1Cached uploads Q8_1 to the Q8_0 GPU layout and launches the Q8_0 GEMV kernel.
+func (b *Backend) MatMulVecQ8_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	out := make([]float32, rows)
+	if err := b.MatMulVecQ8_1CachedInto(name, raw, rows, cols, vec, out); err != nil {
 		return nil, err
 	}
 
@@ -779,6 +796,8 @@ func (b *Backend) quantCache(t dtype.DType) (map[string]gpuQ8Matrix, C.CUfunctio
 	switch t {
 	case dtype.Q8_0:
 		return b.matricesQ8, b.fnQ8, nil
+	case dtype.Q8_1:
+		return b.matricesQ81, b.fnQ8, nil
 	case dtype.Q4_0:
 		if !b.hasQ4 {
 			return nil, nil, fmt.Errorf("cuda: q4_0 kernel unavailable")
@@ -838,6 +857,8 @@ func (b *Backend) uploadQuant(t dtype.DType, ptr *C.CUdeviceptr, raw []byte) C.i
 	switch t {
 	case dtype.Q8_0:
 		return C.gguf_cuda_upload_q8_0(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	case dtype.Q8_1:
+		return C.gguf_cuda_upload_q8_1(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	case dtype.Q4_0:
 		return C.gguf_cuda_upload_q4_0(&b.drv, b.ctx, ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	case dtype.Q4_K:
@@ -867,6 +888,8 @@ func validateQuantMatMul(t dtype.DType, raw []byte, rows, cols int, vec []float3
 	switch t {
 	case dtype.Q8_0:
 		return validateQ8MatMul(raw, rows, cols, vec)
+	case dtype.Q8_1:
+		return validateQ81MatMul(raw, rows, cols, vec)
 	case dtype.Q4_0:
 		return validateQ4MatMul(raw, rows, cols, vec)
 	case dtype.Q4_K:
@@ -1893,6 +1916,76 @@ func (b *Backend) LogitsFromDevice(t dtype.DType, normName string, norm []float3
 	return nil
 }
 
+// LogitsArgmaxFromDevice: out_norm + lm_head + argmax on resident hidden; DtoH only {idx,val}.
+func (b *Backend) LogitsArgmaxFromDevice(t dtype.DType, normName string, norm []float32, headName string, headRaw []byte, headF32 []float32, vocab, embd int, eps float32) (int, float32, error) {
+	if !b.hasRMS || !b.hasLogitsArgmax {
+		return 0, 0, fmt.Errorf("cuda: logits_argmax unavailable")
+	}
+	if len(norm) < embd {
+		return 0, 0, fmt.Errorf("cuda: LogitsArgmaxFromDevice: norm too short")
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.hiddenResident {
+		return 0, 0, fmt.Errorf("cuda: LogitsArgmaxFromDevice: residency not active")
+	}
+
+	normM, err := b.ensureFP32Matrix(normName, norm, embd, 1)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var headPtr C.CUdeviceptr
+	fnMatmul := b.fn
+	if t == dtype.F32 || t == dtype.F16 {
+		headM, err := b.ensureFP32Matrix(headName, headF32, vocab, embd)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		headPtr = headM.ptr
+	} else {
+		var fn C.CUfunction
+		if _, fn, err = b.quantCache(t); err != nil {
+			return 0, 0, err
+		}
+
+		headM, err := b.ensureQuantMatrix(t, headName, headRaw, vocab, embd)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		headPtr = headM.ptr
+		fnMatmul = fn
+	}
+
+	var idx C.int
+	var val C.float
+	rc := C.gguf_cuda_logits_argmax_from_device(
+		&b.drv,
+		b.ctx,
+		fnMatmul,
+		b.fnRMS,
+		b.fnLogitsArgmax,
+		&b.matmulPool,
+		normM.ptr,
+		headPtr,
+		C.int(vocab),
+		C.int(embd),
+		C.float(eps),
+		&idx,
+		&val,
+	)
+	b.lastVecAddr = 0
+	b.lastVecLen = 0
+	if rc != 0 {
+		return 0, 0, fmt.Errorf("cuda: logits_argmax_from_device: code %d", int(rc))
+	}
+	return int(idx), float32(val), nil
+}
+
 // clearResidencyLocked disables device residency (call under b.mu)
 func (b *Backend) clearResidencyLocked() {
 	b.hiddenResident = false
@@ -2314,7 +2407,11 @@ func (b *Backend) KVCacheInit(layers, maxSeq, kvDim, nHeads, headDim int) error 
 }
 
 func (b *Backend) KVCacheReset() {
-	// Logical reset: new Append starts at pos=0, old data overwritten.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.kvReady {
+		C.gguf_cuda_kv_reset(&b.kvCache)
+	}
 }
 
 func (b *Backend) KVCacheAppend(layer, pos int, k, v []float32) error {
@@ -2382,6 +2479,57 @@ func (b *Backend) KVCacheAppendN(layer, pos int, k, v []float32, n int) error {
 	return nil
 }
 
+// KVCacheDropOldest shifts device K/V left by n tokens (SWA reclaim without host mirror).
+func (b *Backend) KVCacheDropOldest(layer, n int) error {
+	if n < 1 {
+		return nil
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache not initialized")
+	}
+
+	rc := C.gguf_cuda_kv_drop_oldest(&b.drv, b.ctx, &b.kvCache, C.int(layer), C.int(n))
+	if rc != 0 {
+		return fmt.Errorf("cuda: kv_drop_oldest layer=%d n=%d: code %d", layer, n, int(rc))
+	}
+
+	return nil
+}
+
+// KVCacheRebuildFromHost replaces compact device K/V [0..n) from host (resync after reclaim).
+func (b *Backend) KVCacheRebuildFromHost(layer int, k, v []float32, n int) error {
+	if n < 0 {
+		return fmt.Errorf("cuda: KVCacheRebuildFromHost: n=%d", n)
+	}
+
+	var kPtr, vPtr *C.float
+	if n > 0 {
+		if len(k) == 0 || len(v) == 0 {
+			return fmt.Errorf("cuda: KVCacheRebuildFromHost: empty k/v")
+		}
+		kPtr = (*C.float)(unsafe.Pointer(&k[0]))
+		vPtr = (*C.float)(unsafe.Pointer(&v[0]))
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.kvReady {
+		return fmt.Errorf("cuda: kv cache not initialized")
+	}
+
+	rc := C.gguf_cuda_kv_rebuild(&b.drv, b.ctx, &b.kvCache, C.int(layer), kPtr, vPtr, C.int(n))
+	if rc != 0 {
+		return fmt.Errorf("cuda: kv_rebuild layer=%d n=%d: code %d", layer, n, int(rc))
+	}
+
+	return nil
+}
+
 func (b *Backend) AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -2441,8 +2589,11 @@ func (b *Backend) HasFlashAttention() bool { return b.hasAttnFlash }
 // AttentionScoresKVBatch - causal attention for n queries over the GPU KV cache.
 // q/dst are [n][nHeads*headDim]; query i attends to pastLen+i+1 positions (K/V of all n tokens must already be in the cache, e.g. via KVCacheAppendN).
 //
-// With attn_flash: ONE Q HtoD, ONE launch (grid = nHeads x n), ONE DtoH.
-// Limits for the fused path: headDim <= 256, pastLen+n <= maxSeq.
+// With attn_flash (preferred when hasAttnFlash && headDim <= 256):
+//   - ONE Q HtoD, ONE fused launch (grid = nHeads x n_queries; grid.y chunked at 65535), ONE DtoH
+//   - Online softmax over key chunks of 256 (block size); long KV is done-enough without materializing full scores
+//   - Limits: headDim <= 256 (shared Q tile), pastLen+n <= maxSeq, no softcap on this path
+//
 // Temporary q/out buffers (n*nHeads*headDim floats each) are allocated per call.
 // Otherwise falls back to a loop of single-query attention (per-query HtoD/DtoH, three launches per head).
 func (b *Backend) AttentionScoresKVBatch(layer int, dst, q []float32, n, pastLen, nHeads, nKVHeads, headDim int) error {
@@ -2528,6 +2679,28 @@ func validateQ8MatMul(raw []byte, rows, cols int, vec []float32) error {
 	want := rows * blocksPerRow * quant.BlockQ8_0Size
 	if len(raw) < want {
 		return fmt.Errorf("cuda: Q8_0 matrix too short")
+	}
+
+	return nil
+}
+
+func validateQ81MatMul(raw []byte, rows, cols int, vec []float32) error {
+	if rows <= 0 || cols <= 0 {
+		return fmt.Errorf("cuda: rows=%d cols=%d", rows, cols)
+	}
+
+	if cols%quant.QK8_1 != 0 {
+		return fmt.Errorf("cuda: cols=%d not divisible by %d", cols, quant.QK8_1)
+	}
+
+	if len(vec) != cols {
+		return fmt.Errorf("cuda: len(vec)=%d, cols=%d", len(vec), cols)
+	}
+
+	blocksPerRow := cols / quant.QK8_1
+	want := rows * blocksPerRow * quant.BlockQ8_1Size
+	if len(raw) < want {
+		return fmt.Errorf("cuda: Q8_1 matrix too short")
 	}
 
 	return nil

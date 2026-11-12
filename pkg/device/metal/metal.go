@@ -57,6 +57,10 @@ func (b *Backend) MatMulVecQ8_0Cached(string, []byte, int, int, []float32) ([]fl
 	return nil, unavailable("MatMulVecQ8_0Cached")
 }
 
+func (b *Backend) MatMulVecQ8_1Cached(string, []byte, int, int, []float32) ([]float32, error) {
+	return nil, unavailable("MatMulVecQ8_1Cached")
+}
+
 func (b *Backend) MatMulVecQ4_0Cached(string, []byte, int, int, []float32) ([]float32, error) {
 	return nil, unavailable("MatMulVecQ4_0Cached")
 }
@@ -226,6 +230,14 @@ func (b *Backend) KVCacheAppend(int, int, []float32, []float32) error {
 
 func (b *Backend) KVCacheAppendN(int, int, []float32, []float32, int) error {
 	return unavailable("KVCacheAppendN")
+}
+
+func (b *Backend) KVCacheDropOldest(int, int) error {
+	return unavailable("KVCacheDropOldest")
+}
+
+func (b *Backend) KVCacheRebuildFromHost(int, []float32, []float32, int) error {
+	return unavailable("KVCacheRebuildFromHost")
 }
 
 func (b *Backend) AttentionScoresKV(int, []float32, []float32, int, int, int, int) error {

@@ -92,6 +92,7 @@ func load(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch int, parse 
 }
 
 // prepareSWAAppend reclaims oldest KV on sliding-window layers so Append fits the window.
+// Host DropOldestLayer is mirrored on device (drop/shift, or rebuild from host); GPUKVStale only if sync fails.
 func (m *Model) prepareSWAAppend(layer, n int) {
 	if !m.cfg.IsSWALayer(layer) || m.cfg.SlidingWindow <= 0 || n < 1 {
 		return
@@ -103,10 +104,44 @@ func (m *Model) prepareSWAAppend(layer, n int) {
 		return
 	}
 
-	m.cache.DropOldestLayer(layer, have+n-w)
-	if m.dev != nil {
-		m.decode.GPUKVStale = true
+	drop := have + n - w
+	m.cache.DropOldestLayer(layer, drop)
+	m.syncGPUKVDropLayer(layer, drop)
+}
+
+// kvAppendPos is the compact GPU/host write index for the next token(s) on layer.
+// SWA reclaim keeps LayerLen slots compact at [0..LayerLen); Len() may stay larger.
+func (m *Model) kvAppendPos(layer int) int {
+	if m.cfg.IsSWALayer(layer) && m.cfg.SlidingWindow > 0 {
+		return m.cache.LayerLen(layer)
 	}
+
+	return m.cache.Len()
+}
+
+// syncGPUKVDropLayer shifts or rebuilds device KV after host DropOldestLayer.
+func (m *Model) syncGPUKVDropLayer(layer, drop int) {
+	if m.dev == nil || drop < 1 || !device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+		return
+	}
+
+	if err := m.dev.KVCacheDropOldest(layer, drop); err == nil {
+		m.decode.GPUKVStale = false
+		return
+	}
+
+	if m.decode.CPUKVHollow {
+		m.decode.GPUKVStale = true
+		return
+	}
+
+	n := m.cache.LayerLen(layer)
+	if err := m.dev.KVCacheRebuildFromHost(layer, m.cache.KLayer(layer), m.cache.VLayer(layer), n); err != nil {
+		m.decode.GPUKVStale = true
+		return
+	}
+
+	m.decode.GPUKVStale = false
 }
 
 func (m *Model) initGPUKVCache() error {
@@ -280,10 +315,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		seqLen := m.cache.Len() + 1
 		if m.cfg.IsSWALayer(layer) && m.cfg.SlidingWindow > 0 {
 			have := m.cache.LayerLen(layer)
-			seqLen = have + 1
-			if seqLen > m.cfg.SlidingWindow {
-				seqLen = m.cfg.SlidingWindow
-			}
+			seqLen = min(have+1, m.cfg.SlidingWindow)
 		}
 		if err := m.qkvAttnGPU(layer, pos, ln, m.scratch.h, m.scratch.k, m.scratch.v, m.scratch.attn, seqLen); err == nil {
 			if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
@@ -310,7 +342,7 @@ func (m *Model) forwardBlock(layer int, pos int) error {
 		compute.ApplyRoPEHeads(m.scratch.q, m.cfg.NumHeads, m.cfg.HeadDim, pos, base)
 		compute.ApplyRoPEHeads(m.scratch.k, m.cfg.NumKVHeads, m.cfg.HeadDim, pos, base)
 
-		kvPos := m.cache.Len()
+		kvPos := m.kvAppendPos(layer)
 		if err := m.cache.Append(layer, m.scratch.k, m.scratch.v); err != nil {
 			return err
 		}

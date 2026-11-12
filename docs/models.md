@@ -8,7 +8,7 @@ generation) is implemented only for specific architectures - selected by `genera
 | Architecture       | `general.architecture` | Status    | Notes                                                       |
 |--------------------|------------------------|-----------|-------------------------------------------------------------|
 | **Qwen3**          | `qwen3`                | supported | Primary reference; full residency; `-b` batch prefill       |
-| **Qwen3-MoE**      | `qwen3moe`             | partial   | QK-norm + MoE; 30B-A3B, 235B-A22B; `n_batch` forced to 1    |
+| **Qwen3-MoE**      | `qwen3moe`             | partial   | QK-norm + MoE; 30B-A3B, 235B-A22B; `-b>1` serial resid MoE  |
 | **Qwen2**          | `qwen2`                | partial   | Distill-Qwen etc.; NeoX via mistral path                    |
 | **Qwen2-MoE**      | `qwen2moe`             | partial   | MoE + gated shared expert (A2.7B, 57B-A14B)                 |
 | **Llama 3**        | `llama`                | supported | Forward + chat; golden Llama-3.2-1B; CUDA RoPE NORM         |
@@ -22,15 +22,15 @@ generation) is implemented only for specific architectures - selected by `genera
 
 ### Arch * GPU coverage (CUDA `-tags cuda`, `-ngl`)
 
-| Arch                         | Dense residency     | `n_batch`        | Notes                               |
-|------------------------------|---------------------|------------------|-------------------------------------|
-| Qwen3 dense                  | full                | yes (default 32) | fused QKV/AttnFFN/logits            |
-| Llama / Mistral              | QKV/AttnFFN         | yes              | unified `CanEnableResidency`        |
-| Gemma 1 / Gemma2             | full GeGLU          | yes              | softcap+post-norm; SWA reclaim A4   |
-| Phi-3                        | full QKV/AttnFFN    | yes              | LongRoPE; fused qkv/ffn row-slices  |
-| Phi-2                        | LN+GELU resid       | yes              | composed kernels; partial RoPE host |
-| MoE (Qwen3/Mixtral/DeepSeek) | ExpertFFNAccumulate | forced 1         | n_batch>1 -> A3                     |
-| DeepSeek2                    | MLA + MoE resid     | forced 1         | GPU YaRN; legacy attn_kv_b MHA      |
+| Arch                         | Dense residency     | `n_batch`        | Notes                                        |
+|------------------------------|---------------------|------------------|----------------------------------------------|
+| Qwen3 dense                  | full                | yes (default 32) | fused QKV/AttnFFN/logits                     |
+| Llama / Mistral              | QKV/AttnFFN         | yes              | unified `CanEnableResidency`                 |
+| Gemma 1 / Gemma2             | full GeGLU          | yes              | softcap+post-norm; SWA reclaim A4            |
+| Phi-3                        | full QKV/AttnFFN    | yes              | LongRoPE; fused qkv/ffn row-slices           |
+| Phi-2                        | LN+GELU resid       | yes              | composed kernels; partial RoPE host          |
+| MoE (Qwen3/Mixtral/DeepSeek) | ExpertFFNAccumulate | yes (serial tok) | PrefillBatchSize>1; experts not GEMM-batched |
+| DeepSeek2                    | MLA + MoE resid     | yes (serial tok) | no per-layer syncHidden; legacy attn_kv_b    |
 
 \* TheBloke and convert.py often set `general.architecture: llama` - gogguf detects Mistral via `general.name` / sliding window.
 
@@ -50,7 +50,7 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 ### Qwen3 capabilities
 
 - Prefill + autoregressive decode, KV-cache
-- **`n_batch` (`-b`)**: multi-token prefill for **dense** arches (default CLI **32**); MoE/MLA/SWA forced to `1` (see [cli.md](cli.md)). GPU path uses quant `MatMulMat*` GEMM.
+- **`n_batch` (`-b`)**: multi-token prefill (default CLI **32**). Dense arches use chunk GEMM/attn; MoE/DeepSeek2 MLA use serial per-token resid inside each chunk (`PrefillBatchSize` still reports `-b`). Mistral SWA allows `-b>1` with windowed causal attn (reclaim still marks GPU KV stale until A4). See [cli.md](cli.md).
 - Full device residency when `-ngl` = all layers and native quants - GPU launch: [platforms.md](platforms.md), internals: [build.md](build.md)
 - BPE tokenizer (`tokenizer.ggml.model` / qwen2-style)
 - Chat template: Jinja from GGUF + ChatML/Qwen fallback
@@ -63,16 +63,22 @@ quantization (see below). Golden fixtures in CI cover **1.7B-Q8_0**; docs/exampl
 | Type                               | CPU     | Native GPU + residency |
 |------------------------------------|---------|------------------------|
 | F16, F32                           | dequant | FP32 path              |
-| Q8_0, Q4_0, Q4_1, Q5_0, Q5_1       | yes     | fused                  |
+| BF16                               | dequant | Floats path (no fused) |
+| Q8_0, Q8_1, Q4_0, Q4_1, Q5_0, Q5_1 | yes     | fused                  |
 | Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K | yes     | fused                  |
 
-Also listed as Legacy / K-quants / unquantized in tooling: Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K...Q8_K, F16, F32.
+Also listed as Legacy / K-quants / unquantized in tooling: Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q8_1, Q2_K...Q8_K, F16, F32, BF16.
+
+### Dtype registry (Load) without fused GPU residency
+
+Registered GGUF type IDs so `Load` / `inspect` / mmap sizing works. CPU `ToFloat32` for IQ-* / MXFP4 is a stub (error); use a fused quant or BF16/F16 for inference. Not in `FusedQuantSupported`.
+
+- IQ-quants: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ4_NL, IQ4_XS
+- MXFP4
 
 ### Planned weight quantizations
 
-- Q8_1
-- IQ-quants: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, IQ3_S, IQ4_NL, IQ4_XS
-- BF16, MXFP4
+- Native fused CUDA / full CPU dequant for IQ-* and MXFP4
 
 ## GGUF read-only (no inference)
 
@@ -99,13 +105,13 @@ If `general.architecture` is not supported, inference `Load` returns an error li
 
 OS / GPU support and launch: **[platforms.md](platforms.md)**.
 
-| Task                                        | Status                                     |
-|---------------------------------------------|--------------------------------------------|
-| CUDA Graphs (matmul / layer)                | done                                       |
-| Architecture registry (`pkg/model/<arch>/`) | partial (`qwen3`, `llama`, `mistral`, ...) |
-| Multi-GPU pipeline split                    | partial (`-dev` / `-tensor-split`)         |
-| `forwardBatch` on non-Qwen3                 | not done                                   |
-| True batched GPU GEMM                       | not done                                   |
+| Task                                        | Status                                                                                                                 |
+|---------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| CUDA Graphs (matmul / layer)                | done                                                                                                                   |
+| Architecture registry (`pkg/model/<arch>/`) | partial (`qwen3`, `llama`, `mistral`, ...)                                                                             |
+| Multi-GPU pipeline split                    | sequential layer-split + async P2P / resid double-buffer (`QueueNextResid` overlap); true tensor-parallel out of scope |
+| `forwardBatch` on non-Qwen3                 | not done                                                                                                               |
+| True batched GPU GEMM                       | not done                                                                                                               |
 
 ## Adding a new architecture
 

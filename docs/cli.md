@@ -55,7 +55,7 @@ Download from Hugging Face (cached under `~/.cache/huggingface/hub`):
 | `--thinking`        | `false` | Qwen3 thinking mode (with `--chat`)                                                      |
 | `-i`                | `false` | interactive REPL (stdin)                                                                 |
 | `-ngl`              | `0`     | GPU layers (`0` = CPU; needs `-tags cuda` build + `N > 0`): [platforms.md](platforms.md) |
-| `-b` / `--n-batch`  | `32`    | prefill chunk; dense arches use batch/GEMM; MoE/MLA/SWA serial (`1`)                     |
+| `-b` / `--n-batch`  | `32`    | prefill chunk; dense=GEMM/attn; MoE/MLA=serial tok/chunk; SWA=-b>1 windowed              |
 | `-dev`              | empty   | GPU device(s) - see [platforms.md](platforms.md)                                         |
 | `-tensor-split`     | empty   | multi-GPU layer split - see [platforms.md](platforms.md)                                 |
 
@@ -111,7 +111,7 @@ Or from Hugging Face:
 | `--host`                 | `127.0.0.1:8000` | HTTP listen address                                                                 |
 | `-ngl`                   | `0`              | GPU layers (`0` = CPU); needs `-tags cuda` + `N > 0` - [platforms.md](platforms.md) |
 | `-dev` / `-tensor-split` | empty            | multi-GPU - see [platforms.md](platforms.md)                                        |
-| `-b` / `--n-batch`       | `32`             | prefill chunk (dense batch/GEMM; MoE/MLA/SWA serial)                                |
+| `-b` / `--n-batch`       | `32`             | prefill chunk (dense GEMM; MoE/MLA serial tok/chunk; SWA windowed)                  |
 | `--api-key`              | empty            | Bearer / X-API-Key auth                                                             |
 | `--rate-limit`           | `0`              | requests per minute per IP (`0` = off)                                              |
 

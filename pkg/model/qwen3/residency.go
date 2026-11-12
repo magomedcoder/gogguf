@@ -54,8 +54,7 @@ func (m *Model) initFused() {
 }
 
 // initResidency enables device-resident hidden state: all layers on GPU required, fused QKV/residual paths and a single supported weight quant across all layers.
-// MoE (n_batch=1): QKVAttn + AttnOutNorm + router DtoH(n_expert) + ExpertFFNAccumulate into d_resid.
-// PrefillBatchSize stays 1 for MoE; n_batch>1 expert dispatch remains deferred.
+// MoE: QKVAttn + AttnOutNorm + router DtoH(n_expert) + ExpertFFNAccumulate into d_resid (per token; PrefillBatchSize>1 loops tokens).
 func (m *Model) initResidency() {
 	if m.fused == nil {
 		return
@@ -223,7 +222,18 @@ func (m *Model) ffnGPU(layer int, x, out []float32) error {
 	return m.fused.FFN(m.gpuLayers[layer], m.fusedDims, x, out)
 }
 
-// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH of hidden state
+// logitsDevice computes RMSNorm(resident hidden) + lm_head on GPU without DtoH of hidden state.
+// When wantGreedyArgmax is set and the backend supports logits_argmax, only {idx,val} cross PCIe.
 func (m *Model) logitsDevice() error {
+	if m.wantGreedyArgmax {
+		idx, _, err := m.fused.LogitsArgmaxDevice("output_norm.weight", m.outNorm, m.lmHeadName, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
+		if err == nil {
+			m.greedyArgmaxIdx = idx
+			m.greedyArgmaxOK = true
+			return nil
+		}
+		// Fall through to full logits DtoH so non-argmax backends / failures stay correct.
+	}
+
 	return m.fused.LogitsDevice("output_norm.weight", m.outNorm, m.lmHeadName, m.scratch.logits, m.cfg.VocabSize, m.cfg.EmbeddingDim, m.cfg.RMSNormEps)
 }

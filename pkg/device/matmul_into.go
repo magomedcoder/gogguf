@@ -10,6 +10,7 @@ import (
 type MatMulIntoBackend interface {
 	MatMulVecCachedInto(name string, matrix []float32, rows, cols int, vec, dst []float32) error
 	MatMulVecQ8_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
+	MatMulVecQ8_1CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
 	MatMulVecQ4_0CachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
 	MatMulVecQ4_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
 	MatMulVecQ5_KCachedInto(name string, raw []byte, rows, cols int, vec, dst []float32) error
@@ -26,6 +27,7 @@ type MatMulIntoBackend interface {
 type MatMulMatBackend interface {
 	MatMulMatCachedInto(name string, matrix []float32, rows, cols int, x []float32, batch int, out []float32) error
 	MatMulMatQ8_0CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	MatMulMatQ8_1CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
 	MatMulMatQ4_0CachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
 	MatMulMatQ4_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
 	MatMulMatQ5_KCachedInto(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
@@ -66,6 +68,9 @@ var quantCachedInto = map[dtype.DType]quantCachedIntoFn{
 	dtype.Q8_0: func(ib MatMulIntoBackend, name string, raw []byte, rows, cols int, vec, dst []float32) error {
 		return ib.MatMulVecQ8_0CachedInto(name, raw, rows, cols, vec, dst)
 	},
+	dtype.Q8_1: func(ib MatMulIntoBackend, name string, raw []byte, rows, cols int, vec, dst []float32) error {
+		return ib.MatMulVecQ8_1CachedInto(name, raw, rows, cols, vec, dst)
+	},
 	dtype.Q4_0: func(ib MatMulIntoBackend, name string, raw []byte, rows, cols int, vec, dst []float32) error {
 		return ib.MatMulVecQ4_0CachedInto(name, raw, rows, cols, vec, dst)
 	},
@@ -101,6 +106,9 @@ var quantCachedInto = map[dtype.DType]quantCachedIntoFn{
 var quantCachedAlloc = map[dtype.DType]quantCachedFn{
 	dtype.Q8_0: func(b Backend, name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 		return b.MatMulVecQ8_0Cached(name, raw, rows, cols, vec)
+	},
+	dtype.Q8_1: func(b Backend, name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+		return b.MatMulVecQ8_1Cached(name, raw, rows, cols, vec)
 	},
 	dtype.Q4_0: func(b Backend, name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 		return b.MatMulVecQ4_0Cached(name, raw, rows, cols, vec)
@@ -173,6 +181,8 @@ func MatMulMatQuantCachedInto(b Backend, t dtype.DType, name string, raw []byte,
 		switch t {
 		case dtype.Q8_0:
 			return mb.MatMulMatQ8_0CachedInto(name, raw, rows, cols, x, batch, out)
+		case dtype.Q8_1:
+			return mb.MatMulMatQ8_1CachedInto(name, raw, rows, cols, x, batch, out)
 		case dtype.Q4_0:
 			return mb.MatMulMatQ4_0CachedInto(name, raw, rows, cols, x, batch, out)
 		case dtype.Q4_K:

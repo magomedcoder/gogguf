@@ -38,6 +38,11 @@ type Model struct {
 	fusedDims gpuresid.Dims      // dimensions for fused paths
 	gpuLayers []gpuresid.Tensors // layer weight names for fused paths
 	moeGPU    bool               // MoE experts computed on GPU
+
+	// Greedy decode: LogitsArgmaxFromDevice DtoH only {idx,val} when set.
+	wantGreedyArgmax bool
+	greedyArgmaxIdx  int
+	greedyArgmaxOK   bool
 }
 
 // Load creates Qwen3 from weights
@@ -68,11 +73,7 @@ func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch i
 		nBatch = 512
 	}
 
-	// MoE: serial only for now (n_batch=1)
-	if cfg.ExpertCount > 0 {
-		nBatch = 1
-	}
-
+	// MoE: PrefillBatchSize may be >1; forwardBatchMoESerial loops tokens through resid MoE (not expert-GEMM batched).
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)
 	if err != nil {
 		return nil, err
@@ -178,14 +179,21 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("qwen3: empty input")
 	}
 
-	// n_batch>1: multi-token prefill; with -ngl chunk matmul/attn on GPU (loop MatMulVec*Cached + AttentionScoresKV), else CPU GEMM. MoE/debug - serial.
-	useBatch := m.nBatch > 1 && m.cfg.ExpertCount == 0 && m.debug == nil && len(tokenIDs) > 1
+	// n_batch>1: dense uses chunk GEMM/attn; MoE uses serial per-token resid path inside each chunk.
+	useBatch := m.nBatch > 1 && m.debug == nil && len(tokenIDs) > 1
 	if useBatch {
 		for i := 0; i < len(tokenIDs); {
 			end := min(i+m.nBatch, len(tokenIDs))
 
 			needLogits := end == len(tokenIDs)
-			if err := m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits); err != nil {
+			var err error
+			if m.cfg.ExpertCount > 0 {
+				err = m.forwardBatchMoESerial(tokenIDs[i:end], startPos+i, needLogits)
+			} else {
+				err = m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits)
+			}
+
+			if err != nil {
 				return nil, err
 			}
 			i = end
@@ -522,7 +530,28 @@ func (m *Model) matmulInto(name string, rows, cols int, vec, out []float32, laye
 	return dispatch.MatMulRawInto(m.weights, name, rows, cols, vec, out)
 }
 
+// SetGreedyArgmax enables device argmax on the next logitsDevice call (DtoH {idx,val} only)
+func (m *Model) SetGreedyArgmax(on bool) {
+	m.wantGreedyArgmax = on
+	if !on {
+		m.greedyArgmaxOK = false
+	}
+}
+
+// TakeGreedyArgmax returns the last device argmax token when SetGreedyArgmax succeeded
+func (m *Model) TakeGreedyArgmax() (idx int, ok bool) {
+	if !m.greedyArgmaxOK {
+		return 0, false
+	}
+
+	idx = m.greedyArgmaxIdx
+	m.greedyArgmaxOK = false
+
+	return idx, true
+}
+
 func (m *Model) logits() error {
+	m.greedyArgmaxOK = false
 	// hidden on device - out_norm + lm_head on GPU too; only logits go to host
 	if m.decode.ResidDevice && m.decode.LogitsOnGPU {
 		if err := m.logitsDevice(); err == nil {

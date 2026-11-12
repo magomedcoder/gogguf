@@ -70,15 +70,8 @@ func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch i
 
 	nBatch = min(max(nBatch, 1), 512)
 
-	// MoE: serial only for now (n_batch=1)
-	if cfg.isMoE() {
-		nBatch = 1
-	}
-
-	// SWA: batch attention does not apply the sliding window - serial only
-	if cfg.SlidingWindow > 0 && cfg.SlidingWindow < cfg.ContextLength {
-		nBatch = 1
-	}
+	// MoE: PrefillBatchSize may be >1; forwardBatchMoESerial loops tokens through resid MoE.
+	// SWA: -b>1 allowed via forwardBatch with windowed causal attention; reclaim still sets GPUKVStale (A4).
 
 	layerNorms, outNorm, err := loadNormWeights(w, cfg.NumLayers)
 	if err != nil {
@@ -121,14 +114,61 @@ func loadWithConfig(w *weights.Store, g device.Backend, ngl, gpuMaxSeq, nBatch i
 }
 
 // ensureKVRoom reclaims oldest KV when the sliding-window cache is full.
+// Host EnsureRoom/DropOldest is mirrored on device; GPUKVStale only if sync fails.
 func (m *Model) ensureKVRoom(n int) {
 	if m.cfg.SlidingWindow <= 0 {
 		return
 	}
 
-	if dropped := m.cache.EnsureRoom(n); dropped > 0 && m.dev != nil {
-		m.decode.GPUKVStale = true
+	dropped := m.cache.EnsureRoom(n)
+	if dropped < 1 || m.dev == nil {
+		return
 	}
+
+	m.syncGPUKVDropAll(dropped)
+}
+
+// syncGPUKVDropAll shifts every offloaded layer's device KV after host EnsureRoom.
+func (m *Model) syncGPUKVDropAll(drop int) {
+	if m.dev == nil || drop < 1 {
+		return
+	}
+
+	ok := true
+	for layer := 0; layer < m.cfg.NumLayers; layer++ {
+		if !device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+			continue
+		}
+
+		if err := m.dev.KVCacheDropOldest(layer, drop); err != nil {
+			ok = false
+			break
+		}
+	}
+
+	if ok {
+		m.decode.GPUKVStale = false
+		return
+	}
+
+	if m.decode.CPUKVHollow {
+		m.decode.GPUKVStale = true
+		return
+	}
+
+	for layer := 0; layer < m.cfg.NumLayers; layer++ {
+		if !device.LayerOnGPU(layer, m.ngl, m.cfg.NumLayers) {
+			continue
+		}
+
+		n := m.cache.LayerLen(layer)
+		if err := m.dev.KVCacheRebuildFromHost(layer, m.cache.KLayer(layer), m.cache.VLayer(layer), n); err != nil {
+			m.decode.GPUKVStale = true
+			return
+		}
+	}
+
+	m.decode.GPUKVStale = false
 }
 
 func (m *Model) initGPUKVCache() error {
@@ -183,15 +223,23 @@ func (m *Model) Forward(tokenIDs []int, startPos int) ([]float32, error) {
 		return nil, fmt.Errorf("mistral: empty input")
 	}
 
-	// n_batch>1: multi-token prefill (chunk matmul on GPU with -ngl, else CPU GEMM). MoE/SWA/debug - serial.
+	// n_batch>1: dense/SWA use chunk GEMM + windowed causal attn; MoE uses serial resid tokens per chunk.
 	if m.nBatch > 1 && m.debug == nil && len(tokenIDs) > 1 {
 		for i := 0; i < len(tokenIDs); {
 			end := min(i+m.nBatch, len(tokenIDs))
 
 			needLogits := end == len(tokenIDs)
-			if err := m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits); err != nil {
+			var err error
+			if m.cfg.isMoE() {
+				err = m.forwardBatchMoESerial(tokenIDs[i:end], startPos+i, needLogits)
+			} else {
+				err = m.forwardBatch(tokenIDs[i:end], startPos+i, needLogits)
+			}
+
+			if err != nil {
 				return nil, err
 			}
+
 			i = end
 		}
 	} else {

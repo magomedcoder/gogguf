@@ -24,7 +24,7 @@ var ErrHiddenUnavailable = errors.New("device: device-resident hidden unavailabl
 // FusedQuantSupported reports whether fused paths (FFN/QKV/residual/lm_head) support this weight type natively without dequantizing the full matrix to FP32
 func FusedQuantSupported(t dtype.DType) bool {
 	switch t {
-	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K, dtype.Q8_K:
+	case dtype.Q8_0, dtype.Q8_1, dtype.Q4_0, dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K, dtype.Q8_K:
 		return true
 	default:
 		return false
@@ -48,6 +48,9 @@ type Backend interface {
 
 	// MatMulVecQ8_0Cached matmul Q8_0 matrix without dequant to FP32
 	MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
+
+	// MatMulVecQ8_1Cached matmul Q8_1 matrix without dequant to FP32
+	MatMulVecQ8_1Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
 
 	// MatMulVecQ4_0Cached matmul Q4_0 matrix without full dequant to FP32
 	MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error)
@@ -182,6 +185,12 @@ type Backend interface {
 
 	// KVCacheAppendN adds K/V for n tokens starting at position pos (batch prefill)
 	KVCacheAppendN(layer, pos int, k, v []float32, n int) error
+
+	// KVCacheDropOldest shifts device K/V left by n tokens (SWA reclaim; no host mirror needed)
+	KVCacheDropOldest(layer, n int) error
+
+	// KVCacheRebuildFromHost replaces compact device K/V [0..n) from host buffers
+	KVCacheRebuildFromHost(layer int, k, v []float32, n int) error
 
 	// AttentionScoresKV attention with K/V from GPU KV-cache
 	AttentionScoresKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error

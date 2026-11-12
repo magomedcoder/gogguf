@@ -32,7 +32,7 @@ func runRun(args []string) error {
 	thinking := fs.Bool("thinking", false, "Qwen3: enable thinking mode (with --chat)")
 	interactive := fs.Bool("i", false, "interactive mode (REPL)")
 	ngl := fs.Int("ngl", 0, nglUsage)
-	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense models use GEMM/batch; MoE/MLA/SWA stay serial (1)")
+	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense=GEMM; MoE/MLA=serial tok/chunk; SWA=windowed")
 	fs.IntVar(nBatch, "n-batch", 32, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
 	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
@@ -69,7 +69,7 @@ func runRun(args []string) error {
 	}
 	if *nBatch > 1 {
 		if eff := engine.PrefillBatchSize(); eff < *nBatch {
-			fmt.Fprintf(os.Stderr, "n_batch: requested %d, using %d (MoE/MLA/SWA serial)\n", *nBatch, eff)
+			fmt.Fprintf(os.Stderr, "n_batch: requested %d, using %d (arch clamp)\n", *nBatch, eff)
 		} else {
 			fmt.Fprintf(os.Stderr, "n_batch: %d\n", eff)
 		}

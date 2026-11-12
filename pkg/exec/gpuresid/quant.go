@@ -18,6 +18,8 @@ func QuantBytes(t dtype.DType, rows, cols int) (int, error) {
 	switch t {
 	case dtype.Q8_0:
 		blk, size = quant.QK8_0, quant.BlockQ8_0Size
+	case dtype.Q8_1:
+		blk, size = quant.QK8_1, quant.BlockQ8_1Size
 	case dtype.Q4_0:
 		blk, size = quant.QK4_0, quant.BlockQ4_0Size
 	case dtype.Q4_K:

@@ -43,7 +43,7 @@ If the model does not fit in VRAM: smaller quant, lower `-ngl`, or a smaller mod
 CUDA_VISIBLE_DEVICES=1 ./build/gogguf run -m model.gguf -ngl 28 -p "Hi"
 ```
 
-Multi-GPU (`-dev 0,1`): layers are split; at device boundaries hidden moves with **P2P** (`cuMemcpyPeer`) when the topology allows, otherwise host bounce. Layers still run sequentially (no parallel pipeline yet). Disable P2P with `GOGGUF_CUDA_P2P=0`.
+Multi-GPU (`-dev 0,1`): layers are split (sequential layer ranges, not tensor-parallel). At device boundaries hidden moves with **async P2P** into a double-buffered resid when the topology allows (`cuMemcpyPeerAsync`), otherwise host bounce. Optional micro-batch overlap: `QueueNextResid` HtoD on the departing GPU while the peer copy finishes. Disable P2P with `GOGGUF_CUDA_P2P=0`.
 
 `tools bench` with `-ngl` prints the device and VRAM (`VRAM: used / total MB`, or `vram_*_mb` with `--json`).
 
@@ -60,11 +60,11 @@ CPU-only Docker: [build.md](build.md).
 
 ### What runs on GPU (short)
 
-Best case: **Qwen3 dense**, `-ngl` = all layers, fused quants (Q8_0 / Q4_0/1 / Q5_0/1 / Q2_K...Q8_K) - most of the transformer + logits on GPU.
+Best case: **Qwen3 dense**, `-ngl` = all layers, fused quants (Q8_0 / Q8_1 / Q4_0/1 / Q5_0/1 / Q2_K...Q8_K) - most of the transformer + logits on GPU.
 
-Partially / weaker: MoE / DeepSeek2 MLA stay `n_batch=1`; F32 batch GEMM is still loop-B (quant GEMM is real).  
+Partially / weaker: MoE / DeepSeek2 MLA use serial-per-token inside `-b` chunks; F32 batch GEMM is still loop-B (quant GEMM is real).  
 Always CPU: tokenizer, sampling, HTTP.  
-Default CLI `-b` is **32** for dense prefill (GEMM / batch path).  
+Default CLI `-b` is **32** (`PrefillBatchSize` reports the effective chunk size).  
 Details and residency notes: [build.md](build.md) (CUDA section) and [models.md](models.md).
 
 ## CPU (all platforms)
@@ -136,7 +136,7 @@ Ctrl+C stops `serve`.
 ## Planned (GPU roadmap)
 
 - macOS Metal kernels (wiring exists); Windows CUDA needs a real-GPU smoke  
-- Parallel multi-GPU pipeline (P2P transfer already preferred)  
+- True tensor-parallel / deeper pipeline-parallel across sequences  
 - Batched MoE / remaining arch residency gaps  
 
 CLI flags: [cli.md](cli.md). Library: [library.md](library.md).

@@ -20,8 +20,8 @@ func init() {
 	defaultPeerHidden = cudaPeerHidden
 }
 
-// cudaPeerHidden moves resident hidden between two CUDA devices over P2P (cuMemcpyPeer); error = not moved (host fallback)
-func cudaPeerHidden(src, dst Backend, n int) error {
+// cudaPeerHidden moves resident hidden between two CUDA devices over P2P (cuMemcpyPeerAsync + double-buffer); overlapHost enables micro-batch HtoD on src while the peer copy runs. error = not moved (host fallback)
+func cudaPeerHidden(src, dst Backend, n int, overlapHost []float32) error {
 	s, ok := src.(*cuda.Backend)
 	if !ok {
 		return fmt.Errorf("device: peer: %T is not a CUDA backend", src)
@@ -32,7 +32,7 @@ func cudaPeerHidden(src, dst Backend, n int) error {
 		return fmt.Errorf("device: peer: %T is not a CUDA backend", dst)
 	}
 
-	return s.PeerCopyResidTo(d, n)
+	return s.PeerCopyResidToOverlap(d, n, overlapHost)
 }
 
 // OpenCUDA initializes CUDA via Driver API (libcuda) on device 0

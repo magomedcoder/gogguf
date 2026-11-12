@@ -18,7 +18,7 @@ func runServe(args []string) error {
 	fs.StringVar(&hfRepo, "hf-repo", "", "alias for -hf")
 	host := fs.String("host", "127.0.0.1:8000", "HTTP server address")
 	ngl := fs.Int("ngl", 0, nglUsage)
-	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense batch/GEMM; MoE/MLA/SWA serial")
+	nBatch := fs.Int("b", 32, "prefill chunk size (n_batch); dense=GEMM; MoE/MLA=serial tok/chunk; SWA=windowed")
 	fs.IntVar(nBatch, "n-batch", 32, "alias for -b")
 	dev := fs.String("dev", "", "GPU for offload: \"1\" or \"0,1\" (multi-GPU layer split)")
 	tensorSplit := fs.String("tensor-split", "", "layer proportions per device with -dev 0,1, e.g. 0.6,0.4")
@@ -65,7 +65,7 @@ func runServe(args []string) error {
 
 	if *nBatch > 1 {
 		if eff := engine.PrefillBatchSize(); eff < *nBatch {
-			fmt.Fprintf(os.Stderr, " n_batch=%d(requested %d; MoE/MLA/SWA serial)", eff, *nBatch)
+			fmt.Fprintf(os.Stderr, " n_batch=%d(requested %d; arch clamp)", eff, *nBatch)
 		} else {
 			fmt.Fprintf(os.Stderr, " n_batch=%d", eff)
 		}

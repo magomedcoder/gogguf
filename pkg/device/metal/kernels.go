@@ -35,7 +35,7 @@ var PlannedKernels = []KernelPlan{
 	{Name: "rope_heads_norm", Entries: []string{"ApplyRoPEHeadsNorm", "QKVRoPEAttentionQuantCached"}, Notes: "Llama NORM layout"},
 	{Name: "swiglu", Entries: []string{"SwiGLUInPlace", "FFNSwiGLUQuantCached", "AttnFFNResidualGeGLUQuantCached"}, Notes: "SiLU(gate)*up; GeGLU variant for FFNGeGLUQuantCached / AttnFFNResidualGeGLUQuantCached"},
 	{Name: "attn_qk_softmax_v", Entries: []string{"AttentionScoresInto", "AttentionScoresKV"}, Notes: "GQA attention over GPU KV cache; flash-style fused variant later"},
-	{Name: "kv_append", Entries: []string{"KVCacheInit", "KVCacheAppend", "KVCacheAppendN"}, Notes: "unified-memory MTLBuffer KV per layer"},
+	{Name: "kv_append", Entries: []string{"KVCacheInit", "KVCacheAppend", "KVCacheAppendN", "KVCacheDropOldest", "KVCacheRebuildFromHost"}, Notes: "unified-memory MTLBuffer KV per layer"},
 	{Name: "hidden_resident", Entries: []string{"HiddenUpload", "HiddenDownload", "HiddenResident"}, Notes: "residual stream kept in a MTLBuffer between layers"},
 	{Name: "matmul_mat_q8_0", Entries: []string{"MatMulVecQ8_0Cached"}, Notes: "batched GEMM for prefill (-b), via simdgroup_matrix"},
 }
