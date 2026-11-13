@@ -66,7 +66,7 @@ func (o *Options) Normalize() error {
 		return nil
 	}
 
-	// macOS has no CUDA: offload goes through Metal. Without -tags metal (or while Metal kernels are scaffold) openMetalGPU rejects NGL>0.
+	// macOS has no CUDA: offload goes through Metal. Without -tags metal (or when the Metal runtime is not built in) openMetalGPU rejects NGL>0.
 	if runtime.GOOS == "darwin" {
 		g, err := openMetalGPU()
 		if err != nil {

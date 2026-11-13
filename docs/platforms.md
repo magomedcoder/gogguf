@@ -2,11 +2,11 @@
 
 Where you can run GoGGUF, and how to use a GPU.
 
-|                  | Works now                                                               | Planned             |
-|------------------|-------------------------------------------------------------------------|---------------------|
-| **CPU**          | Linux, macOS, Windows                                                   | -                   |
-| **GPU (`-ngl`)** | **Linux + NVIDIA**; Windows driver load (`nvcuda.dll`, needs CGO + GPU) | macOS Metal kernels |
-| **Other GPUs**   | -                                                                       | AMD / Intel         |
+|                  | Works now                                                                                                      | Planned                         |
+|------------------|----------------------------------------------------------------------------------------------------------------|---------------------------------|
+| **CPU**          | Linux, macOS, Windows                                                                                          | -                               |
+| **GPU (`-ngl`)** | **Linux + NVIDIA**; Windows driver load (`nvcuda.dll`, needs CGO + GPU); macOS Metal B1 decode (`-tags metal`) | Metal residency / GEMM (B2, B3) |
+| **Other GPUs**   | -                                                                                                              | AMD / Intel                     |
 
 Tested on **GTX 1050 Ti (4 GB)**, **RTX 5060 Ti (16 GB)**, **Quadro RTX 6000 (24 GB)**.
 
@@ -95,19 +95,20 @@ HF cache default: `~/.cache/huggingface/hub` (Unix) or `%LOCALAPPDATA%\huggingfa
 ## macOS
 
 - **CPU:** yes (`amd64` / `arm64`)  
-- **GPU (`-ngl`):** scaffold only. Build with `-tags metal` wires `-ngl` to `OpenMetal`; while kernels are not ready, NGL>0 still errors with a clear message (CPU: `NGL=0`).  
+- **GPU (`-ngl`):** **Metal B1 decode path** with `-tags metal` (needs cgo + Xcode command line tools). MSL kernels (`matmul_vec_f32`, `matmul_vec_q8_0`, `rmsnorm`, `rope_heads` NeoX, `swiglu`, `attn_qk_softmax_v`) plus a unified-memory GPU KV cache; weights are uploaded to `MTLBuffer`s once by name. Best case: **Qwen3 dense Q8_0**, `-ngl` = all layers. Other quant types, fused/resident layer paths and batched prefill still run on CPU per op (B2/B3). Without `-tags metal`, `-ngl > 0` is rejected (CPU: `NGL=0`).  
 - **mmap:** yes (`mmap`)
 
 ```bash
 go build -o build/gogguf ./cmd/gogguf
 ./build/gogguf run -m model.gguf --chat -p "Hi"
 ./build/gogguf serve -m model.gguf --host 127.0.0.1:8000
-# later, when kernels land:
-# go build -tags metal -o build/gogguf ./cmd/gogguf
-# ./build/gogguf run -m model.gguf -ngl 999 --chat -p "Hi"
+# Metal decode (Apple Silicon / Intel Mac):
+go build -tags metal -o build/gogguf ./cmd/gogguf
+./build/gogguf run -m Qwen3-1.7B-Q8_0.gguf -ngl 999 --chat -p "Hi"
+go test -tags metal ./pkg/device/metal/   # GPU parity tests (skip without Metal)
 ```
 
-Planned: Metal kernels so `-ngl` runs on Apple Silicon / Intel Mac.
+Metal limits (B1): each op is a synchronous command buffer (no residency yet), so decode is correct but not yet fast; B2 adds resident hidden state and fused layer kernels.
 
 ## Windows
 
@@ -135,7 +136,7 @@ Ctrl+C stops `serve`.
 
 ## Planned (GPU roadmap)
 
-- macOS Metal kernels (wiring exists); Windows CUDA needs a real-GPU smoke  
+- Metal B2/B3 (residency, more quants, batched GEMM prefill); Windows CUDA needs a real-GPU smoke  
 - True tensor-parallel / deeper pipeline-parallel across sequences  
 - Batched MoE / remaining arch residency gaps  
 

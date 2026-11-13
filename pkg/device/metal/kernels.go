@@ -2,9 +2,19 @@ package metal
 
 import "slices"
 
-// KernelsImplemented is false until Metal Shading Language kernels back Backend.
-// pkg/model.Options.Normalize uses Backend.Ready (this flag) to decide whether darwin -ngl may offload.
-const KernelsImplemented = false
+// KernelsImplemented (kernels_impl_*.go) is true only in a darwin + cgo build with -tags metal, where the MSL kernels in msl.go back Backend; false everywhere else.
+// pkg/model.Options.Normalize uses Backend.Ready (this flag plus an opened runtime) to decide whether darwin -ngl may offload.
+
+// B1Kernels are the MSL entry points compiled by the darwin runtime for the B1 decode path (each must also be named in PlannedKernels).
+// kv_append has no kernel: unified-memory KV buffers are written from Go with a plain memcpy.
+var B1Kernels = []string{
+	"matmul_vec_f32",
+	"matmul_vec_q8_0",
+	"rmsnorm",
+	"rope_heads",
+	"swiglu",
+	"attn_qk_softmax_v",
+}
 
 // KernelPlan describes one planned Metal compute kernel (nothing is compiled or dispatched yet)
 type KernelPlan struct {
@@ -13,7 +23,7 @@ type KernelPlan struct {
 	Notes   string
 }
 
-// PlannedKernels is the roadmap for a Metal backend, mirroring the CUDA fused set in pkg/device/cuda (not implemented).
+// PlannedKernels is the roadmap for a Metal backend, mirroring the CUDA fused set in pkg/device/cuda; B1Kernels (and kv_append on the host) are implemented, the rest is planned.
 // Order is the intended implementation order: decode matvec first (tg), then ops and residency, then batched GEMM (pp).
 var PlannedKernels = []KernelPlan{
 	{Name: "matmul_vec_f32", Entries: []string{"MatMulVec", "MatMulVecCached"}, Notes: "dense FP32/FP16 matvec, SIMD-group reduction"},

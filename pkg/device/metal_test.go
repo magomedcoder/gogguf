@@ -38,11 +38,11 @@ func TestMetalScaffoldCompute(t *testing.T) {
 	}
 }
 
-// Error text names the entry point and the planned kernel; Ready stays false until kernels land
+// Error text names the entry point and the planned kernel; a Backend without an open runtime is never Ready (with a runtime, Ready follows KernelsImplemented: true only in a darwin+cgo -tags metal build)
 func TestMetalScaffoldErrorsAreDescriptive(t *testing.T) {
 	var b metal.Backend
-	if b.Ready() != metal.KernelsImplemented {
-		t.Fatalf("Ready() = %v, KernelsImplemented = %v", b.Ready(), metal.KernelsImplemented)
+	if b.Ready() {
+		t.Fatalf("Ready() = true on a Backend without runtime (KernelsImplemented = %v)", metal.KernelsImplemented)
 	}
 
 	_, err := b.MatMulVecQ8_0Cached("w", nil, 1, 1, nil)
