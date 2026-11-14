@@ -35,6 +35,10 @@ typedef struct {
 } SwigluParams;
 
 typedef struct {
+    uint32_t n;
+} AddParams;
+
+typedef struct {
     uint32_t seqLen;
     uint32_t nHeads;
     uint32_t nKVHeads;
@@ -56,10 +60,16 @@ enum {
 @property(nonatomic, strong) id<MTLLibrary> library;
 @property(nonatomic, strong) id<MTLComputePipelineState> matF32;
 @property(nonatomic, strong) id<MTLComputePipelineState> matQ8;
+@property(nonatomic, strong) id<MTLComputePipelineState> matQ4_0;
+@property(nonatomic, strong) id<MTLComputePipelineState> matQ4K;
+@property(nonatomic, strong) id<MTLComputePipelineState> addPSO;
 @property(nonatomic, strong) id<MTLComputePipelineState> rms;
 @property(nonatomic, strong) id<MTLComputePipelineState> rope;
 @property(nonatomic, strong) id<MTLComputePipelineState> swiglu;
 @property(nonatomic, strong) id<MTLComputePipelineState> attn;
+// open batch (gguf_metal_batch_begin): dispatches are encoded into batchEnc and committed together by gguf_metal_batch_end
+@property(nonatomic, strong) id<MTLCommandBuffer> batchCB;
+@property(nonatomic, strong) id<MTLComputeCommandEncoder> batchEnc;
 @property(nonatomic, copy) NSString *lastError;
 @property(nonatomic, copy) NSString *deviceName;
 @end
@@ -120,11 +130,14 @@ gguf_metal_t gguf_metal_open(const char *msl_src, char *err, size_t err_len) {
 
         m.matF32 = make_pso(m, "matmul_vec_f32");
         m.matQ8 = make_pso(m, "matmul_vec_q8_0");
+        m.matQ4_0 = make_pso(m, "matmul_vec_q4_0");
+        m.matQ4K = make_pso(m, "matmul_vec_q4_k");
+        m.addPSO = make_pso(m, "add");
         m.rms = make_pso(m, "rmsnorm");
         m.rope = make_pso(m, "rope_heads");
         m.swiglu = make_pso(m, "swiglu");
         m.attn = make_pso(m, "attn_qk_softmax_v");
-        if (m.matF32 == nil || m.matQ8 == nil || m.rms == nil || m.rope == nil || m.swiglu == nil || m.attn == nil) {
+        if (m.matF32 == nil || m.matQ8 == nil || m.matQ4_0 == nil || m.matQ4K == nil || m.addPSO == nil || m.rms == nil || m.rope == nil || m.swiglu == nil || m.attn == nil) {
             set_err(err, err_len, m.lastError);
             return NULL;
         }
@@ -137,6 +150,8 @@ void gguf_metal_close(gguf_metal_t ctx) {
     if (ctx == NULL) {
         return;
     }
+    gguf_metal_batch_abort(ctx);
+
     // transfer ownership back to ARC and drop it
     GgufMetal *m = (__bridge_transfer GgufMetal *)ctx;
     m = nil;
@@ -217,9 +232,25 @@ void gguf_metal_buf_free(gguf_metal_buf_t buf) {
     (void)b;
 }
 
-// run encodes one dispatch (buffers at index 0..n-1, params via setBytes at index n), commits and waits
-static int run(GgufMetal *m, id<MTLComputePipelineState> pso, void *const *bufs, int nbufs, const void *params, size_t plen, MTLSize groups, MTLSize threads) {
+// encode_dispatch binds buffers at index 0..n-1 (optional byte offsets), params via setBytes at index n, and dispatches
+static void encode_dispatch(id<MTLComputeCommandEncoder> enc, id<MTLComputePipelineState> pso, void *const *bufs, const size_t *offs, int nbufs, const void *params, size_t plen, MTLSize groups, MTLSize threads) {
+    [enc setComputePipelineState:pso];
+    for (int i = 0; i < nbufs; i++) {
+        [enc setBuffer:(__bridge id<MTLBuffer>)bufs[i] offset:(offs != NULL ? (NSUInteger)offs[i] : 0) atIndex:(NSUInteger)i];
+    }
+    [enc setBytes:params length:plen atIndex:(NSUInteger)nbufs];
+    [enc dispatchThreadgroups:groups threadsPerThreadgroup:threads];
+}
+
+// run_off encodes one dispatch (buffers at index 0..n-1 with optional byte offsets, params via setBytes at index n).
+// Inside a batch it only encodes; otherwise it commits and waits.
+static int run_off(GgufMetal *m, id<MTLComputePipelineState> pso, void *const *bufs, const size_t *offs, int nbufs, const void *params, size_t plen, MTLSize groups, MTLSize threads) {
     @autoreleasepool {
+        if (m.batchEnc != nil) {
+            encode_dispatch(m.batchEnc, pso, bufs, offs, nbufs, params, plen, groups, threads);
+            return 0;
+        }
+
         id<MTLCommandBuffer> cb = [m.queue commandBuffer];
         if (cb == nil) {
             m.lastError = @"metal: commandBuffer failed";
@@ -232,12 +263,7 @@ static int run(GgufMetal *m, id<MTLComputePipelineState> pso, void *const *bufs,
             return 1;
         }
 
-        [enc setComputePipelineState:pso];
-        for (int i = 0; i < nbufs; i++) {
-            [enc setBuffer:(__bridge id<MTLBuffer>)bufs[i] offset:0 atIndex:(NSUInteger)i];
-        }
-        [enc setBytes:params length:plen atIndex:(NSUInteger)nbufs];
-        [enc dispatchThreadgroups:groups threadsPerThreadgroup:threads];
+        encode_dispatch(enc, pso, bufs, offs, nbufs, params, plen, groups, threads);
         [enc endEncoding];
 
         [cb commit];
@@ -252,14 +278,78 @@ static int run(GgufMetal *m, id<MTLComputePipelineState> pso, void *const *bufs,
     }
 }
 
+static int run(GgufMetal *m, id<MTLComputePipelineState> pso, void *const *bufs, int nbufs, const void *params, size_t plen, MTLSize groups, MTLSize threads) {
+    return run_off(m, pso, bufs, NULL, nbufs, params, plen, groups, threads);
+}
+
+int gguf_metal_batch_begin(gguf_metal_t ctx) {
+    GgufMetal *m = (__bridge GgufMetal *)ctx;
+    if (m.batchCB != nil) {
+        m.lastError = @"metal: batch already open";
+        return 1;
+    }
+
+    id<MTLCommandBuffer> cb = [m.queue commandBuffer];
+    if (cb == nil) {
+        m.lastError = @"metal: commandBuffer failed";
+        return 1;
+    }
+
+    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+    if (enc == nil) {
+        m.lastError = @"metal: computeCommandEncoder failed";
+        return 1;
+    }
+
+    m.batchCB = cb;
+    m.batchEnc = enc;
+
+    return 0;
+}
+
+int gguf_metal_batch_end(gguf_metal_t ctx) {
+    GgufMetal *m = (__bridge GgufMetal *)ctx;
+    if (m.batchCB == nil) {
+        m.lastError = @"metal: no open batch";
+        return 1;
+    }
+
+    id<MTLCommandBuffer> cb = m.batchCB;
+    id<MTLComputeCommandEncoder> enc = m.batchEnc;
+    m.batchCB = nil;
+    m.batchEnc = nil;
+
+    [enc endEncoding];
+    [cb commit];
+    [cb waitUntilCompleted];
+
+    if (cb.status != MTLCommandBufferStatusCompleted) {
+        m.lastError = [NSString stringWithFormat:@"metal: command buffer failed: %@", cb.error.localizedDescription];
+        return 2;
+    }
+
+    return 0;
+}
+
+void gguf_metal_batch_abort(gguf_metal_t ctx) {
+    GgufMetal *m = (__bridge GgufMetal *)ctx;
+    if (m.batchEnc != nil) {
+        [m.batchEnc endEncoding];
+    }
+
+    m.batchCB = nil;
+    m.batchEnc = nil;
+}
+
 static NSUInteger min_uint(NSUInteger a, NSUInteger b) {
     return a < b ? a : b;
 }
 
-static int matmul(gguf_metal_t ctx, id<MTLComputePipelineState> pso, gguf_metal_buf_t w, gguf_metal_buf_t x, gguf_metal_buf_t out, uint32_t rows, uint32_t cols) {
+static int matmul(gguf_metal_t ctx, id<MTLComputePipelineState> pso, gguf_metal_buf_t w, gguf_metal_buf_t x, size_t x_off, gguf_metal_buf_t out, size_t out_off, uint32_t rows, uint32_t cols) {
     GgufMetal *m = (__bridge GgufMetal *)ctx;
     MatParams p = {rows, cols};
     void *bufs[3] = {w, x, out};
+    size_t offs[3] = {0, x_off, out_off};
 
     NSUInteger tg = min_uint(pso.threadExecutionWidth * kRowsPerTG, pso.maxTotalThreadsPerThreadgroup);
     if (tg < pso.threadExecutionWidth * kRowsPerTG) {
@@ -268,35 +358,76 @@ static int matmul(gguf_metal_t ctx, id<MTLComputePipelineState> pso, gguf_metal_
     }
 
     NSUInteger groups = (rows + kRowsPerTG - 1) / kRowsPerTG;
-    return run(m, pso, bufs, 3, &p, sizeof(p), MTLSizeMake(groups, 1, 1), MTLSizeMake(tg, 1, 1));
+    return run_off(m, pso, bufs, offs, 3, &p, sizeof(p), MTLSizeMake(groups, 1, 1), MTLSizeMake(tg, 1, 1));
+}
+
+int gguf_metal_matmul_off(gguf_metal_t ctx, int kind, gguf_metal_buf_t w, gguf_metal_buf_t x, size_t x_off, gguf_metal_buf_t out, size_t out_off, uint32_t rows, uint32_t cols) {
+    GgufMetal *m = (__bridge GgufMetal *)ctx;
+    id<MTLComputePipelineState> pso = nil;
+    switch (kind) {
+    case GGUF_METAL_MAT_F32:
+        pso = m.matF32;
+        break;
+    case GGUF_METAL_MAT_Q8_0:
+        pso = m.matQ8;
+        break;
+    case GGUF_METAL_MAT_Q4_0:
+        pso = m.matQ4_0;
+        break;
+    case GGUF_METAL_MAT_Q4_K:
+        pso = m.matQ4K;
+        break;
+    default:
+        m.lastError = [NSString stringWithFormat:@"metal: unknown matvec kind %d", kind];
+        return 3;
+    }
+
+    return matmul(ctx, pso, w, x, x_off, out, out_off, rows, cols);
 }
 
 int gguf_metal_matmul_f32(gguf_metal_t ctx, gguf_metal_buf_t w, gguf_metal_buf_t x, gguf_metal_buf_t out, uint32_t rows, uint32_t cols) {
-    GgufMetal *m = (__bridge GgufMetal *)ctx;
-    return matmul(ctx, m.matF32, w, x, out, rows, cols);
+    return gguf_metal_matmul_off(ctx, GGUF_METAL_MAT_F32, w, x, 0, out, 0, rows, cols);
 }
 
 int gguf_metal_matmul_q8_0(gguf_metal_t ctx, gguf_metal_buf_t w, gguf_metal_buf_t x, gguf_metal_buf_t out, uint32_t rows, uint32_t cols) {
-    GgufMetal *m = (__bridge GgufMetal *)ctx;
-    return matmul(ctx, m.matQ8, w, x, out, rows, cols);
+    return gguf_metal_matmul_off(ctx, GGUF_METAL_MAT_Q8_0, w, x, 0, out, 0, rows, cols);
 }
 
-int gguf_metal_rmsnorm(gguf_metal_t ctx, gguf_metal_buf_t x, gguf_metal_buf_t weight, gguf_metal_buf_t dst, uint32_t dim, float eps) {
+int gguf_metal_rmsnorm_rows(gguf_metal_t ctx, gguf_metal_buf_t x, size_t x_off, gguf_metal_buf_t weight, gguf_metal_buf_t dst, size_t dst_off, uint32_t dim, uint32_t rows, float eps) {
     GgufMetal *m = (__bridge GgufMetal *)ctx;
     RMSParams p = {dim, eps};
     void *bufs[3] = {x, weight, dst};
+    size_t offs[3] = {x_off, 0, dst_off};
     NSUInteger tg = min_uint(kRMSThreads, m.rms.maxTotalThreadsPerThreadgroup);
-    return run(m, m.rms, bufs, 3, &p, sizeof(p), MTLSizeMake(1, 1, 1), MTLSizeMake(tg, 1, 1));
+    return run_off(m, m.rms, bufs, offs, 3, &p, sizeof(p), MTLSizeMake(rows, 1, 1), MTLSizeMake(tg, 1, 1));
 }
 
-int gguf_metal_rope_heads(gguf_metal_t ctx, gguf_metal_buf_t v, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
+int gguf_metal_rmsnorm(gguf_metal_t ctx, gguf_metal_buf_t x, gguf_metal_buf_t weight, gguf_metal_buf_t dst, uint32_t dim, float eps) {
+    return gguf_metal_rmsnorm_rows(ctx, x, 0, weight, dst, 0, dim, 1, eps);
+}
+
+int gguf_metal_rope_heads_off(gguf_metal_t ctx, gguf_metal_buf_t v, size_t v_off, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
     GgufMetal *m = (__bridge GgufMetal *)ctx;
     RopeParams p = {n_heads, head_dim};
     void *bufs[2] = {v, cos_sin};
+    size_t offs[2] = {v_off, 0};
     NSUInteger total = (NSUInteger)n_heads * (head_dim / 2);
     NSUInteger tg = min_uint(kElemThreads, m.rope.maxTotalThreadsPerThreadgroup);
     NSUInteger groups = (total + tg - 1) / tg;
-    return run(m, m.rope, bufs, 2, &p, sizeof(p), MTLSizeMake(groups, 1, 1), MTLSizeMake(tg, 1, 1));
+    return run_off(m, m.rope, bufs, offs, 2, &p, sizeof(p), MTLSizeMake(groups, 1, 1), MTLSizeMake(tg, 1, 1));
+}
+
+int gguf_metal_rope_heads(gguf_metal_t ctx, gguf_metal_buf_t v, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
+    return gguf_metal_rope_heads_off(ctx, v, 0, cos_sin, n_heads, head_dim);
+}
+
+int gguf_metal_add(gguf_metal_t ctx, gguf_metal_buf_t a, gguf_metal_buf_t b, uint32_t n) {
+    GgufMetal *m = (__bridge GgufMetal *)ctx;
+    AddParams p = {n};
+    void *bufs[2] = {a, b};
+    NSUInteger tg = min_uint(kElemThreads, m.addPSO.maxTotalThreadsPerThreadgroup);
+    NSUInteger groups = ((NSUInteger)n + tg - 1) / tg;
+    return run(m, m.addPSO, bufs, 2, &p, sizeof(p), MTLSizeMake(groups, 1, 1), MTLSizeMake(tg, 1, 1));
 }
 
 int gguf_metal_swiglu(gguf_metal_t ctx, gguf_metal_buf_t gate, gguf_metal_buf_t up, uint32_t n) {

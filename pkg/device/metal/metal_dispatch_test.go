@@ -16,6 +16,13 @@ type fakeGPU struct {
 	kvV   [][]float32
 	kvLen []int
 	kvDim int
+
+	// B2 fake state (fused_test.go)
+	noResident  bool      // hiddenReady() == false
+	resid       []float32 // device-resident hidden state
+	attnDev     []float32 // attention output left on the device by qkvRoPEAttention
+	failQKV     bool
+	failAttnFFN string // "" | "clean" (resid intact) | "dirty" (resid modified)
 }
 
 func (f *fakeGPU) deviceName() string {
@@ -132,9 +139,9 @@ func TestBackendScaffoldNotReady(t *testing.T) {
 }
 
 func TestB1KernelsArePlanned(t *testing.T) {
-	for _, name := range B1Kernels {
+	for _, name := range append(append([]string(nil), B1Kernels...), B2Kernels...) {
 		if !slices.ContainsFunc(PlannedKernels, func(k KernelPlan) bool { return k.Name == name }) {
-			t.Fatalf("B1 kernel %q missing from PlannedKernels", name)
+			t.Fatalf("B1/B2 kernel %q missing from PlannedKernels", name)
 		}
 	}
 }

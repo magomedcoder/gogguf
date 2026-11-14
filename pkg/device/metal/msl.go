@@ -2,13 +2,13 @@
 
 package metal
 
-// mslSource is the Metal Shading Language source for the B1 decode kernels, compiled at runtime by runtime_darwin.go (newLibraryWithSource).
-// Kernel names are listed in B1Kernels; struct layouts must match the param structs in driver_darwin.m (all 4-byte scalars).
+// mslSource is the Metal Shading Language source for the B1 decode kernels plus the B2 additions (add, matmul_vec_q4_0, matmul_vec_q4_k), compiled at runtime by runtime_darwin.go (newLibraryWithSource).
+// Kernel names are listed in B1Kernels / B2Kernels; struct layouts must match the param structs in driver_darwin.m (all 4-byte scalars).
 //
 // Launch geometry (see driver_darwin.m):
 //   - matmul_vec_*: one simdgroup per output row, 4 rows per threadgroup (threadgroup = 4 * threadExecutionWidth threads)
-//   - rmsnorm / attn_qk_softmax_v: one threadgroup per vector / per query head, reductions via simd_sum/simd_max + threadgroup scratch
-//   - rope_heads / swiglu: one thread per element pair / element, grid rounded up to whole threadgroups (kernels bounds-check)
+//   - rmsnorm / attn_qk_softmax_v: one threadgroup per vector / per query head, reductions via simd_sum/simd_max + threadgroup scratch (rmsnorm normalizes `rows` consecutive dim-vectors, one threadgroup each: rows = nHeads is the per-head QK-norm, rows = 1 the plain norm)
+//   - rope_heads / swiglu / add: one thread per element pair / element, grid rounded up to whole threadgroups (kernels bounds-check)
 const mslSource = `
 #include <metal_stdlib>
 using namespace metal;
@@ -34,6 +34,10 @@ struct SwigluParams {
     uint n;
 };
 
+struct AddParams {
+    uint n;
+};
+
 struct AttnParams {
     uint seqLen;
     uint nHeads;
@@ -49,6 +53,22 @@ struct block_q8_0 {
     char qs[32];
 };
 static_assert(sizeof(block_q8_0) == 34, "block_q8_0 must match the ggml Q8_0 layout");
+
+// block_q4_0 as read by pkg/quant (BlockQ4_0Size = 18): fp16 scale + 16 bytes, element i is nibble (i & 1) of byte i / 2, value = d * (nibble - 8)
+struct block_q4_0 {
+    half d;
+    uchar qs[16];
+};
+static_assert(sizeof(block_q4_0) == 18, "block_q4_0 must match pkg/quant BlockQ4_0Size");
+
+// ggml block_q4_K (pkg/quant BlockQ4_KSize = 144): fp16 d, fp16 dmin, 12 bytes of packed 6-bit scales/mins, 128 bytes of nibbles (256 values)
+struct block_q4_K {
+    half d;
+    half dmin;
+    uchar scales[12];
+    uchar qs[128];
+};
+static_assert(sizeof(block_q4_K) == 144, "block_q4_K must match the ggml Q4_K layout");
 
 // ---- threadgroup reductions (partial has >= 32 floats: threadgroup <= 1024 threads, simd width >= 32) ----
 
@@ -149,13 +169,107 @@ kernel void matmul_vec_q8_0(
     }
 }
 
-// ---- rmsnorm: dst = x * rsqrt(mean(x^2) + eps) * weight (dst may alias x) ----
+// ---- matmul_vec_q4_0: fused dequant (d * (nibble - 8)) + dot, cols % 32 == 0 ----
+
+kernel void matmul_vec_q4_0(
+    device const block_q4_0 *W [[buffer(0)]],
+    device const float *x [[buffer(1)]],
+    device float *out [[buffer(2)]],
+    constant MatParams &p [[buffer(3)]],
+    uint tg [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sgw [[threads_per_simdgroup]])
+{
+    uint row = tg * ROWS_PER_TG + sg;
+    if (row >= p.rows) {
+        return;
+    }
+
+    uint nb = p.cols >> 5;
+    device const block_q4_0 *blk = W + (ulong)row * nb;
+    float sum = 0.0f;
+    for (uint i = lane; i < p.cols; i += sgw) {
+        device const block_q4_0 &b = blk[i >> 5];
+        uint q = (uint(b.qs[(i & 31u) >> 1]) >> (4u * (i & 1u))) & 0xFu;
+        sum += float(b.d) * float(int(q) - 8) * x[i];
+    }
+
+    sum = simd_sum(sum);
+    if (lane == 0) {
+        out[row] = sum;
+    }
+}
+
+// ---- matmul_vec_q4_k: ggml Q4_K super-blocks (256 values), cols % 256 == 0.
+// Per 64-value group g: low nibbles of qs[g*32 .. +32) are values g*64 + l (scale/min 2g), high nibbles are values g*64 + 32 + l (scale/min 2g+1).
+// Lanes of the simdgroup own l = lane, lane + width, ... so qs reads are contiguous. ----
+
+static void get_scale_min_k4(uint j, device const uchar *q, thread uint &sc, thread uint &mn) {
+    if (j < 4) {
+        sc = uint(q[j]) & 63u;
+        mn = uint(q[j + 4]) & 63u;
+    } else {
+        sc = (uint(q[j + 4]) & 0xFu) | ((uint(q[j - 4]) >> 6) << 4);
+        mn = (uint(q[j + 4]) >> 4) | ((uint(q[j]) >> 6) << 4);
+    }
+}
+
+kernel void matmul_vec_q4_k(
+    device const block_q4_K *W [[buffer(0)]],
+    device const float *x [[buffer(1)]],
+    device float *out [[buffer(2)]],
+    constant MatParams &p [[buffer(3)]],
+    uint tg [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sgw [[threads_per_simdgroup]])
+{
+    uint row = tg * ROWS_PER_TG + sg;
+    if (row >= p.rows) {
+        return;
+    }
+
+    uint nb = p.cols >> 8;
+    device const block_q4_K *blk = W + (ulong)row * nb;
+    float sum = 0.0f;
+    for (uint sb = 0; sb < nb; sb++) {
+        device const block_q4_K &b = blk[sb];
+        float d = float(b.d);
+        float dmin = float(b.dmin);
+        device const uchar *sc = &b.scales[0];
+        device const float *xs = x + (ulong)sb * 256u;
+        for (uint g = 0; g < 4; g++) {
+            uint s1, m1, s2, m2;
+            get_scale_min_k4(2 * g, sc, s1, m1);
+            get_scale_min_k4(2 * g + 1, sc, s2, m2);
+            float d1 = d * float(s1);
+            float d2 = d * float(s2);
+            float mm1 = dmin * float(m1);
+            float mm2 = dmin * float(m2);
+            for (uint l = lane; l < 32; l += sgw) {
+                uint q = b.qs[g * 32 + l];
+                sum += (d1 * float(q & 0xFu) - mm1) * xs[g * 64 + l];
+                sum += (d2 * float(q >> 4) - mm2) * xs[g * 64 + 32 + l];
+            }
+        }
+    }
+
+    sum = simd_sum(sum);
+    if (lane == 0) {
+        out[row] = sum;
+    }
+}
+
+// ---- rmsnorm: dst = x * rsqrt(mean(x^2) + eps) * weight (dst may alias x).
+// One threadgroup per dim-vector: threadgroup r normalizes x[r*dim ..) into dst[r*dim ..) with the shared weight[dim] (grid of 1 = plain RMSNorm, grid of nHeads = per-head QK-norm) ----
 
 kernel void rmsnorm(
-    device const float *x [[buffer(0)]],
+    device const float *xIn [[buffer(0)]],
     device const float *weight [[buffer(1)]],
-    device float *dst [[buffer(2)]],
+    device float *dstOut [[buffer(2)]],
     constant RMSParams &p [[buffer(3)]],
+    uint row [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
     uint tgSize [[threads_per_threadgroup]],
     uint sg [[simdgroup_index_in_threadgroup]],
@@ -164,6 +278,9 @@ kernel void rmsnorm(
 {
     threadgroup float partial[32];
     uint nsg = (tgSize + sgw - 1) / sgw;
+
+    device const float *x = xIn + (ulong)row * p.dim;
+    device float *dst = dstOut + (ulong)row * p.dim;
 
     float s = 0.0f;
     for (uint i = tid; i < p.dim; i += tgSize) {
@@ -218,6 +335,21 @@ kernel void swiglu(
 
     float g = gate[gid];
     gate[gid] = (g / (1.0f + exp(-g))) * up[gid];
+}
+
+// ---- add: a[i] += b[i] (residual add on the device-resident hidden state) ----
+
+kernel void add(
+    device float *a [[buffer(0)]],
+    device const float *b [[buffer(1)]],
+    constant AddParams &p [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= p.n) {
+        return;
+    }
+
+    a[gid] += b[gid];
 }
 
 // ---- attn_qk_softmax_v: one threadgroup per query head, GQA (kv head = head / (nHeads / nKVHeads)).

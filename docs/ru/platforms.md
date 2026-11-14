@@ -2,11 +2,11 @@
 
 Где можно запускать GoGGUF и как включить GPU.
 
-|                  | Сейчас                                                                                                                | Планируется                     |
-|------------------|-----------------------------------------------------------------------------------------------------------------------|---------------------------------|
-| **CPU**          | Linux, macOS, Windows                                                                                                 | -                               |
-| **GPU (`-ngl`)** | **Linux + NVIDIA**; Windows: загрузка драйвера (`nvcuda.dll`, нужны CGO и GPU); macOS Metal B1 decode (`-tags metal`) | Metal residency / GEMM (B2, B3) |
-| **Другие GPU**   | -                                                                                                                     | AMD / Intel                     |
+|                  | Сейчас                                                                                                                                                   | Планируется                                                  |
+|------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------|
+| **CPU**          | Linux, macOS, Windows                                                                                                                                    | -                                                            |
+| **GPU (`-ngl`)** | **Linux + NVIDIA**; Windows: загрузка драйвера (`nvcuda.dll`, нужны CGO и GPU); macOS Metal B1 decode + B2 residency / fused Q8_0 decode (`-tags metal`) | Metal GEMM prefill (B3), остальные fused quant, smoke на Mac |
+| **Другие GPU**   | -                                                                                                                                                        | AMD / Intel                                                  |
 
 Тестировалось на **GTX 1050 Ti (4 GB)**, **RTX 5060 Ti (16 GB)**, **Quadro RTX 6000 (24 GB)**.
 
@@ -95,7 +95,7 @@ HF cache: `~/.cache/huggingface/hub` (Unix) или `%LOCALAPPDATA%\huggingface\h
 ## macOS
 
 - **CPU:** да (`amd64` / `arm64`)  
-- **GPU (`-ngl`):** **Metal B1 decode** при сборке `-tags metal` (нужны cgo и Xcode command line tools). MSL kernels (`matmul_vec_f32`, `matmul_vec_q8_0`, `rmsnorm`, `rope_heads` NeoX, `swiglu`, `attn_qk_softmax_v`) и GPU KV в unified memory; веса один раз загружаются в `MTLBuffer` по имени. Лучший случай: **Qwen3 dense Q8_0**, `-ngl` = все слои. Остальные quant, fused/resident пути слоя и batch prefill пока на CPU по операциям (B2/B3). Без `-tags metal` `-ngl > 0` отклоняется (CPU: `NGL=0`).  
+- **GPU (`-ngl`):** **Metal B1 decode + B2 residency** при сборке `-tags metal` (нужны cgo и Xcode command line tools). MSL kernels (`matmul_vec_f32`, `matmul_vec_q8_0`, `matmul_vec_q4_0`, `matmul_vec_q4_k`, `rmsnorm`, `rope_heads` NeoX, `swiglu`, `add`, `attn_qk_softmax_v`) и GPU KV в unified memory; веса один раз загружаются в `MTLBuffer` по имени. Лучший случай: **Qwen3 dense Q8_0**, `-ngl` = все слои: общий путь `gpuresid` держит residual в `MTLBuffer` между слоями (`HiddenResident()`; один `HiddenUpload` на токен), выполняет QKV+QK-norm+RoPE+KV append+attention и WO+residual+FFN+residual **одним command buffer на слой**, а `LogitsFromDevice` копирует на host только logits. `Backend.Ready()` (runtime открыт, kernels собраны) разрешает offload по `-ngl`; `HiddenResident()` дополнительно требует в runtime rmsnorm+add+swiglu+attention+Q8_0 matvec. Fused путь - только Q8_0 + NeoX: другие quant, Llama-RoPE, GeGLU/Gemma и batch prefill идут через B1 по операциям (один синхронный command buffer на операцию, всё ещё на GPU) или на CPU. Matvec Q4_0 / Q4_K доступен по операциям и для `lm_head`. Без `-tags metal` `-ngl > 0` отклоняется (CPU: `NGL=0`).  
 - **mmap:** да (`mmap`)
 
 ```bash
@@ -108,7 +108,7 @@ go build -tags metal -o build/gogguf ./cmd/gogguf
 go test -tags metal ./pkg/device/metal/   # parity-тесты GPU (skip без Metal)
 ```
 
-Ограничения Metal (B1): каждая операция - синхронный command buffer (residency пока нет), поэтому decode корректен, но ещё не быстрый; B2 добавит resident hidden и fused kernels слоя.
+Ограничения Metal: B1 - один синхронный command buffer на операцию; B2 (Qwen3 dense Q8_0) сводит слой к двум command buffer с device-resident residual. Бенчмарки и smoke на Mac пока не прогнаны; Q4_0 следует nibble-раскладке `pkg/quant`.
 
 ## Windows
 
@@ -136,7 +136,7 @@ Ctrl+C останавливает `serve`.
 
 ## Планируется (GPU)
 
-- Metal B2/B3 (residency, больше quant, GEMM prefill); smoke CUDA на реальной Windows-машине  
+- Metal B3 (GEMM prefill), fused слои Q4_0/Q4_K/Q5_K/Q6_K, Llama-RoPE / Gemma на Metal, smoke и bench на Mac; smoke CUDA на реальной Windows-машине  
 - True tensor-parallel / более глубокий pipeline-parallel по последовательностям  
 - Batched MoE / оставшиеся gaps residency  
 

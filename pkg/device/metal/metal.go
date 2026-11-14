@@ -3,6 +3,7 @@ package metal
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/dtype"
@@ -22,6 +23,8 @@ type gpu interface {
 	matMulF32(name string, matrix []float32, rows, cols int, vec, dst []float32) error
 	// matMulQ8_0 ggml Q8_0 matrix (34-byte blocks) * vec -> dst; name == "" uploads raw for this call only
 	matMulQ8_0(name string, raw []byte, rows, cols int, vec, dst []float32) error
+	// matMulQuant same for the other native matvec quants (Q4_0 / Q4_K, pkg/quant layouts); t selects the kernel
+	matMulQuant(t dtype.DType, name string, raw []byte, rows, cols int, vec, dst []float32) error
 	rmsNorm(dst, x, weight []float32, eps float32) error
 	ropeHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error
 	swiglu(gate, up []float32) error
@@ -33,6 +36,19 @@ type gpu interface {
 	kvDropOldest(layer, n int) error
 	kvRebuild(layer int, k, v []float32, n int) error
 	attentionKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error
+
+	// B2 residency / fused decode (fused.go). The residual lives in a device buffer; Backend owns the "active" flag and the contracts (h == nil, x == nil), the runtime only runs the kernels.
+	// hiddenReady reports that the runtime has every kernel residency needs (rmsnorm + add + swiglu + attention + Q8_0 matvec)
+	hiddenReady() bool
+	hiddenUpload(x []float32) error
+	hiddenDownload(dst []float32) error
+	// qkvRoPEAttention: resident == true reads RMSNorm(resid, attn_norm) instead of a.h; the attention output stays on the device for attnFFNResidual
+	qkvRoPEAttention(a *qkvArgs, resident bool) error
+	// attnFFNResidual: resident == true works on resid in place; otherwise a.x is the residual (staged in resid, written back on success).
+	// dirty reports that resid may have been modified when err != nil (the GPU work was committed and failed)
+	attnFFNResidual(a *attnFFNArgs, resident bool) (dirty bool, err error)
+	ffnSwiGLU(a *ffnArgs) error
+	logitsFromResident(a *logitsArgs) error
 	close() error
 }
 
@@ -47,15 +63,21 @@ func unavailable(op string) error {
 
 // Ready reports whether the backend can run model layers: MSL kernels are built in (KernelsImplemented) and a device runtime is open.
 // This is what enables -ngl on darwin in pkg/model.Options.Normalize; a scaffold Backend (no -tags metal, or non-darwin) is never ready.
+// Ready only gates offload (B1 per-op path); the B2 device-resident fused path is advertised separately by HiddenResident (fused.go), which pkg/exec/gpuresid checks on top of it.
 func (b *Backend) Ready() bool {
 	return KernelsImplemented && b != nil && b.rt != nil
 }
 
-// Backend - Metal device: B1 decode ops (matvec F32/Q8_0, RMSNorm, RoPE NeoX, SwiGLU, attention, GPU KV) run on the runtime when open;
-// everything else (and a Backend without runtime) returns ErrUnavailable so callers fall back to the CPU path
+// Backend - Metal device: B1 decode ops (matvec F32/Q8_0/Q4_0/Q4_K, RMSNorm, RoPE NeoX, SwiGLU, attention, GPU KV) and the B2 Q8_0 NeoX fused decode path (device-resident hidden state, fused QKV / attn+FFN / logits) run on the runtime when open;
+// everything else (and a Backend without runtime) returns ErrUnavailable so callers fall back to the B1 per-op path or the CPU
 type Backend struct {
 	name string
 	rt   gpu
+
+	// device-resident hidden state (fused.go); guarded by mu, held across each fused call like the CUDA backend does
+	mu        sync.Mutex
+	hidden    bool // resid holds the current hidden state
+	hiddenLen int  // floats in resid while hidden
 }
 
 // Name returns device name, e.g. "Metal Apple M2 Pro" or "Metal (scaffold)"
@@ -75,7 +97,7 @@ func (b *Backend) Name() string {
 	return b.name
 }
 
-// VRAMInfo: Metal allocations / recommended working set (unified memory); zeros without runtime
+// VRAMInfo Metal allocations / recommended working set (unified memory); zeros without runtime
 func (b *Backend) VRAMInfo() (used, total uint64, err error) {
 	if b == nil || b.rt == nil {
 		return 0, 0, nil
@@ -159,16 +181,75 @@ func (b *Backend) MatMulVecQ8_0Cached(name string, raw []byte, rows, cols int, v
 	return dst, nil
 }
 
+// quantGeometry returns the block width (values) and block size (bytes) of a Metal matvec quant (pkg/quant layouts)
+func quantGeometry(t dtype.DType) (qk, blockBytes int, ok bool) {
+	switch t {
+	case dtype.Q8_0:
+		return quant.QK8_0, quant.BlockQ8_0Size, true
+	case dtype.Q4_0:
+		return quant.QK4_0, quant.BlockQ4_0Size, true
+	case dtype.Q4_K:
+		return quant.QK_K, quant.BlockQ4_KSize, true
+	default:
+		return 0, 0, false
+	}
+}
+
+// checkQuantMatrix validates a rows x cols matrix of type t held in raw
+func checkQuantMatrix(op string, t dtype.DType, raw []byte, rows, cols int) error {
+	qk, bs, ok := quantGeometry(t)
+	if !ok {
+		return unavailable(op)
+	}
+
+	if rows < 1 || cols < 1 {
+		return fmt.Errorf("metal: %s: rows=%d cols=%d", op, rows, cols)
+	}
+
+	if cols%qk != 0 {
+		return fmt.Errorf("metal: %s: cols=%d not divisible by %d", op, cols, qk)
+	}
+
+	if len(raw) < rows*(cols/qk)*bs {
+		return fmt.Errorf("metal: %s: %s matrix too short", op, t)
+	}
+
+	return nil
+}
+
+// matMulQuantCached is the shared Q4_0 / Q4_K matvec entry (Q8_0 keeps its own wrapper above)
+func (b *Backend) matMulQuantCached(op string, t dtype.DType, name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	rt, err := b.runtime(op)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkQuantMatrix(op, t, raw, rows, cols); err != nil {
+		return nil, err
+	}
+
+	if len(vec) < cols {
+		return nil, fmt.Errorf("metal: %s: len(vec)=%d, cols=%d", op, len(vec), cols)
+	}
+
+	dst := make([]float32, rows)
+	if err := rt.matMulQuant(t, name, raw, rows, cols, vec[:cols], dst); err != nil {
+		return nil, err
+	}
+
+	return dst, nil
+}
+
 func (b *Backend) MatMulVecQ8_1Cached(string, []byte, int, int, []float32) ([]float32, error) {
 	return nil, unavailable("MatMulVecQ8_1Cached")
 }
 
-func (b *Backend) MatMulVecQ4_0Cached(string, []byte, int, int, []float32) ([]float32, error) {
-	return nil, unavailable("MatMulVecQ4_0Cached")
+func (b *Backend) MatMulVecQ4_0Cached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return b.matMulQuantCached("MatMulVecQ4_0Cached", dtype.Q4_0, name, raw, rows, cols, vec)
 }
 
-func (b *Backend) MatMulVecQ4_KCached(string, []byte, int, int, []float32) ([]float32, error) {
-	return nil, unavailable("MatMulVecQ4_KCached")
+func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return b.matMulQuantCached("MatMulVecQ4_KCached", dtype.Q4_K, name, raw, rows, cols, vec)
 }
 
 func (b *Backend) MatMulVecQ5_KCached(string, []byte, int, int, []float32) ([]float32, error) {
@@ -303,45 +384,12 @@ func (b *Backend) QKVRoPEAttentionQ8_0Cached(_, _, _, _, _ string, _, _, _ []byt
 	return unavailable("QKVRoPEAttentionQ8_0Cached")
 }
 
-func (b *Backend) FFNSwiGLUQuantCached(dtype.DType, string, string, string, []byte, []byte, []byte, []float32, []float32, int, int) error {
-	return unavailable("FFNSwiGLUQuantCached")
-}
-
 func (b *Backend) FFNGeGLUQuantCached(dtype.DType, string, string, string, []byte, []byte, []byte, []float32, []float32, int, int) error {
 	return unavailable("FFNGeGLUQuantCached")
 }
 
-func (b *Backend) AttnFFNResidualQuantCached(_ dtype.DType, _, _, _, _, _ string, _, _, _, _ []byte, _, _, _ []float32, _, _, _ int, _ float32) error {
-	return unavailable("AttnFFNResidualQuantCached")
-}
-
 func (b *Backend) AttnFFNResidualGeGLUQuantCached(_ dtype.DType, _, _, _, _, _, _, _ string, _, _, _, _ []byte, _, _, _, _, _ []float32, _, _, _ int, _ float32) error {
 	return unavailable("AttnFFNResidualGeGLUQuantCached")
-}
-
-func (b *Backend) QKVRoPEAttentionQuantCached(_ dtype.DType, _ compute.RoPEMode, _, _, _, _, _, _ string, _, _, _ []byte, _, _, _, _, _, _, _, _, _ []float32, _, _, _, _, _, _, _ int, _ float32) error {
-	return unavailable("QKVRoPEAttentionQuantCached")
-}
-
-// HiddenResident device-resident hidden state will require Metal kernels
-func (b *Backend) HiddenResident() bool {
-	return false
-}
-
-func (b *Backend) HiddenActive() bool {
-	return false
-}
-
-func (b *Backend) HiddenUpload([]float32) error {
-	return unavailable("HiddenUpload")
-}
-
-func (b *Backend) HiddenDownload([]float32) error {
-	return unavailable("HiddenDownload")
-}
-
-func (b *Backend) LogitsFromDevice(dtype.DType, string, []float32, string, []byte, []float32, []float32, int, int, float32) error {
-	return unavailable("LogitsFromDevice")
 }
 
 func (b *Backend) LayerNormResidInto([]float32, []float32, []float32, string, string, float32) error {
@@ -497,6 +545,10 @@ func (b *Backend) Close() error {
 	if b == nil || b.rt == nil {
 		return nil
 	}
+
+	b.mu.Lock()
+	b.hidden, b.hiddenLen = false, 0
+	b.mu.Unlock()
 
 	rt := b.rt
 	b.rt = nil

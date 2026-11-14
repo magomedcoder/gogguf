@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
@@ -46,8 +47,10 @@ type mtl struct {
 	ctx  C.gguf_metal_t
 	name string
 
-	f32 map[string]*devWeight
-	q8  map[string]*devWeight
+	f32  map[string]*devWeight
+	q8   map[string]*devWeight
+	q4_0 map[string]*devWeight
+	q4_k map[string]*devWeight
 
 	// scratch: grown on demand (power-of-two) and reused across calls
 	vec, out, tmpW  devBuf // matvec input / output / uncached weight upload
@@ -62,9 +65,15 @@ type mtl struct {
 	kvMaxSeq, kvDim int
 	kvK, kvV        []devBuf
 	kvLen           []int // cached positions per layer
+
+	// B2 residency / fused decode (fused_darwin.go): resid is the device-resident residual stream (Backend owns the "active" flag); the other buffers are per-layer scratch reused across fused calls.
+	resid              devBuf
+	hn, fq, fo, fg, fu devBuf // normed hidden / Q / WO-and-down output / gate / up
+	fattn              devBuf // attention output, left on the device between QKV and AttnFFN
+	fattnLen           int    // floats valid in fattn (0 = none)
 }
 
-// openGPU creates the Metal device and compiles the B1 MSL kernels
+// openGPU creates the Metal device and compiles the B1/B2 MSL kernels
 func openGPU() (gpu, string, error) {
 	src := C.CString(mslSource)
 	defer C.free(unsafe.Pointer(src))
@@ -79,6 +88,8 @@ func openGPU() (gpu, string, error) {
 		ctx:  ctx,
 		f32:  make(map[string]*devWeight),
 		q8:   make(map[string]*devWeight),
+		q4_0: make(map[string]*devWeight),
+		q4_k: make(map[string]*devWeight),
 		name: C.GoString(C.gguf_metal_device_name(ctx)),
 	}
 
@@ -237,6 +248,24 @@ func (r *mtl) matMulF32(name string, matrix []float32, rows, cols int, vec, dst 
 }
 
 func (r *mtl) matMulQ8_0(name string, raw []byte, rows, cols int, vec, dst []float32) error {
+	return r.matMulQuant(dtype.Q8_0, name, raw, rows, cols, vec, dst)
+}
+
+// quantKind maps a quant type to its matvec kernel kind, block geometry and weight cache
+func (r *mtl) quantKind(t dtype.DType) (kind C.int, qk, blockBytes int, cache map[string]*devWeight, err error) {
+	switch t {
+	case dtype.Q8_0:
+		return C.GGUF_METAL_MAT_Q8_0, quant.QK8_0, quant.BlockQ8_0Size, r.q8, nil
+	case dtype.Q4_0:
+		return C.GGUF_METAL_MAT_Q4_0, quant.QK4_0, quant.BlockQ4_0Size, r.q4_0, nil
+	case dtype.Q4_K:
+		return C.GGUF_METAL_MAT_Q4_K, quant.QK_K, quant.BlockQ4_KSize, r.q4_k, nil
+	default:
+		return 0, 0, 0, nil, unavailable("matmul " + t.String())
+	}
+}
+
+func (r *mtl) matMulQuant(t dtype.DType, name string, raw []byte, rows, cols int, vec, dst []float32) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -244,8 +273,13 @@ func (r *mtl) matMulQ8_0(name string, raw []byte, rows, cols int, vec, dst []flo
 		return err
 	}
 
-	bytes := rows * (cols / quant.QK8_0) * quant.BlockQ8_0Size
-	w, err := r.weight(r.q8, name, unsafe.Pointer(&raw[0]), bytes, rows, cols)
+	kind, qk, bs, cache, err := r.quantKind(t)
+	if err != nil {
+		return err
+	}
+
+	bytes := rows * (cols / qk) * bs
+	w, err := r.weight(cache, name, unsafe.Pointer(&raw[0]), bytes, rows, cols)
 	if err != nil {
 		return err
 	}
@@ -258,7 +292,7 @@ func (r *mtl) matMulQ8_0(name string, raw []byte, rows, cols int, vec, dst []flo
 		return err
 	}
 
-	if err := r.check("matmul_vec_q8_0", C.gguf_metal_matmul_q8_0(r.ctx, w, r.vec.h, r.out.h, C.uint32_t(rows), C.uint32_t(cols))); err != nil {
+	if err := r.check("matmul_vec_"+t.String(), C.gguf_metal_matmul_off(r.ctx, C.int(kind), w, r.vec.h, 0, r.out.h, 0, C.uint32_t(rows), C.uint32_t(cols))); err != nil {
 		return err
 	}
 
@@ -574,7 +608,7 @@ func (r *mtl) close() error {
 		return nil
 	}
 
-	for _, cache := range []map[string]*devWeight{r.f32, r.q8} {
+	for _, cache := range []map[string]*devWeight{r.f32, r.q8, r.q4_0, r.q4_k} {
 		for name, w := range cache {
 			r.free(&w.buf)
 			delete(cache, name)
@@ -583,7 +617,7 @@ func (r *mtl) close() error {
 
 	r.kvFree()
 
-	for _, d := range []*devBuf{&r.vec, &r.out, &r.tmpW, &r.nx, &r.nw, &r.nd, &r.rope, &r.ropeV, &r.gate, &r.up, &r.aq, &r.ak, &r.av, &r.ao, &r.scores, &r.kvScores} {
+	for _, d := range []*devBuf{&r.vec, &r.out, &r.tmpW, &r.nx, &r.nw, &r.nd, &r.rope, &r.ropeV, &r.gate, &r.up, &r.aq, &r.ak, &r.av, &r.ao, &r.scores, &r.kvScores, &r.resid, &r.hn, &r.fq, &r.fo, &r.fg, &r.fu, &r.fattn} {
 		r.free(d)
 	}
 
