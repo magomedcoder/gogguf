@@ -11,7 +11,7 @@ import (
 
 // Every B1/B2 kernel is defined in the embedded MSL (static check, runs without a GPU)
 func TestMSLDefinesB1Kernels(t *testing.T) {
-	all := append(append([]string(nil), B1Kernels...), B2Kernels...)
+	all := allKernels()
 	for _, name := range all {
 		if !strings.Contains(mslSource, "kernel void "+name+"(") {
 			t.Fatalf("mslSource has no kernel %q", name)
@@ -19,7 +19,7 @@ func TestMSLDefinesB1Kernels(t *testing.T) {
 	}
 
 	if got, want := strings.Count(mslSource, "kernel void "), len(all); got != want {
-		t.Fatalf("mslSource defines %d kernels, B1Kernels+B2Kernels list %d", got, want)
+		t.Fatalf("mslSource defines %d kernels, B1Kernels+B2Kernels+B3Kernels list %d", got, want)
 	}
 }
 

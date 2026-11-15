@@ -73,6 +73,25 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools/
 
 **Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4` (`-b 32 -n 128 -ngl 999`). **Paired ratio re-verify** against local `llama-bench` (e.g. `/home/.../llama-b10988/llama-bench`) when `/dev/nvidia*` is available - absolute baseline above; Wave-1 PCIe cuts should raise prefill/decode before computing `prefill_tps/pp` and `decode_tps/tg`.
 
+### Metal (macOS) bench protocol
+
+Not run yet: no numbers are recorded here. Run on the Mac you want to measure (Apple Silicon or Intel + Metal GPU), same GGUF / prompt / `-n` / `-b` for every row:
+
+```bash
+# GoGGUF (Metal build: cgo + Xcode command line tools)
+PROMPT=$(python3 -c 'print("Hello world. "*200)')   # ~600 tokens
+go test -tags metal ./pkg/device/metal/             # parity first (GPU tests skip without Metal)
+go build -tags metal -o build/tools ./cmd/tools/
+./build/tools bench -m models/Qwen3-1.7B-Q8_0.gguf -p "$PROMPT" -n 128 -b 1  -ngl 999 --runs 3 --json   # loop / decode-shaped baseline
+./build/tools bench -m models/Qwen3-1.7B-Q8_0.gguf -p "$PROMPT" -n 128 -b 32 -ngl 999 --runs 3 --json   # B3 GEMM prefill
+./build/tools bench -m models/Qwen3-1.7B-Q8_0.gguf -p "$PROMPT" -n 128 -b 32 -ngl 0   --runs 3 --json   # CPU reference
+
+# llama.cpp Metal build on the same machine / GGUF / -ngl / -b
+./llama-bench -m models/Qwen3-1.7B-Q8_0.gguf -p 512 -n 128 -ngl 999 -b 32
+```
+
+Record per run: machine + chip, macOS version, GoGGUF commit, `prefill_tps`, `decode_tps`, `prompt_tokens`, then compute `prefill_tps / pp` and `decode_tps / tg` against `llama-bench`. Also compare greedy tokens vs `-ngl 0` (`tools greedy`) so a faster run is not a wrong one. Only Q8_0 has the GEMM kernel (`matmul_mat_q8_0`, thread-per-output); other quants still loop matvec, so bench them separately and do not compare with the Q8_0 row. Results go into [todo.md](../../GoGGUF-docs/todo.md) § B3.
+
 ## `greedy`
 
 Greedy decode N tokens as JSON token IDs (for golden).

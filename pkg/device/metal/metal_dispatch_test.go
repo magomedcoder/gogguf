@@ -139,9 +139,9 @@ func TestBackendScaffoldNotReady(t *testing.T) {
 }
 
 func TestB1KernelsArePlanned(t *testing.T) {
-	for _, name := range append(append([]string(nil), B1Kernels...), B2Kernels...) {
+	for _, name := range allKernels() {
 		if !slices.ContainsFunc(PlannedKernels, func(k KernelPlan) bool { return k.Name == name }) {
-			t.Fatalf("B1/B2 kernel %q missing from PlannedKernels", name)
+			t.Fatalf("B1/B2/B3 kernel %q missing from PlannedKernels", name)
 		}
 	}
 }

@@ -49,6 +49,14 @@ type gpu interface {
 	attnFFNResidual(a *attnFFNArgs, resident bool) (dirty bool, err error)
 	ffnSwiGLU(a *ffnArgs) error
 	logitsFromResident(a *logitsArgs) error
+
+	// B3 prefill / batch (batch.go): x is [batch][cols], out [batch][rows], token b at offset b*cols / b*rows. All GPU work of one call is a single command buffer.
+	// matMulMatQ8_0: W*X[batch] in ONE matmul_mat_q8_0 launch (batch >= 2; batch == 1 goes through matMulQ8_0). name == "" uploads raw for this call only
+	matMulMatQ8_0(name string, raw []byte, rows, cols int, x []float32, batch int, out []float32) error
+	// ffnSwiGLUMatQ8_0: gate/up GEMM -> SwiGLU -> down GEMM with the activations on the device; x and out may alias
+	ffnSwiGLUMatQ8_0(a *ffnMatArgs) error
+	// attentionKVBatch causal multi-query attention over the device KV cache: query i (of n) sees pastLen+i+1 positions
+	attentionKVBatch(layer int, dst, q []float32, n, pastLen, nHeads, nKVHeads, headDim int) error
 	close() error
 }
 

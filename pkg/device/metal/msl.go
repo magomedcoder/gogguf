@@ -2,11 +2,12 @@
 
 package metal
 
-// mslSource is the Metal Shading Language source for the B1 decode kernels plus the B2 additions (add, matmul_vec_q4_0, matmul_vec_q4_k), compiled at runtime by runtime_darwin.go (newLibraryWithSource).
-// Kernel names are listed in B1Kernels / B2Kernels; struct layouts must match the param structs in driver_darwin.m (all 4-byte scalars).
+// mslSource is the Metal Shading Language source for the B1 decode kernels plus the B2 additions (add, matmul_vec_q4_0, matmul_vec_q4_k) and the B3 prefill GEMM (matmul_mat_q8_0), compiled at runtime by runtime_darwin.go (newLibraryWithSource).
+// Kernel names are listed in B1Kernels / B2Kernels / B3Kernels; struct layouts must match the param structs in driver_darwin.m (all 4-byte scalars).
 //
 // Launch geometry (see driver_darwin.m):
 //   - matmul_vec_*: one simdgroup per output row, 4 rows per threadgroup (threadgroup = 4 * threadExecutionWidth threads)
+//   - matmul_mat_q8_0: one thread per (batch, row) output, grid = batch * rows rounded up to whole threadgroups (kernel bounds-checks)
 //   - rmsnorm / attn_qk_softmax_v: one threadgroup per vector / per query head, reductions via simd_sum/simd_max + threadgroup scratch (rmsnorm normalizes `rows` consecutive dim-vectors, one threadgroup each: rows = nHeads is the per-head QK-norm, rows = 1 the plain norm)
 //   - rope_heads / swiglu / add: one thread per element pair / element, grid rounded up to whole threadgroups (kernels bounds-check)
 const mslSource = `
@@ -18,6 +19,12 @@ using namespace metal;
 struct MatParams {
     uint rows;
     uint cols;
+};
+
+struct MatMatParams {
+    uint rows;
+    uint cols;
+    uint batch;
 };
 
 struct RMSParams {
@@ -167,6 +174,40 @@ kernel void matmul_vec_q8_0(
     if (lane == 0) {
         out[row] = sum;
     }
+}
+
+// ---- matmul_mat_q8_0 (B3 prefill GEMM): W[rows][cols] * X[batch][cols] -> out[batch][rows].
+// CUDA-parity thread-per-output algorithm (cuda/ptx.go matmul_mat_q8_0): thread gid = b * rows + r owns out[b * rows + r] and walks the Q8_0 row block by block (per block: sum of q * x, then * d, accumulated in block order like compute.MatMulMatQ8_0Into). cols % 32 == 0.
+// Not simdgroup_matrix: that is a follow-up (needs tile staging); this kernel is correct everywhere and one launch covers the whole batch. ----
+
+kernel void matmul_mat_q8_0(
+    device const block_q8_0 *W [[buffer(0)]],
+    device const float *X [[buffer(1)]],
+    device float *out [[buffer(2)]],
+    constant MatMatParams &p [[buffer(3)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if ((ulong)gid >= (ulong)p.rows * (ulong)p.batch) {
+        return;
+    }
+
+    uint r = gid % p.rows;
+    uint b = gid / p.rows;
+    uint nb = p.cols >> 5;
+    device const block_q8_0 *blk = W + (ulong)r * nb;
+    device const float *x = X + (ulong)b * p.cols;
+
+    float sum = 0.0f;
+    for (uint i = 0; i < nb; i++) {
+        float d = float(blk[i].d);
+        float s = 0.0f;
+        for (uint j = 0; j < 32; j++) {
+            s += float(blk[i].qs[j]) * x[(i << 5) + j];
+        }
+        sum += d * s;
+    }
+
+    out[(ulong)b * p.rows + r] = sum;
 }
 
 // ---- matmul_vec_q4_0: fused dequant (d * (nibble - 8)) + dot, cols % 32 == 0 ----

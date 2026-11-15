@@ -70,6 +70,25 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools/
 
 **Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4`. **Paired ratio re-verify** с локальным `llama-bench`, когда есть `/dev/nvidia*`.
 
+### Протокол bench на Metal (macOS)
+
+Пока не прогонялся: чисел здесь нет. Запускать на том Mac, который измеряем (Apple Silicon или Intel + Metal GPU); для всех строк один GGUF / промпт / `-n` / `-b`:
+
+```bash
+# GoGGUF (Metal-сборка: cgo + Xcode command line tools)
+PROMPT=$(python3 -c 'print("Hello world. "*200)')   # ~600 токенов
+go test -tags metal ./pkg/device/metal/             # сначала parity (GPU-тесты skip без Metal)
+go build -tags metal -o build/tools ./cmd/tools/
+./build/tools bench -m models/Qwen3-1.7B-Q8_0.gguf -p "$PROMPT" -n 128 -b 1  -ngl 999 --runs 3 --json   # baseline без GEMM
+./build/tools bench -m models/Qwen3-1.7B-Q8_0.gguf -p "$PROMPT" -n 128 -b 32 -ngl 999 --runs 3 --json   # B3 GEMM prefill
+./build/tools bench -m models/Qwen3-1.7B-Q8_0.gguf -p "$PROMPT" -n 128 -b 32 -ngl 0   --runs 3 --json   # эталон CPU
+
+# llama.cpp (Metal-сборка) на той же машине / GGUF / -ngl / -b
+./llama-bench -m models/Qwen3-1.7B-Q8_0.gguf -p 512 -n 128 -ngl 999 -b 32
+```
+
+Фиксировать для каждого прогона: машина и чип, версия macOS, коммит GoGGUF, `prefill_tps`, `decode_tps`, `prompt_tokens`; затем считать `prefill_tps / pp` и `decode_tps / tg` относительно `llama-bench`. Дополнительно сверять greedy-токены с `-ngl 0` (`tools greedy`), чтобы быстрый прогон не был неверным. GEMM-kernel (`matmul_mat_q8_0`, thread-per-output) есть только у Q8_0; остальные quant по-прежнему крутят matvec - бенчить их отдельно и не сравнивать со строкой Q8_0. Результаты - в [todo.md](../../../GoGGUF-docs/todo.md) § B3.
+
 ## `greedy`
 
 Greedy decode N токенов в JSON (token IDs) для сверки с golden.

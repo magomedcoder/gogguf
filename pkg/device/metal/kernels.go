@@ -24,6 +24,12 @@ var B2Kernels = []string{
 	"matmul_vec_q4_k",
 }
 
+// B3Kernels are the MSL entry points added for prefill (-b): the batched Q8_0 GEMM (each must also be named in PlannedKernels).
+// Batch attention and the batch FFN add no kernel of their own: they encode attn_qk_softmax_v / matmul_mat_q8_0 + swiglu launches into one command buffer per call.
+var B3Kernels = []string{
+	"matmul_mat_q8_0",
+}
+
 // KernelPlan describes one planned Metal compute kernel (nothing is compiled or dispatched yet)
 type KernelPlan struct {
 	Name    string   // MSL function name
@@ -31,7 +37,7 @@ type KernelPlan struct {
 	Notes   string
 }
 
-// PlannedKernels is the roadmap for a Metal backend, mirroring the CUDA fused set in pkg/device/cuda; B1Kernels, B2Kernels (and kv_append on the host) are implemented, the rest is planned.
+// PlannedKernels is the roadmap for a Metal backend, mirroring the CUDA fused set in pkg/device/cuda; B1Kernels, B2Kernels, B3Kernels (and kv_append on the host) are implemented, the rest is planned.
 // Order is the intended implementation order: decode matvec first (tg), then ops and residency, then batched GEMM (pp).
 var PlannedKernels = []KernelPlan{
 	{Name: "matmul_vec_f32", Entries: []string{"MatMulVec", "MatMulVecCached"}, Notes: "dense FP32/FP16 matvec, SIMD-group reduction"},
@@ -51,11 +57,11 @@ var PlannedKernels = []KernelPlan{
 	{Name: "gelu", Entries: []string{"GELUInPlace"}, Notes: "tanh-approx GELU (Phi-2 FFN)"},
 	{Name: "rope_heads", Entries: []string{"ApplyRoPEHeads", "ApplyRoPEHeadsScaled", "QKVRoPEAttentionQuantCached"}, Notes: "NeoX layout; Scaled = YaRN/LongRoPE tables"},
 	{Name: "rope_heads_norm", Entries: []string{"ApplyRoPEHeadsNorm", "QKVRoPEAttentionQuantCached"}, Notes: "Llama NORM layout"},
-	{Name: "swiglu", Entries: []string{"SwiGLUInPlace", "FFNSwiGLUQuantCached", "AttnFFNResidualGeGLUQuantCached"}, Notes: "SiLU(gate)*up (B2: fused Q8_0 FFN); GeGLU variant for FFNGeGLUQuantCached / AttnFFNResidualGeGLUQuantCached stays planned"},
-	{Name: "attn_qk_softmax_v", Entries: []string{"AttentionScoresInto", "AttentionScoresKV", "QKVRoPEAttentionQuantCached"}, Notes: "GQA attention over GPU KV cache; flash-style fused variant later"},
+	{Name: "swiglu", Entries: []string{"SwiGLUInPlace", "FFNSwiGLUQuantCached", "FFNSwiGLUMatQuantCached", "AttnFFNResidualGeGLUQuantCached"}, Notes: "SiLU(gate)*up (B2: fused Q8_0 FFN; B3: batch FFN, whole [batch][ffn] in one launch); GeGLU variant for FFNGeGLUQuantCached / AttnFFNResidualGeGLUQuantCached stays planned"},
+	{Name: "attn_qk_softmax_v", Entries: []string{"AttentionScoresInto", "AttentionScoresKV", "AttentionScoresKVBatch", "QKVRoPEAttentionQuantCached"}, Notes: "GQA attention over GPU KV cache; B3 batch = one launch per query row (causal seqLen = pastLen+i+1) encoded into one command buffer; flash-style fused variant later"},
 	{Name: "kv_append", Entries: []string{"KVCacheInit", "KVCacheAppend", "KVCacheAppendN", "KVCacheDropOldest", "KVCacheRebuildFromHost"}, Notes: "unified-memory MTLBuffer KV per layer"},
 	{Name: "add", Entries: []string{"HiddenUpload", "HiddenDownload", "HiddenResident", "AttnFFNResidualQuantCached", "ResidAdd"}, Notes: "B2: a[i] += b[i] residual add; the residual stream lives in a MTLBuffer between layers (hidden_resident). ResidAdd (host delta, Phi-2) stays planned"},
-	{Name: "matmul_mat_q8_0", Entries: []string{"MatMulVecQ8_0Cached"}, Notes: "batched GEMM for prefill (-b), via simdgroup_matrix"},
+	{Name: "matmul_mat_q8_0", Entries: []string{"MatMulMatQ8_0CachedInto", "FFNSwiGLUMatQuantCached"}, Notes: "B3: batched Q8_0 GEMM for prefill (-b), CUDA-parity thread-per-(batch,row) output, one launch for W*X[batch]; simdgroup_matrix tiled GEMM is a follow-up (needs a Mac to tune); other quants / F32 loop the matvec kernels inside MatMulMat*"},
 }
 
 // plannedKernelFor returns the first planned kernel dispatched by a Backend entry point ("" when none is named)

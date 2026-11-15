@@ -49,6 +49,9 @@ int gguf_metal_matmul_q8_0(gguf_metal_t ctx, gguf_metal_buf_t w, gguf_metal_buf_
 // gguf_metal_matmul_off: out[out_off bytes ..) = W * x[x_off bytes ..) for any kind above (rows x cols); offsets are byte offsets, multiples of 4
 int gguf_metal_matmul_off(gguf_metal_t ctx, int kind, gguf_metal_buf_t w, gguf_metal_buf_t x, size_t x_off, gguf_metal_buf_t out, size_t out_off, uint32_t rows, uint32_t cols);
 
+// gguf_metal_matmul_mat_q8_0 (B3 prefill GEMM): out[out_off bytes ..) [batch][rows] = W[rows][cols] (Q8_0 blocks) * x[x_off bytes ..) [batch][cols]; one thread per (batch, row) output, cols % 32 == 0
+int gguf_metal_matmul_mat_q8_0(gguf_metal_t ctx, gguf_metal_buf_t w, gguf_metal_buf_t x, size_t x_off, gguf_metal_buf_t out, size_t out_off, uint32_t rows, uint32_t cols, uint32_t batch);
+
 int gguf_metal_rmsnorm(gguf_metal_t ctx, gguf_metal_buf_t x, gguf_metal_buf_t weight, gguf_metal_buf_t dst, uint32_t dim, float eps);
 
 // gguf_metal_rmsnorm_rows normalizes `rows` consecutive dim-vectors (one threadgroup each) with a shared weight[dim]; x and dst may alias (per-head QK-norm in place)
@@ -63,6 +66,9 @@ int gguf_metal_rope_heads_off(gguf_metal_t ctx, gguf_metal_buf_t v, size_t v_off
 int gguf_metal_add(gguf_metal_t ctx, gguf_metal_buf_t a, gguf_metal_buf_t b, uint32_t n);
 
 int gguf_metal_swiglu(gguf_metal_t ctx, gguf_metal_buf_t gate, gguf_metal_buf_t up, uint32_t n);
+
+// gguf_metal_attention_off is gguf_metal_attention with byte offsets into q and out (batch prefill encodes one launch per query row)
+int gguf_metal_attention_off(gguf_metal_t ctx, gguf_metal_buf_t q, size_t q_off, gguf_metal_buf_t k, gguf_metal_buf_t v, gguf_metal_buf_t scores, gguf_metal_buf_t out, size_t out_off, uint32_t seq_len, uint32_t n_heads, uint32_t n_kv_heads, uint32_t head_dim, uint32_t scores_stride);
 
 int gguf_metal_attention(gguf_metal_t ctx, gguf_metal_buf_t q, gguf_metal_buf_t k, gguf_metal_buf_t v, gguf_metal_buf_t scores, gguf_metal_buf_t out, uint32_t seq_len, uint32_t n_heads, uint32_t n_kv_heads, uint32_t head_dim, uint32_t scores_stride);
 

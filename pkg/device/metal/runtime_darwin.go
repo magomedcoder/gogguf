@@ -71,6 +71,12 @@ type mtl struct {
 	hn, fq, fo, fg, fu devBuf // normed hidden / Q / WO-and-down output / gate / up
 	fattn              devBuf // attention output, left on the device between QKV and AttnFFN
 	fattnLen           int    // floats valid in fattn (0 = none)
+
+	// B3 prefill / batch (batch_darwin.go): scratch separate from the B2 buffers so a prefill never disturbs a resident decode state.
+	// mx stages the host input X[batch][cols] (reused while xPtr/xLen/content still match = skip_x), mo the GEMM output, bgate/bup/bout the batch FFN activations.
+	mx, mo, bgate, bup, bout devBuf
+	xPtr                     uintptr // host slice staged in mx (0 = nothing reusable)
+	xLen                     int
 }
 
 // openGPU creates the Metal device and compiles the B1/B2 MSL kernels
@@ -616,8 +622,9 @@ func (r *mtl) close() error {
 	}
 
 	r.kvFree()
+	r.xPtr, r.xLen = 0, 0
 
-	for _, d := range []*devBuf{&r.vec, &r.out, &r.tmpW, &r.nx, &r.nw, &r.nd, &r.rope, &r.ropeV, &r.gate, &r.up, &r.aq, &r.ak, &r.av, &r.ao, &r.scores, &r.kvScores, &r.resid, &r.hn, &r.fq, &r.fo, &r.fg, &r.fu, &r.fattn} {
+	for _, d := range []*devBuf{&r.vec, &r.out, &r.tmpW, &r.nx, &r.nw, &r.nd, &r.rope, &r.ropeV, &r.gate, &r.up, &r.aq, &r.ak, &r.av, &r.ao, &r.scores, &r.kvScores, &r.resid, &r.hn, &r.fq, &r.fo, &r.fg, &r.fu, &r.fattn, &r.mx, &r.mo, &r.bgate, &r.bup, &r.bout} {
 		r.free(d)
 	}
 

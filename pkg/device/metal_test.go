@@ -6,10 +6,19 @@ import (
 	"testing"
 
 	"github.com/magomedcoder/gogguf/pkg/device/metal"
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 )
 
 // Metal stub must implement full Backend so it can replace CUDA when kernels appear
 var _ Backend = (*metal.Backend)(nil)
+
+// B3 prefill capabilities: GEMM (every MatMulMat* entry, loop-B inside for non-Q8_0), batch FFN and batch attention are real Metal methods, so the type assertions in
+// MatMulMatQuantCachedInto / FFNSwiGLUMatQuantCached / AttentionScoresKVBatch succeed on a Metal backend (like cuda_open.go for CUDA)
+var (
+	_ MatMulMatBackend        = (*metal.Backend)(nil)
+	_ FFNSwiGLUMatBackend     = (*metal.Backend)(nil)
+	_ KVBatchAttentionBackend = (*metal.Backend)(nil)
+)
 
 func TestMetalScaffoldCompute(t *testing.T) {
 	var b metal.Backend
@@ -72,5 +81,32 @@ func TestMetalPlannedKernelsCoverEntries(t *testing.T) {
 		}
 
 		seen[k.Name] = true
+	}
+}
+
+// A scaffold Metal backend still takes the B3 dispatch helpers (type assertions hold) and reports ErrUnavailable from inside, so prefill falls back to the CPU instead of panicking
+func TestMetalScaffoldBatchDispatchUnavailable(t *testing.T) {
+	var b metal.Backend
+	x := make([]float32, 2*32)
+	out := make([]float32, 2*2)
+
+	if err := MatMulMatQuantCachedInto(&b, dtype.Q8_0, "w", nil, 2, 32, x, 2, out); !errors.Is(err, metal.ErrUnavailable) {
+		t.Fatalf("MatMulMatQuantCachedInto Q8_0 = %v, expected ErrUnavailable", err)
+	}
+
+	if err := MatMulMatQuantCachedInto(&b, dtype.Q4_0, "w", nil, 2, 32, x, 2, out); !errors.Is(err, metal.ErrUnavailable) {
+		t.Fatalf("MatMulMatQuantCachedInto Q4_0 = %v, expected ErrUnavailable", err)
+	}
+
+	if err := MatMulMatCachedIntoFP32(&b, "w", nil, 2, 32, x, 2, out); !errors.Is(err, metal.ErrUnavailable) {
+		t.Fatalf("MatMulMatCachedIntoFP32 = %v, expected ErrUnavailable", err)
+	}
+
+	if err := FFNSwiGLUMatQuantCached(&b, dtype.Q8_0, "g", "u", "d", nil, nil, nil, x, x, 32, 64, 2); !errors.Is(err, metal.ErrUnavailable) {
+		t.Fatalf("FFNSwiGLUMatQuantCached = %v, expected ErrUnavailable", err)
+	}
+
+	if err := AttentionScoresKVBatch(&b, 0, out, out, 2, 0, 1, 1, 2); !errors.Is(err, metal.ErrUnavailable) {
+		t.Fatalf("AttentionScoresKVBatch = %v, expected ErrUnavailable", err)
 	}
 }

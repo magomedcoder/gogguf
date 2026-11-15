@@ -21,6 +21,12 @@ typedef struct {
 } MatParams;
 
 typedef struct {
+    uint32_t rows;
+    uint32_t cols;
+    uint32_t batch;
+} MatMatParams;
+
+typedef struct {
     uint32_t dim;
     float eps;
 } RMSParams;
@@ -62,6 +68,7 @@ enum {
 @property(nonatomic, strong) id<MTLComputePipelineState> matQ8;
 @property(nonatomic, strong) id<MTLComputePipelineState> matQ4_0;
 @property(nonatomic, strong) id<MTLComputePipelineState> matQ4K;
+@property(nonatomic, strong) id<MTLComputePipelineState> matMatQ8;
 @property(nonatomic, strong) id<MTLComputePipelineState> addPSO;
 @property(nonatomic, strong) id<MTLComputePipelineState> rms;
 @property(nonatomic, strong) id<MTLComputePipelineState> rope;
@@ -132,12 +139,13 @@ gguf_metal_t gguf_metal_open(const char *msl_src, char *err, size_t err_len) {
         m.matQ8 = make_pso(m, "matmul_vec_q8_0");
         m.matQ4_0 = make_pso(m, "matmul_vec_q4_0");
         m.matQ4K = make_pso(m, "matmul_vec_q4_k");
+        m.matMatQ8 = make_pso(m, "matmul_mat_q8_0");
         m.addPSO = make_pso(m, "add");
         m.rms = make_pso(m, "rmsnorm");
         m.rope = make_pso(m, "rope_heads");
         m.swiglu = make_pso(m, "swiglu");
         m.attn = make_pso(m, "attn_qk_softmax_v");
-        if (m.matF32 == nil || m.matQ8 == nil || m.matQ4_0 == nil || m.matQ4K == nil || m.addPSO == nil || m.rms == nil || m.rope == nil || m.swiglu == nil || m.attn == nil) {
+        if (m.matF32 == nil || m.matQ8 == nil || m.matQ4_0 == nil || m.matQ4K == nil || m.matMatQ8 == nil || m.addPSO == nil || m.rms == nil || m.rope == nil || m.swiglu == nil || m.attn == nil) {
             set_err(err, err_len, m.lastError);
             return NULL;
         }
@@ -393,6 +401,24 @@ int gguf_metal_matmul_q8_0(gguf_metal_t ctx, gguf_metal_buf_t w, gguf_metal_buf_
     return gguf_metal_matmul_off(ctx, GGUF_METAL_MAT_Q8_0, w, x, 0, out, 0, rows, cols);
 }
 
+int gguf_metal_matmul_mat_q8_0(gguf_metal_t ctx, gguf_metal_buf_t w, gguf_metal_buf_t x, size_t x_off, gguf_metal_buf_t out, size_t out_off, uint32_t rows, uint32_t cols, uint32_t batch) {
+    GgufMetal *m = (__bridge GgufMetal *)ctx;
+    MatMatParams p = {rows, cols, batch};
+    void *bufs[3] = {w, x, out};
+    size_t offs[3] = {0, x_off, out_off};
+
+    // one thread per (batch, row) output: grid rounded up to whole threadgroups, the kernel bounds-checks
+    uint64_t total = (uint64_t)rows * (uint64_t)batch;
+    NSUInteger tg = min_uint(kElemThreads, m.matMatQ8.maxTotalThreadsPerThreadgroup);
+    uint64_t groups = (total + tg - 1) / tg;
+    if (groups > 0xFFFFFFFFull) {
+        m.lastError = @"metal: matmul_mat_q8_0 grid too large";
+        return 3;
+    }
+
+    return run_off(m, m.matMatQ8, bufs, offs, 3, &p, sizeof(p), MTLSizeMake((NSUInteger)groups, 1, 1), MTLSizeMake(tg, 1, 1));
+}
+
 int gguf_metal_rmsnorm_rows(gguf_metal_t ctx, gguf_metal_buf_t x, size_t x_off, gguf_metal_buf_t weight, gguf_metal_buf_t dst, size_t dst_off, uint32_t dim, uint32_t rows, float eps) {
     GgufMetal *m = (__bridge GgufMetal *)ctx;
     RMSParams p = {dim, eps};
@@ -439,10 +465,15 @@ int gguf_metal_swiglu(gguf_metal_t ctx, gguf_metal_buf_t gate, gguf_metal_buf_t 
     return run(m, m.swiglu, bufs, 2, &p, sizeof(p), MTLSizeMake(groups, 1, 1), MTLSizeMake(tg, 1, 1));
 }
 
-int gguf_metal_attention(gguf_metal_t ctx, gguf_metal_buf_t q, gguf_metal_buf_t k, gguf_metal_buf_t v, gguf_metal_buf_t scores, gguf_metal_buf_t out, uint32_t seq_len, uint32_t n_heads, uint32_t n_kv_heads, uint32_t head_dim, uint32_t scores_stride) {
+int gguf_metal_attention_off(gguf_metal_t ctx, gguf_metal_buf_t q, size_t q_off, gguf_metal_buf_t k, gguf_metal_buf_t v, gguf_metal_buf_t scores, gguf_metal_buf_t out, size_t out_off, uint32_t seq_len, uint32_t n_heads, uint32_t n_kv_heads, uint32_t head_dim, uint32_t scores_stride) {
     GgufMetal *m = (__bridge GgufMetal *)ctx;
     AttnParams p = {seq_len, n_heads, n_kv_heads, head_dim, scores_stride, (float)(1.0 / sqrt((double)head_dim))};
     void *bufs[5] = {q, k, v, scores, out};
+    size_t offs[5] = {q_off, 0, 0, 0, out_off};
     NSUInteger tg = min_uint(kAttnThreads, m.attn.maxTotalThreadsPerThreadgroup);
-    return run(m, m.attn, bufs, 5, &p, sizeof(p), MTLSizeMake(n_heads, 1, 1), MTLSizeMake(tg, 1, 1));
+    return run_off(m, m.attn, bufs, offs, 5, &p, sizeof(p), MTLSizeMake(n_heads, 1, 1), MTLSizeMake(tg, 1, 1));
+}
+
+int gguf_metal_attention(gguf_metal_t ctx, gguf_metal_buf_t q, gguf_metal_buf_t k, gguf_metal_buf_t v, gguf_metal_buf_t scores, gguf_metal_buf_t out, uint32_t seq_len, uint32_t n_heads, uint32_t n_kv_heads, uint32_t head_dim, uint32_t scores_stride) {
+    return gguf_metal_attention_off(ctx, q, 0, k, v, scores, out, 0, seq_len, n_heads, n_kv_heads, head_dim, scores_stride);
 }
