@@ -2,12 +2,13 @@ package metal
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/dtype"
 )
 
-// B2: device-resident hidden state and the fused Q8_0 NeoX decode path (QKV+RoPE+attention, WO+residual+FFN+residual, lm_head).
+// B2: device-resident hidden state and the fused decode path (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K weights, NeoX or Llama NORM RoPE) (QKV+RoPE+attention, WO+residual+FFN+residual, lm_head).
 // The contracts mirror pkg/device/cuda (pkg/exec/gpuresid drives both unchanged):
 //   - HiddenUpload puts the hidden state into the device residual buffer, HiddenDownload fetches it and clears residency
 //   - QKVRoPEAttentionQuantCached with h == nil reads RMSNorm(resid, attn_norm); the attention output stays on the device for AttnFFNResidualQuantCached
@@ -15,9 +16,12 @@ import (
 //   - after a fused failure HiddenActive() stays true when resid is intact (caller downloads and falls back to CPU), false when resid may have been modified
 //
 // Backend owns the residency flag (guarded by Backend.mu); the runtime (runtime_darwin.go) only owns the resid MTLBuffer and runs the kernels.
-// Only Q8_0 weights + NeoX RoPE are fused for now: other types / modes return ErrUnavailable and the model falls back to the B1 per-op path.
+// Only the types in fusedQuants are fused (one type per call: every matrix of the call has type t, no per-tensor mixing); other types return ErrUnavailable and the model falls back to the B1 per-op path.
+// NeoX and NORM RoPE are both fused; any other RoPE mode returns ErrUnavailable.
 
 type qkvArgs struct {
+	t                                                       dtype.DType
+	mode                                                    compute.RoPEMode
 	qName, kName, vName, qNormName, kNormName, attnNormName string
 	qRaw, kRaw, vRaw                                        []byte
 	qNorm, kNorm, attnNorm, h, cos, sin, attn, kOut, vOut   []float32
@@ -26,6 +30,7 @@ type qkvArgs struct {
 }
 
 type attnFFNArgs struct {
+	t                                               dtype.DType
 	woName, ffnNormName, gateName, upName, downName string
 	woRaw, gateRaw, upRaw, downRaw                  []byte
 	ffnNorm, x, attn                                []float32
@@ -34,6 +39,7 @@ type attnFFNArgs struct {
 }
 
 type ffnArgs struct {
+	t                          dtype.DType
 	gateName, upName, downName string
 	gateRaw, upRaw, downRaw    []byte
 	x, out                     []float32
@@ -56,8 +62,8 @@ func unsupported(op, why string) error {
 	return fmt.Errorf("%w: %s: %s; per-op B1 path / -ngl 0 stays available", ErrUnavailable, op, why)
 }
 
-// HiddenResident reports that the runtime can keep the residual on device: rmsnorm + add + swiglu + attention + Q8_0 matvec kernels are compiled.
-// Unlike Ready() it is false for a Backend without runtime; it does not imply every quant is fused (see fusedQ8).
+// HiddenResident reports that the runtime can keep the residual on device: rmsnorm + add + swiglu + attention + quant matvec + rope kernels are compiled.
+// Unlike Ready() it is false for a Backend without runtime; it does not imply every quant is fused (see fusedQuants).
 func (b *Backend) HiddenResident() bool {
 	return b != nil && b.rt != nil && b.rt.hiddenReady()
 }
@@ -149,16 +155,19 @@ func (b *Backend) fusedRuntime(op string) (gpu, error) {
 	return rt, nil
 }
 
-// fusedQ8 gates the fused paths: Q8_0 weights only (other quants return ErrUnavailable until their fused kernels exist)
-func fusedQ8(op string, t dtype.DType) error {
-	if t != dtype.Q8_0 {
-		return unsupported(op, fmt.Sprintf("fused path supports Q8_0 only, got %s", t))
+// fusedQuants are the weight types the fused paths run natively (each has a matmul_vec_* kernel and a pkg/quant block layout)
+var fusedQuants = []dtype.DType{dtype.Q8_0, dtype.Q4_0, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K}
+
+// fusedQuantSupported gates the fused paths: ErrUnavailable for any type without a fused kernel (callers fall back to the per-op path)
+func fusedQuantSupported(op string, t dtype.DType) error {
+	if !slices.Contains(fusedQuants, t) {
+		return unsupported(op, fmt.Sprintf("fused path supports Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K, got %s", t))
 	}
 
 	return nil
 }
 
-// QKVRoPEAttentionQuantCached [RMSNorm(resid)] -> Q/K/V matvec -> QK-norm -> RoPE (NeoX) -> KV append -> attention, in one command buffer.
+// QKVRoPEAttentionQuantCached [RMSNorm(resid)] -> Q/K/V matvec -> QK-norm -> RoPE (NeoX or Llama NORM, selected by mode) -> KV append -> attention, in one command buffer.
 // h == nil with active residency: h = RMSNorm(resid, attnNorm) on device.
 // attn / kOut / vOut are optional host mirrors (nil = no copy);
 // the attention output always stays on the device for the following AttnFFNResidualQuantCached call.
@@ -171,12 +180,12 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t dtype.DType, mode compute.RoPEMo
 		return err
 	}
 
-	if err := fusedQ8(op, t); err != nil {
+	if err := fusedQuantSupported(op, t); err != nil {
 		return err
 	}
 
-	if mode != compute.RoPENeoX {
-		return unsupported(op, "fused path supports NeoX RoPE only")
+	if mode != compute.RoPENeoX && mode != compute.RoPENorm {
+		return unsupported(op, fmt.Sprintf("fused path supports NeoX and NORM RoPE, got mode %d", int(mode)))
 	}
 
 	if embd < 1 || nHeads < 1 || nKVHeads < 1 || headDim < 2 || headDim%2 != 0 || nHeads%nKVHeads != 0 || layer < 0 || kvPos < 0 || seqLen < 1 {
@@ -233,6 +242,7 @@ func (b *Backend) QKVRoPEAttentionQuantCached(t dtype.DType, mode compute.RoPEMo
 	}
 
 	return rt.qkvRoPEAttention(&qkvArgs{
+		t: t, mode: mode,
 		qName: qName, kName: kName, vName: vName, qNormName: qNormName, kNormName: kNormName, attnNormName: attnNormName,
 		qRaw: qRaw, kRaw: kRaw, vRaw: vRaw,
 		qNorm: qNorm, kNorm: kNorm, attnNorm: attnNorm, h: h, cos: cos, sin: sin, attn: attn, kOut: kOut, vOut: vOut,
@@ -254,7 +264,7 @@ func (b *Backend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName,
 		return err
 	}
 
-	if err := fusedQ8(op, t); err != nil {
+	if err := fusedQuantSupported(op, t); err != nil {
 		return err
 	}
 
@@ -300,6 +310,7 @@ func (b *Backend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName,
 	}
 
 	dirty, err := rt.attnFFNResidual(&attnFFNArgs{
+		t:           t,
 		woName:      woName,
 		ffnNormName: ffnNormName,
 		gateName:    gateName,
@@ -329,7 +340,7 @@ func (b *Backend) AttnFFNResidualQuantCached(t dtype.DType, woName, ffnNormName,
 	return nil
 }
 
-// FFNSwiGLUQuantCached gate/up matvec + SwiGLU + down matvec on device for Q8_0; activations never leave the device between the three matvecs.
+// FFNSwiGLUQuantCached gate/up matvec + SwiGLU + down matvec on device for the fused quants (fusedQuants); activations never leave the device between the three matvecs.
 // x is required (the CUDA MoE-snapshot form x == nil has no Metal counterpart).
 func (b *Backend) FFNSwiGLUQuantCached(t dtype.DType, gateName, upName, downName string, gateRaw, upRaw, downRaw []byte, x, out []float32, embd, ffn int) error {
 	const op = "FFNSwiGLUQuantCached"
@@ -339,7 +350,7 @@ func (b *Backend) FFNSwiGLUQuantCached(t dtype.DType, gateName, upName, downName
 		return err
 	}
 
-	if err := fusedQ8(op, t); err != nil {
+	if err := fusedQuantSupported(op, t); err != nil {
 		return err
 	}
 
@@ -369,6 +380,7 @@ func (b *Backend) FFNSwiGLUQuantCached(t dtype.DType, gateName, upName, downName
 	}
 
 	return rt.ffnSwiGLU(&ffnArgs{
+		t:        t,
 		gateName: gateName,
 		upName:   upName,
 		downName: downName,
@@ -383,7 +395,7 @@ func (b *Backend) FFNSwiGLUQuantCached(t dtype.DType, gateName, upName, downName
 }
 
 // LogitsFromDevice RMSNorm(resident hidden, output_norm) + lm_head matvec on the device; only the logits are copied to the host.
-// Head types: headF32 for F32 / F16, headRaw for Q8_0 / Q4_0 / Q4_K.
+// Head types: headF32 for F32 / F16, headRaw for Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K.
 // Residency stays active (the caller downloads / releases it).
 func (b *Backend) LogitsFromDevice(t dtype.DType, normName string, norm []float32, headName string, headRaw []byte, headF32, logits []float32, vocab, embd int, eps float32) error {
 	const op = "LogitsFromDevice"
@@ -410,7 +422,7 @@ func (b *Backend) LogitsFromDevice(t dtype.DType, normName string, norm []float3
 		if len(headF32) < vocab*embd {
 			return fmt.Errorf("metal: %s: FP32 head too short", op)
 		}
-	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_K:
+	case dtype.Q8_0, dtype.Q4_0, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K:
 		if err := checkQuantMatrix(op, t, headRaw, vocab, embd); err != nil {
 			return err
 		}

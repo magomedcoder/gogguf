@@ -62,6 +62,7 @@ func TestMetalHiddenUploadDownload(t *testing.T) {
 	}
 }
 
+// Q4_0 / Q4_K / Q5_K / Q6_K native matvecs (cols % block width == 0) against the pkg/compute reference
 func TestMetalMatMulVecQ4Parity(t *testing.T) {
 	b := openTest(t)
 
@@ -73,6 +74,8 @@ func TestMetalMatMulVecQ4Parity(t *testing.T) {
 	}{
 		{"Q4_0", quant.QK4_0, quant.BlockQ4_0Size, b.MatMulVecQ4_0Cached, compute.MatMulVecQ4_0},
 		{"Q4_K", quant.QK_K, quant.BlockQ4_KSize, b.MatMulVecQ4_KCached, compute.MatMulVecQ4_K},
+		{"Q5_K", quant.QK_K, quant.BlockQ5_KSize, b.MatMulVecQ5_KCached, compute.MatMulVecQ5_K},
+		{"Q6_K", quant.QK_K, quant.BlockQ6_KSize, b.MatMulVecQ6_KCached, compute.MatMulVecQ6_K},
 	} {
 		for _, sz := range []struct{ rows, blocks int }{{1, 1}, {7, 2}, {70, 3}, {300, 8}} {
 			cols := sz.blocks * tc.qk
@@ -186,7 +189,7 @@ func TestMetalFusedLogitsParity(t *testing.T) {
 	for _, tc := range []struct {
 		t    dtype.DType
 		embd int
-	}{{dtype.Q8_0, 64}, {dtype.F32, 64}, {dtype.F16, 64}, {dtype.Q4_0, 64}, {dtype.Q4_K, 256}} {
+	}{{dtype.Q8_0, 64}, {dtype.F32, 64}, {dtype.F16, 64}, {dtype.Q4_0, 64}, {dtype.Q4_K, 256}, {dtype.Q5_K, 256}, {dtype.Q6_K, 256}} {
 		x, norm := detRand(tc.embd, 400), detRand(tc.embd, 401)
 		if err := b.HiddenUpload(x); err != nil {
 			t.Fatal(err)
@@ -209,6 +212,12 @@ func TestMetalFusedLogitsParity(t *testing.T) {
 		case dtype.Q4_K:
 			raw = fakeQ4(vocab, tc.embd, quant.QK_K, quant.BlockQ4_KSize, 404)
 			want, _ = compute.MatMulVecQ4_K(raw, vocab, tc.embd, h)
+		case dtype.Q5_K:
+			raw = fakeQ4(vocab, tc.embd, quant.QK_K, quant.BlockQ5_KSize, 406)
+			want, _ = compute.MatMulVecQ5_K(raw, vocab, tc.embd, h)
+		case dtype.Q6_K:
+			raw = fakeQ4(vocab, tc.embd, quant.QK_K, quant.BlockQ6_KSize, 407)
+			want, _ = compute.MatMulVecQ6_K(raw, vocab, tc.embd, h)
 		default:
 			f32 = detRand(vocab*tc.embd, 405)
 			want, _ = compute.MatMulVec(f32, vocab, tc.embd, h)
@@ -269,4 +278,72 @@ func TestMetalRMSNormSingleRowAfterRowsChange(t *testing.T) {
 	}
 
 	closeTo(t, "RMSNormInto", got, want, 1e-5)
+}
+
+// fused decode for every quant type x NeoX / NORM RoPE on a real device: resident decode over several tokens equals the host reference (fixtures: fused_test.go)
+func TestMetalFusedQuantRoPEModeParity(t *testing.T) {
+	for _, ty := range fusedParityTypes {
+		for _, mode := range []compute.RoPEMode{compute.RoPENeoX, compute.RoPENorm} {
+			t.Run(fmt.Sprintf("%s/mode%d", ty, int(mode)), func(t *testing.T) {
+				l := newQuantLayerFixture(ty, mode)
+				b := openFusedTest(t, l)
+
+				var kc, vc []float32
+				x := detRand(l.embd, 900)
+				for pos := range 3 {
+					want := l.reference(x, pos, &kc, &vc)
+
+					if err := b.HiddenUpload(x); err != nil {
+						t.Fatal(err)
+					}
+
+					if err := l.qkv(b, 0, pos, nil, nil, nil, nil); err != nil {
+						t.Fatalf("pos %d qkv: %v", pos, err)
+					}
+
+					if err := l.attnFFN(b, nil, nil); err != nil {
+						t.Fatalf("pos %d attnFFN: %v", pos, err)
+					}
+
+					got := make([]float32, l.embd)
+					if err := b.HiddenDownload(got); err != nil {
+						t.Fatal(err)
+					}
+
+					closeTo(t, fmt.Sprintf("%s layer pos %d", ty, pos), got, want, 5e-4)
+					x = want
+				}
+
+				// batch-free FFN entry point with the same weights
+				h := detRand(l.embd, 901)
+				g, u := refMatVec(ty, l.gate, l.ffn, l.embd, h), refMatVec(ty, l.up, l.ffn, l.embd, h)
+				compute.SwiGLUInPlace(g, u)
+				want := refMatVec(ty, l.down, l.embd, l.ffn, g)
+
+				out := make([]float32, l.embd)
+				if err := b.FFNSwiGLUQuantCached(ty, "gate", "up", "down", l.gate, l.up, l.down, h, out, l.embd, l.ffn); err != nil {
+					t.Fatal(err)
+				}
+
+				closeTo(t, "FFNSwiGLUQuantCached "+ty.String(), out, want, 5e-4)
+			})
+		}
+	}
+}
+
+func TestMetalRoPEHeadsNormParity(t *testing.T) {
+	b := openTest(t)
+
+	for _, tc := range []struct{ heads, headDim, pos int }{{1, 2, 0}, {4, 16, 5}, {8, 128, 1234}, {2, 256, 30000}} {
+		v := detRand(tc.heads*tc.headDim, uint32(tc.pos)+1)
+		want := append([]float32(nil), v...)
+		compute.ApplyRoPEHeadsNorm(want, tc.heads, tc.headDim, tc.pos, 10000)
+
+		got := append([]float32(nil), v...)
+		if err := b.ApplyRoPEHeadsNorm(got, tc.heads, tc.headDim, tc.pos, 10000); err != nil {
+			t.Fatal(err)
+		}
+
+		closeTo(t, "ApplyRoPEHeadsNorm", got, want, 1e-5)
+	}
 }

@@ -23,10 +23,12 @@ type gpu interface {
 	matMulF32(name string, matrix []float32, rows, cols int, vec, dst []float32) error
 	// matMulQ8_0 ggml Q8_0 matrix (34-byte blocks) * vec -> dst; name == "" uploads raw for this call only
 	matMulQ8_0(name string, raw []byte, rows, cols int, vec, dst []float32) error
-	// matMulQuant same for the other native matvec quants (Q4_0 / Q4_K, pkg/quant layouts); t selects the kernel
+	// matMulQuant same for the other native matvec quants (Q4_0 / Q4_K / Q5_K / Q6_K, pkg/quant layouts); t selects the kernel
 	matMulQuant(t dtype.DType, name string, raw []byte, rows, cols int, vec, dst []float32) error
 	rmsNorm(dst, x, weight []float32, eps float32) error
 	ropeHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error
+	// ropeHeadsNorm same for the Llama NORM layout (adjacent pairs 2i, 2i+1)
+	ropeHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error
 	swiglu(gate, up []float32) error
 	// attention over host k/v [seqLen][nKVHeads*headDim]
 	attention(dst, q, k, v []float32, seqLen, nHeads, nKVHeads, headDim int) error
@@ -38,7 +40,7 @@ type gpu interface {
 	attentionKV(layer int, dst, q []float32, seqLen, nHeads, nKVHeads, headDim int) error
 
 	// B2 residency / fused decode (fused.go). The residual lives in a device buffer; Backend owns the "active" flag and the contracts (h == nil, x == nil), the runtime only runs the kernels.
-	// hiddenReady reports that the runtime has every kernel residency needs (rmsnorm + add + swiglu + attention + Q8_0 matvec)
+	// hiddenReady reports that the runtime has every kernel residency needs (rmsnorm + add + swiglu + attention + the quant matvecs + both rope layouts)
 	hiddenReady() bool
 	hiddenUpload(x []float32) error
 	hiddenDownload(dst []float32) error
@@ -76,7 +78,7 @@ func (b *Backend) Ready() bool {
 	return KernelsImplemented && b != nil && b.rt != nil
 }
 
-// Backend - Metal device: B1 decode ops (matvec F32/Q8_0/Q4_0/Q4_K, RMSNorm, RoPE NeoX, SwiGLU, attention, GPU KV) and the B2 Q8_0 NeoX fused decode path (device-resident hidden state, fused QKV / attn+FFN / logits) run on the runtime when open;
+// Backend - Metal device: B1 decode ops (matvec F32/Q8_0/Q4_0/Q4_K/Q5_K/Q6_K, RMSNorm, RoPE NeoX + NORM, SwiGLU, attention, GPU KV) and the B2 fused decode path for Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K weights with NeoX or NORM RoPE (device-resident hidden state, fused QKV / attn+FFN / logits) run on the runtime when open;
 // everything else (and a Backend without runtime) returns ErrUnavailable so callers fall back to the B1 per-op path or the CPU
 type Backend struct {
 	name string
@@ -198,6 +200,10 @@ func quantGeometry(t dtype.DType) (qk, blockBytes int, ok bool) {
 		return quant.QK4_0, quant.BlockQ4_0Size, true
 	case dtype.Q4_K:
 		return quant.QK_K, quant.BlockQ4_KSize, true
+	case dtype.Q5_K:
+		return quant.QK_K, quant.BlockQ5_KSize, true
+	case dtype.Q6_K:
+		return quant.QK_K, quant.BlockQ6_KSize, true
 	default:
 		return 0, 0, false
 	}
@@ -225,7 +231,7 @@ func checkQuantMatrix(op string, t dtype.DType, raw []byte, rows, cols int) erro
 	return nil
 }
 
-// matMulQuantCached is the shared Q4_0 / Q4_K matvec entry (Q8_0 keeps its own wrapper above)
+// matMulQuantCached is the shared Q4_0 / Q4_K / Q5_K / Q6_K matvec entry (Q8_0 keeps its own wrapper above)
 func (b *Backend) matMulQuantCached(op string, t dtype.DType, name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
 	rt, err := b.runtime(op)
 	if err != nil {
@@ -260,12 +266,12 @@ func (b *Backend) MatMulVecQ4_KCached(name string, raw []byte, rows, cols int, v
 	return b.matMulQuantCached("MatMulVecQ4_KCached", dtype.Q4_K, name, raw, rows, cols, vec)
 }
 
-func (b *Backend) MatMulVecQ5_KCached(string, []byte, int, int, []float32) ([]float32, error) {
-	return nil, unavailable("MatMulVecQ5_KCached")
+func (b *Backend) MatMulVecQ5_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return b.matMulQuantCached("MatMulVecQ5_KCached", dtype.Q5_K, name, raw, rows, cols, vec)
 }
 
-func (b *Backend) MatMulVecQ6_KCached(string, []byte, int, int, []float32) ([]float32, error) {
-	return nil, unavailable("MatMulVecQ6_KCached")
+func (b *Backend) MatMulVecQ6_KCached(name string, raw []byte, rows, cols int, vec []float32) ([]float32, error) {
+	return b.matMulQuantCached("MatMulVecQ6_KCached", dtype.Q6_K, name, raw, rows, cols, vec)
 }
 
 func (b *Backend) MatMulVecQ4_1Cached(string, []byte, int, int, []float32) ([]float32, error) {
@@ -339,8 +345,22 @@ func (b *Backend) ApplyRoPEHeadsScaled([]float32, int, int, int, float32, comput
 	return unavailable("ApplyRoPEHeadsScaled")
 }
 
-func (b *Backend) ApplyRoPEHeadsNorm([]float32, int, int, int, float32) error {
-	return unavailable("ApplyRoPEHeadsNorm")
+// ApplyRoPEHeadsNorm applies Llama NORM RoPE (adjacent pairs 2i, 2i+1) in place; same host cos/sin table as NeoX, the rope_heads_norm kernel only rotates pairs
+func (b *Backend) ApplyRoPEHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error {
+	rt, err := b.runtime("ApplyRoPEHeadsNorm")
+	if err != nil {
+		return err
+	}
+
+	if nHeads < 1 || headDim < 2 || headDim%2 != 0 {
+		return fmt.Errorf("metal: ApplyRoPEHeadsNorm: nHeads=%d headDim=%d", nHeads, headDim)
+	}
+
+	if len(v) < nHeads*headDim {
+		return fmt.Errorf("metal: ApplyRoPEHeadsNorm: len(v)=%d, need %d", len(v), nHeads*headDim)
+	}
+
+	return rt.ropeHeadsNorm(v[:nHeads*headDim], nHeads, headDim, pos, freqBase)
 }
 
 func (b *Backend) SwiGLUInPlace(gate, up []float32) error {

@@ -69,7 +69,7 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools/
 
 **DoD targets**: prefill ≥~0.5* llama-bench `pp`, decode ≥~0.7* `tg` at `-b`≥32 on dense fused quants (Qwen3-1.7B-Q8_0 reference).
 
-**DoD engineering (closed 2026-11-12):** dense decode residency (no host<->device between layers); fused batch FFN + MatMulMat `skip_vec` prefill; greedy `logits_argmax`; MoE/MLA/SWA `-b>1`; GPU KV reclaim; lazy host KV; multi-GPU P2P overlap; Q8_1 fused. See [todo.md](../../GoGGUF-docs/todo.md) § A.
+**DoD engineering (closed 2026-11-12):** dense decode residency (no host<->device between layers); fused batch FFN + MatMulMat `skip_vec` prefill; greedy `logits_argmax`; MoE/MLA/SWA `-b>1`; GPU KV reclaim; lazy host KV; multi-GPU P2P overlap; Q8_1 fused. GPU status: [platforms.md](platforms.md).
 
 **Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4` (`-b 32 -n 128 -ngl 999`). **Paired ratio re-verify** against local `llama-bench` (e.g. `/home/.../llama-b10988/llama-bench`) when `/dev/nvidia*` is available - absolute baseline above; Wave-1 PCIe cuts should raise prefill/decode before computing `prefill_tps/pp` and `decode_tps/tg`.
 
@@ -90,7 +90,7 @@ go build -tags metal -o build/tools ./cmd/tools/
 ./llama-bench -m models/Qwen3-1.7B-Q8_0.gguf -p 512 -n 128 -ngl 999 -b 32
 ```
 
-Record per run: machine + chip, macOS version, GoGGUF commit, `prefill_tps`, `decode_tps`, `prompt_tokens`, then compute `prefill_tps / pp` and `decode_tps / tg` against `llama-bench`. Also compare greedy tokens vs `-ngl 0` (`tools greedy`) so a faster run is not a wrong one. Only Q8_0 has the GEMM kernel (`matmul_mat_q8_0`, thread-per-output); other quants still loop matvec, so bench them separately and do not compare with the Q8_0 row. Results go into [todo.md](../../GoGGUF-docs/todo.md) § B3.
+Record per run: machine + chip, macOS version, GoGGUF commit, `prefill_tps`, `decode_tps`, `prompt_tokens`, then compute `prefill_tps / pp` and `decode_tps / tg` against `llama-bench`. Also compare greedy tokens vs `-ngl 0` (`tools greedy`) so a faster run is not a wrong one. Only Q8_0 has the GEMM kernel (`matmul_mat_q8_0`, thread-per-output); other quants still loop matvec, so bench them separately and do not compare with the Q8_0 row. Paste the measured numbers into this section when available.
 
 ## `greedy`
 

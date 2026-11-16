@@ -68,10 +68,13 @@ enum {
 @property(nonatomic, strong) id<MTLComputePipelineState> matQ8;
 @property(nonatomic, strong) id<MTLComputePipelineState> matQ4_0;
 @property(nonatomic, strong) id<MTLComputePipelineState> matQ4K;
+@property(nonatomic, strong) id<MTLComputePipelineState> matQ5K;
+@property(nonatomic, strong) id<MTLComputePipelineState> matQ6K;
 @property(nonatomic, strong) id<MTLComputePipelineState> matMatQ8;
 @property(nonatomic, strong) id<MTLComputePipelineState> addPSO;
 @property(nonatomic, strong) id<MTLComputePipelineState> rms;
 @property(nonatomic, strong) id<MTLComputePipelineState> rope;
+@property(nonatomic, strong) id<MTLComputePipelineState> ropeNorm;
 @property(nonatomic, strong) id<MTLComputePipelineState> swiglu;
 @property(nonatomic, strong) id<MTLComputePipelineState> attn;
 // open batch (gguf_metal_batch_begin): dispatches are encoded into batchEnc and committed together by gguf_metal_batch_end
@@ -139,13 +142,16 @@ gguf_metal_t gguf_metal_open(const char *msl_src, char *err, size_t err_len) {
         m.matQ8 = make_pso(m, "matmul_vec_q8_0");
         m.matQ4_0 = make_pso(m, "matmul_vec_q4_0");
         m.matQ4K = make_pso(m, "matmul_vec_q4_k");
+        m.matQ5K = make_pso(m, "matmul_vec_q5_k");
+        m.matQ6K = make_pso(m, "matmul_vec_q6_k");
         m.matMatQ8 = make_pso(m, "matmul_mat_q8_0");
         m.addPSO = make_pso(m, "add");
         m.rms = make_pso(m, "rmsnorm");
         m.rope = make_pso(m, "rope_heads");
+        m.ropeNorm = make_pso(m, "rope_heads_norm");
         m.swiglu = make_pso(m, "swiglu");
         m.attn = make_pso(m, "attn_qk_softmax_v");
-        if (m.matF32 == nil || m.matQ8 == nil || m.matQ4_0 == nil || m.matQ4K == nil || m.matMatQ8 == nil || m.addPSO == nil || m.rms == nil || m.rope == nil || m.swiglu == nil || m.attn == nil) {
+        if (m.matF32 == nil || m.matQ8 == nil || m.matQ4_0 == nil || m.matQ4K == nil || m.matQ5K == nil || m.matQ6K == nil || m.matMatQ8 == nil || m.addPSO == nil || m.rms == nil || m.rope == nil || m.ropeNorm == nil || m.swiglu == nil || m.attn == nil) {
             set_err(err, err_len, m.lastError);
             return NULL;
         }
@@ -385,6 +391,12 @@ int gguf_metal_matmul_off(gguf_metal_t ctx, int kind, gguf_metal_buf_t w, gguf_m
     case GGUF_METAL_MAT_Q4_K:
         pso = m.matQ4K;
         break;
+    case GGUF_METAL_MAT_Q5_K:
+        pso = m.matQ5K;
+        break;
+    case GGUF_METAL_MAT_Q6_K:
+        pso = m.matQ6K;
+        break;
     default:
         m.lastError = [NSString stringWithFormat:@"metal: unknown matvec kind %d", kind];
         return 3;
@@ -432,19 +444,33 @@ int gguf_metal_rmsnorm(gguf_metal_t ctx, gguf_metal_buf_t x, gguf_metal_buf_t we
     return gguf_metal_rmsnorm_rows(ctx, x, 0, weight, dst, 0, dim, 1, eps);
 }
 
-int gguf_metal_rope_heads_off(gguf_metal_t ctx, gguf_metal_buf_t v, size_t v_off, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
+static int rope_heads_launch(gguf_metal_t ctx, id<MTLComputePipelineState> pso, gguf_metal_buf_t v, size_t v_off, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
     GgufMetal *m = (__bridge GgufMetal *)ctx;
     RopeParams p = {n_heads, head_dim};
     void *bufs[2] = {v, cos_sin};
     size_t offs[2] = {v_off, 0};
     NSUInteger total = (NSUInteger)n_heads * (head_dim / 2);
-    NSUInteger tg = min_uint(kElemThreads, m.rope.maxTotalThreadsPerThreadgroup);
+    NSUInteger tg = min_uint(kElemThreads, pso.maxTotalThreadsPerThreadgroup);
     NSUInteger groups = (total + tg - 1) / tg;
-    return run_off(m, m.rope, bufs, offs, 2, &p, sizeof(p), MTLSizeMake(groups, 1, 1), MTLSizeMake(tg, 1, 1));
+    return run_off(m, pso, bufs, offs, 2, &p, sizeof(p), MTLSizeMake(groups, 1, 1), MTLSizeMake(tg, 1, 1));
+}
+
+int gguf_metal_rope_heads_off(gguf_metal_t ctx, gguf_metal_buf_t v, size_t v_off, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
+    GgufMetal *m = (__bridge GgufMetal *)ctx;
+    return rope_heads_launch(ctx, m.rope, v, v_off, cos_sin, n_heads, head_dim);
+}
+
+int gguf_metal_rope_heads_norm_off(gguf_metal_t ctx, gguf_metal_buf_t v, size_t v_off, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
+    GgufMetal *m = (__bridge GgufMetal *)ctx;
+    return rope_heads_launch(ctx, m.ropeNorm, v, v_off, cos_sin, n_heads, head_dim);
 }
 
 int gguf_metal_rope_heads(gguf_metal_t ctx, gguf_metal_buf_t v, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
     return gguf_metal_rope_heads_off(ctx, v, 0, cos_sin, n_heads, head_dim);
+}
+
+int gguf_metal_rope_heads_norm(gguf_metal_t ctx, gguf_metal_buf_t v, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim) {
+    return gguf_metal_rope_heads_norm_off(ctx, v, 0, cos_sin, n_heads, head_dim);
 }
 
 int gguf_metal_add(gguf_metal_t ctx, gguf_metal_buf_t a, gguf_metal_buf_t b, uint32_t n) {

@@ -11,12 +11,14 @@
 typedef void *gguf_metal_t;
 typedef void *gguf_metal_buf_t;
 
-// Matvec kinds for gguf_metal_matmul_off (weight layouts: F32 rows, ggml Q8_0 / Q4_0 / Q4_K blocks as read by pkg/quant)
+// Matvec kinds for gguf_metal_matmul_off (weight layouts: F32 rows, ggml Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K blocks as read by pkg/quant: packed 34 / 18 / 144 / 176 / 210 bytes per block)
 enum {
     GGUF_METAL_MAT_F32 = 0,
     GGUF_METAL_MAT_Q8_0 = 1,
     GGUF_METAL_MAT_Q4_0 = 2,
     GGUF_METAL_MAT_Q4_K = 3,
+    GGUF_METAL_MAT_Q5_K = 4,
+    GGUF_METAL_MAT_Q6_K = 5,
 };
 
 // gguf_metal_open creates device + queue and compiles msl_src plus every B1/B2 pipeline; NULL on failure with message in err
@@ -61,6 +63,11 @@ int gguf_metal_rope_heads(gguf_metal_t ctx, gguf_metal_buf_t v, gguf_metal_buf_t
 
 // gguf_metal_rope_heads_off rotates the heads at byte offset v_off of v (NeoX pairs, cos_sin = cos[head_dim/2] then sin[head_dim/2])
 int gguf_metal_rope_heads_off(gguf_metal_t ctx, gguf_metal_buf_t v, size_t v_off, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim);
+
+// gguf_metal_rope_heads_norm_off is gguf_metal_rope_heads_off for the Llama NORM layout: adjacent pairs (2i, 2i + 1), same cos_sin table
+int gguf_metal_rope_heads_norm_off(gguf_metal_t ctx, gguf_metal_buf_t v, size_t v_off, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim);
+
+int gguf_metal_rope_heads_norm(gguf_metal_t ctx, gguf_metal_buf_t v, gguf_metal_buf_t cos_sin, uint32_t n_heads, uint32_t head_dim);
 
 // gguf_metal_add: a[i] += b[i] for i < n (residual add)
 int gguf_metal_add(gguf_metal_t ctx, gguf_metal_buf_t a, gguf_metal_buf_t b, uint32_t n);

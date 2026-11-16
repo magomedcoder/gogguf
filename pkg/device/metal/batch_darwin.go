@@ -12,6 +12,7 @@ import (
 	"math"
 	"unsafe"
 
+	"github.com/magomedcoder/gogguf/pkg/dtype"
 	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
@@ -110,17 +111,17 @@ func (r *mtl) ffnSwiGLUMatQ8_0(a *ffnMatArgs) error {
 		return err
 	}
 
-	gate, err := r.weightQ8(a.gateName, a.gateRaw, a.ffn, a.embd)
+	gate, err := r.weightQuant(dtype.Q8_0, a.gateName, a.gateRaw, a.ffn, a.embd)
 	if err != nil {
 		return err
 	}
 
-	up, err := r.weightQ8(a.upName, a.upRaw, a.ffn, a.embd)
+	up, err := r.weightQuant(dtype.Q8_0, a.upName, a.upRaw, a.ffn, a.embd)
 	if err != nil {
 		return err
 	}
 
-	down, err := r.weightQ8(a.downName, a.downRaw, a.embd, a.ffn)
+	down, err := r.weightQuant(dtype.Q8_0, a.downName, a.downRaw, a.embd, a.ffn)
 	if err != nil {
 		return err
 	}

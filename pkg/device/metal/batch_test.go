@@ -132,7 +132,7 @@ func TestBackendMatMulMatQ8_0Contracts(t *testing.T) {
 	}
 }
 
-// F32 and the other quants loop the matvec entry points INSIDE MatMulMat*: Q4_0 / Q4_K / F32 return correct results (no GEMM kernel is launched), unsupported quants are ErrUnavailable
+// F32 and the other quants loop the matvec entry points INSIDE MatMulMat*: Q4_0 / Q4_K / Q5_K / Q6_K / F32 return correct results (no GEMM kernel is launched), unsupported quants are ErrUnavailable
 func TestBackendMatMulMatLoopB(t *testing.T) {
 	f := &fakeGPU{}
 	b := &Backend{
@@ -154,7 +154,7 @@ func TestBackendMatMulMatLoopB(t *testing.T) {
 
 	approxEqual(t, "MatMulMatCachedInto", got, want, 1e-5)
 
-	// Q4_0 / Q4_K
+	// Q4_0 / Q4_K / Q5_K / Q6_K
 	for _, tc := range []struct {
 		name      string
 		qk, bytes int
@@ -163,6 +163,8 @@ func TestBackendMatMulMatLoopB(t *testing.T) {
 	}{
 		{"Q4_0", quant.QK4_0, quant.BlockQ4_0Size, b.MatMulMatQ4_0CachedInto, compute.MatMulVecQ4_0},
 		{"Q4_K", quant.QK_K, quant.BlockQ4_KSize, b.MatMulMatQ4_KCachedInto, compute.MatMulVecQ4_K},
+		{"Q5_K", quant.QK_K, quant.BlockQ5_KSize, b.MatMulMatQ5_KCachedInto, compute.MatMulVecQ5_K},
+		{"Q6_K", quant.QK_K, quant.BlockQ6_KSize, b.MatMulMatQ6_KCachedInto, compute.MatMulVecQ6_K},
 	} {
 		rows, cols := 4, tc.qk*2
 		raw := fakeQ4(rows, cols, tc.qk, tc.bytes, 730)
@@ -200,8 +202,6 @@ func TestBackendMatMulMatLoopB(t *testing.T) {
 	out := make([]float32, batch*rows)
 	for name, call := range map[string]func() error{
 		"Q8_1": func() error { return b.MatMulMatQ8_1CachedInto("w", nil, rows, 32, x, batch, out) },
-		"Q5_K": func() error { return b.MatMulMatQ5_KCachedInto("w", nil, rows, cols, x, batch, out) },
-		"Q6_K": func() error { return b.MatMulMatQ6_KCachedInto("w", nil, rows, cols, x, batch, out) },
 		"Q4_1": func() error { return b.MatMulMatQ4_1CachedInto("w", nil, rows, cols, x, batch, out) },
 		"Q5_0": func() error { return b.MatMulMatQ5_0CachedInto("w", nil, rows, cols, x, batch, out) },
 		"Q5_1": func() error { return b.MatMulMatQ5_1CachedInto("w", nil, rows, cols, x, batch, out) },

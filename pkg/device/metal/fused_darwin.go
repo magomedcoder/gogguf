@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/magomedcoder/gogguf/pkg/compute"
 	"github.com/magomedcoder/gogguf/pkg/dtype"
-	"github.com/magomedcoder/gogguf/pkg/quant"
 )
 
 // B2 runtime: device-resident residual (mtl.resid) and the fused decode path.
@@ -89,7 +89,12 @@ func (r *mtl) encRMS(x *devBuf, xOff int, w C.gguf_metal_buf_t, dst *devBuf, dst
 	return r.check("rmsnorm", C.gguf_metal_rmsnorm_rows(r.ctx, x.h, C.size_t(xOff), w, dst.h, C.size_t(dstOff), u32(dim), u32(rows), C.float(eps)))
 }
 
-func (r *mtl) encRoPE(v *devBuf, vOff int, nHeads, headDim int) error {
+// encRoPE encodes one rope launch over nHeads heads at byte offset vOff: NeoX pairs (i, i + headDim/2) or Llama NORM adjacent pairs (2i, 2i + 1), both reading r.rope (cos[half] then sin[half])
+func (r *mtl) encRoPE(mode compute.RoPEMode, v *devBuf, vOff int, nHeads, headDim int) error {
+	if mode == compute.RoPENorm {
+		return r.check("rope_heads_norm", C.gguf_metal_rope_heads_norm_off(r.ctx, v.h, C.size_t(vOff), r.rope.h, u32(nHeads), u32(headDim)))
+	}
+
 	return r.check("rope_heads", C.gguf_metal_rope_heads_off(r.ctx, v.h, C.size_t(vOff), r.rope.h, u32(nHeads), u32(headDim)))
 }
 
@@ -97,13 +102,18 @@ func (r *mtl) encAdd(a, b *devBuf, n int) error {
 	return r.check("add", C.gguf_metal_add(r.ctx, a.h, b.h, u32(n)))
 }
 
-// weightQ8 returns the cached device Q8_0 matrix (fused paths always pass a name: the temp upload buffer would be clobbered inside one batch)
-func (r *mtl) weightQ8(name string, raw []byte, rows, cols int) (C.gguf_metal_buf_t, error) {
+// weightQuant returns the cached device matrix of quant type t in its own cache (fused paths always pass a name: the temp upload buffer would be clobbered inside one batch)
+func (r *mtl) weightQuant(t dtype.DType, name string, raw []byte, rows, cols int) (C.gguf_metal_buf_t, error) {
 	if name == "" {
 		return nil, fmt.Errorf("metal: fused weight needs a cache name")
 	}
 
-	return r.weight(r.q8, name, unsafe.Pointer(&raw[0]), rows*(cols/quant.QK8_0)*quant.BlockQ8_0Size, rows, cols)
+	_, qk, bs, cache, err := r.quantKind(t)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.weight(cache, name, unsafe.Pointer(&raw[0]), rows*(cols/qk)*bs, rows, cols)
 }
 
 // weightVec returns a cached device FP32 vector (norm weights)
@@ -123,6 +133,11 @@ func (r *mtl) qkvRoPEAttention(a *qkvArgs, resident bool) error {
 		return err
 	}
 
+	kind, _, _, _, err := r.quantKind(a.t)
+	if err != nil {
+		return err
+	}
+
 	// the attention output of a previous call is no longer valid whatever happens below
 	r.fattnLen = 0
 
@@ -139,17 +154,17 @@ func (r *mtl) qkvRoPEAttention(a *qkvArgs, resident bool) error {
 		return fmt.Errorf("metal: qkv_rope_attn: resident hidden buffer holds < %d floats", a.embd)
 	}
 
-	qw, err := r.weightQ8(a.qName, a.qRaw, qDim, a.embd)
+	qw, err := r.weightQuant(a.t, a.qName, a.qRaw, qDim, a.embd)
 	if err != nil {
 		return err
 	}
 
-	kw, err := r.weightQ8(a.kName, a.kRaw, kvDim, a.embd)
+	kw, err := r.weightQuant(a.t, a.kName, a.kRaw, kvDim, a.embd)
 	if err != nil {
 		return err
 	}
 
-	vw, err := r.weightQ8(a.vName, a.vRaw, kvDim, a.embd)
+	vw, err := r.weightQuant(a.t, a.vName, a.vRaw, kvDim, a.embd)
 	if err != nil {
 		return err
 	}
@@ -205,15 +220,15 @@ func (r *mtl) qkvRoPEAttention(a *qkvArgs, resident bool) error {
 			}
 		}
 
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, qw, &r.hn, 0, &r.fq, 0, qDim, a.embd); err != nil {
+		if err := r.encMat(kind, qw, &r.hn, 0, &r.fq, 0, qDim, a.embd); err != nil {
 			return err
 		}
 
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, kw, &r.hn, 0, kbuf, off, kvDim, a.embd); err != nil {
+		if err := r.encMat(kind, kw, &r.hn, 0, kbuf, off, kvDim, a.embd); err != nil {
 			return err
 		}
 
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, vw, &r.hn, 0, vbuf, off, kvDim, a.embd); err != nil {
+		if err := r.encMat(kind, vw, &r.hn, 0, vbuf, off, kvDim, a.embd); err != nil {
 			return err
 		}
 
@@ -229,11 +244,11 @@ func (r *mtl) qkvRoPEAttention(a *qkvArgs, resident bool) error {
 			}
 		}
 
-		if err := r.encRoPE(&r.fq, 0, a.nHeads, a.headDim); err != nil {
+		if err := r.encRoPE(a.mode, &r.fq, 0, a.nHeads, a.headDim); err != nil {
 			return err
 		}
 
-		if err := r.encRoPE(kbuf, off, a.nKVHeads, a.headDim); err != nil {
+		if err := r.encRoPE(a.mode, kbuf, off, a.nKVHeads, a.headDim); err != nil {
 			return err
 		}
 
@@ -270,6 +285,11 @@ func (r *mtl) attnFFNResidual(a *attnFFNArgs, resident bool) (dirty bool, err er
 		return false, err
 	}
 
+	kind, _, _, _, err := r.quantKind(a.t)
+	if err != nil {
+		return false, err
+	}
+
 	// the device attention output is consumed by this call (success or not)
 	haveAttn := r.fattnLen == a.attnDim
 	r.fattnLen = 0
@@ -293,7 +313,7 @@ func (r *mtl) attnFFNResidual(a *attnFFNArgs, resident bool) (dirty bool, err er
 		}
 	}
 
-	wo, err := r.weightQ8(a.woName, a.woRaw, a.embd, a.attnDim)
+	wo, err := r.weightQuant(a.t, a.woName, a.woRaw, a.embd, a.attnDim)
 	if err != nil {
 		return false, err
 	}
@@ -303,17 +323,17 @@ func (r *mtl) attnFFNResidual(a *attnFFNArgs, resident bool) (dirty bool, err er
 		return false, err
 	}
 
-	gate, err := r.weightQ8(a.gateName, a.gateRaw, a.ffn, a.embd)
+	gate, err := r.weightQuant(a.t, a.gateName, a.gateRaw, a.ffn, a.embd)
 	if err != nil {
 		return false, err
 	}
 
-	up, err := r.weightQ8(a.upName, a.upRaw, a.ffn, a.embd)
+	up, err := r.weightQuant(a.t, a.upName, a.upRaw, a.ffn, a.embd)
 	if err != nil {
 		return false, err
 	}
 
-	down, err := r.weightQ8(a.downName, a.downRaw, a.embd, a.ffn)
+	down, err := r.weightQuant(a.t, a.downName, a.downRaw, a.embd, a.ffn)
 	if err != nil {
 		return false, err
 	}
@@ -328,7 +348,7 @@ func (r *mtl) attnFFNResidual(a *attnFFNArgs, resident bool) (dirty bool, err er
 	}
 
 	committed, err := r.batch(func() error {
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, wo, &r.fattn, 0, &r.fo, 0, a.embd, a.attnDim); err != nil {
+		if err := r.encMat(kind, wo, &r.fattn, 0, &r.fo, 0, a.embd, a.attnDim); err != nil {
 			return err
 		}
 
@@ -340,11 +360,11 @@ func (r *mtl) attnFFNResidual(a *attnFFNArgs, resident bool) (dirty bool, err er
 			return err
 		}
 
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, gate, &r.hn, 0, &r.fg, 0, a.ffn, a.embd); err != nil {
+		if err := r.encMat(kind, gate, &r.hn, 0, &r.fg, 0, a.ffn, a.embd); err != nil {
 			return err
 		}
 
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, up, &r.hn, 0, &r.fu, 0, a.ffn, a.embd); err != nil {
+		if err := r.encMat(kind, up, &r.hn, 0, &r.fu, 0, a.ffn, a.embd); err != nil {
 			return err
 		}
 
@@ -352,7 +372,7 @@ func (r *mtl) attnFFNResidual(a *attnFFNArgs, resident bool) (dirty bool, err er
 			return err
 		}
 
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, down, &r.fg, 0, &r.fo, 0, a.embd, a.ffn); err != nil {
+		if err := r.encMat(kind, down, &r.fg, 0, &r.fo, 0, a.embd, a.ffn); err != nil {
 			return err
 		}
 
@@ -378,17 +398,22 @@ func (r *mtl) ffnSwiGLU(a *ffnArgs) error {
 		return err
 	}
 
-	gate, err := r.weightQ8(a.gateName, a.gateRaw, a.ffn, a.embd)
+	kind, _, _, _, err := r.quantKind(a.t)
 	if err != nil {
 		return err
 	}
 
-	up, err := r.weightQ8(a.upName, a.upRaw, a.ffn, a.embd)
+	gate, err := r.weightQuant(a.t, a.gateName, a.gateRaw, a.ffn, a.embd)
 	if err != nil {
 		return err
 	}
 
-	down, err := r.weightQ8(a.downName, a.downRaw, a.embd, a.ffn)
+	up, err := r.weightQuant(a.t, a.upName, a.upRaw, a.ffn, a.embd)
+	if err != nil {
+		return err
+	}
+
+	down, err := r.weightQuant(a.t, a.downName, a.downRaw, a.embd, a.ffn)
 	if err != nil {
 		return err
 	}
@@ -407,11 +432,11 @@ func (r *mtl) ffnSwiGLU(a *ffnArgs) error {
 	}
 
 	if _, err := r.batch(func() error {
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, gate, &r.hn, 0, &r.fg, 0, a.ffn, a.embd); err != nil {
+		if err := r.encMat(kind, gate, &r.hn, 0, &r.fg, 0, a.ffn, a.embd); err != nil {
 			return err
 		}
 
-		if err := r.encMat(C.GGUF_METAL_MAT_Q8_0, up, &r.hn, 0, &r.fu, 0, a.ffn, a.embd); err != nil {
+		if err := r.encMat(kind, up, &r.hn, 0, &r.fu, 0, a.ffn, a.embd); err != nil {
 			return err
 		}
 
@@ -419,7 +444,7 @@ func (r *mtl) ffnSwiGLU(a *ffnArgs) error {
 			return err
 		}
 
-		return r.encMat(C.GGUF_METAL_MAT_Q8_0, down, &r.fg, 0, &r.fo, 0, a.embd, a.ffn)
+		return r.encMat(kind, down, &r.fg, 0, &r.fo, 0, a.embd, a.ffn)
 	}); err != nil {
 		return err
 	}

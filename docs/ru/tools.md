@@ -66,7 +66,7 @@ CGO_ENABLED=1 go build -tags cuda -o build/tools ./cmd/tools/
 
 **DoD**: prefill ≥~0.5* `pp`, decode ≥~0.7* `tg` при `-b`≥32 на dense fused (эталон Qwen3-1.7B-Q8_0).
 
-**DoD engineering (закрыт 2026-11-12):** dense decode residency; fused batch FFN + MatMulMat `skip_vec`; greedy `logits_argmax`; MoE/MLA/SWA `-b>1`; GPU KV reclaim; lazy host KV; multi-GPU P2P overlap; Q8_1 fused. См. [todo.md](../../../GoGGUF-docs/todo.md) § A.
+**DoD engineering (закрыт 2026-11-12):** dense decode residency; fused batch FFN + MatMulMat `skip_vec`; greedy `logits_argmax`; MoE/MLA/SWA `-b>1`; GPU KV reclaim; lazy host KV; multi-GPU P2P overlap; Q8_1 fused. Статус GPU: [platforms.md](platforms.md).
 
 **Baseline (A1, RTX 5060 Ti sm_120, 2026-10-28):** `prompt_tokens≈601`, `prefill_tps≈43`, `decode_tps≈15.4`. **Paired ratio re-verify** с локальным `llama-bench`, когда есть `/dev/nvidia*`.
 
@@ -87,7 +87,7 @@ go build -tags metal -o build/tools ./cmd/tools/
 ./llama-bench -m models/Qwen3-1.7B-Q8_0.gguf -p 512 -n 128 -ngl 999 -b 32
 ```
 
-Фиксировать для каждого прогона: машина и чип, версия macOS, коммит GoGGUF, `prefill_tps`, `decode_tps`, `prompt_tokens`; затем считать `prefill_tps / pp` и `decode_tps / tg` относительно `llama-bench`. Дополнительно сверять greedy-токены с `-ngl 0` (`tools greedy`), чтобы быстрый прогон не был неверным. GEMM-kernel (`matmul_mat_q8_0`, thread-per-output) есть только у Q8_0; остальные quant по-прежнему крутят matvec - бенчить их отдельно и не сравнивать со строкой Q8_0. Результаты - в [todo.md](../../../GoGGUF-docs/todo.md) § B3.
+Фиксировать для каждого прогона: машина и чип, версия macOS, коммит GoGGUF, `prefill_tps`, `decode_tps`, `prompt_tokens`; затем считать `prefill_tps / pp` и `decode_tps / tg` относительно `llama-bench`. Дополнительно сверять greedy-токены с `-ngl 0` (`tools greedy`), чтобы быстрый прогон не был неверным. GEMM-kernel (`matmul_mat_q8_0`, thread-per-output) есть только у Q8_0; остальные quant по-прежнему крутят matvec - бенчить их отдельно и не сравнивать со строкой Q8_0. Измеренные числа вписать в этот раздел, когда будут.
 
 ## `greedy`
 

@@ -69,6 +69,11 @@ func (f *fakeGPU) ropeHeads(v []float32, nHeads, headDim, pos int, base float32)
 	return nil
 }
 
+func (f *fakeGPU) ropeHeadsNorm(v []float32, nHeads, headDim, pos int, base float32) error {
+	compute.ApplyRoPEHeadsNorm(v, nHeads, headDim, pos, base)
+	return nil
+}
+
 func (f *fakeGPU) attention(dst, q, k, v []float32, seqLen, nHeads, nKVHeads, headDim int) error {
 	return compute.AttentionScoresInto(dst, q, k, v, make([]float32, seqLen), seqLen, nHeads, nKVHeads, headDim)
 }

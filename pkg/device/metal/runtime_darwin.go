@@ -32,7 +32,7 @@ func (d *devBuf) floats(n int) []float32 {
 	return unsafe.Slice((*float32)(d.p), n)
 }
 
-// devWeight is a cached weight matrix (F32 or Q8_0 blocks) uploaded once by tensor name
+// devWeight is a cached weight matrix (F32 or quant blocks) uploaded once by tensor name
 type devWeight struct {
 	buf   devBuf
 	rows  int
@@ -51,6 +51,8 @@ type mtl struct {
 	q8   map[string]*devWeight
 	q4_0 map[string]*devWeight
 	q4_k map[string]*devWeight
+	q5_k map[string]*devWeight
+	q6_k map[string]*devWeight
 
 	// scratch: grown on demand (power-of-two) and reused across calls
 	vec, out, tmpW  devBuf // matvec input / output / uncached weight upload
@@ -96,6 +98,8 @@ func openGPU() (gpu, string, error) {
 		q8:   make(map[string]*devWeight),
 		q4_0: make(map[string]*devWeight),
 		q4_k: make(map[string]*devWeight),
+		q5_k: make(map[string]*devWeight),
+		q6_k: make(map[string]*devWeight),
 		name: C.GoString(C.gguf_metal_device_name(ctx)),
 	}
 
@@ -266,6 +270,10 @@ func (r *mtl) quantKind(t dtype.DType) (kind C.int, qk, blockBytes int, cache ma
 		return C.GGUF_METAL_MAT_Q4_0, quant.QK4_0, quant.BlockQ4_0Size, r.q4_0, nil
 	case dtype.Q4_K:
 		return C.GGUF_METAL_MAT_Q4_K, quant.QK_K, quant.BlockQ4_KSize, r.q4_k, nil
+	case dtype.Q5_K:
+		return C.GGUF_METAL_MAT_Q5_K, quant.QK_K, quant.BlockQ5_KSize, r.q5_k, nil
+	case dtype.Q6_K:
+		return C.GGUF_METAL_MAT_Q6_K, quant.QK_K, quant.BlockQ6_KSize, r.q6_k, nil
 	default:
 		return 0, 0, 0, nil, unavailable("matmul " + t.String())
 	}
@@ -337,6 +345,15 @@ func (r *mtl) rmsNorm(dst, x, weight []float32, eps float32) error {
 }
 
 func (r *mtl) ropeHeads(v []float32, nHeads, headDim, pos int, freqBase float32) error {
+	return r.ropeHostMode(compute.RoPENeoX, v, nHeads, headDim, pos, freqBase)
+}
+
+func (r *mtl) ropeHeadsNorm(v []float32, nHeads, headDim, pos int, freqBase float32) error {
+	return r.ropeHostMode(compute.RoPENorm, v, nHeads, headDim, pos, freqBase)
+}
+
+// ropeHostMode rotates host v in place with the NeoX (rope_heads) or Llama NORM (rope_heads_norm) kernel
+func (r *mtl) ropeHostMode(mode compute.RoPEMode, v []float32, nHeads, headDim, pos int, freqBase float32) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -344,7 +361,7 @@ func (r *mtl) ropeHeads(v []float32, nHeads, headDim, pos int, freqBase float32)
 		return err
 	}
 
-	// cos/sin from the float64 host reference: float32 cos/sin of large angles on the GPU would drift from the CPU path
+	// cos/sin from the float64 host reference: float32 cos/sin of large angles on the GPU would drift from the CPU path (both layouts share the table: pair i uses theta_i)
 	half := headDim / 2
 	tab := make([]float32, 2*half)
 	compute.RoPECosSin(tab[:half], tab[half:], headDim, pos, freqBase)
@@ -357,7 +374,7 @@ func (r *mtl) ropeHeads(v []float32, nHeads, headDim, pos int, freqBase float32)
 		return err
 	}
 
-	if err := r.check("rope_heads", C.gguf_metal_rope_heads(r.ctx, r.ropeV.h, r.rope.h, C.uint32_t(nHeads), C.uint32_t(headDim))); err != nil {
+	if err := r.encRoPE(mode, &r.ropeV, 0, nHeads, headDim); err != nil {
 		return err
 	}
 
@@ -614,7 +631,7 @@ func (r *mtl) close() error {
 		return nil
 	}
 
-	for _, cache := range []map[string]*devWeight{r.f32, r.q8, r.q4_0, r.q4_k} {
+	for _, cache := range []map[string]*devWeight{r.f32, r.q8, r.q4_0, r.q4_k, r.q5_k, r.q6_k} {
 		for name, w := range cache {
 			r.free(&w.buf)
 			delete(cache, name)

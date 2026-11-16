@@ -2,14 +2,14 @@
 
 package metal
 
-// mslSource is the Metal Shading Language source for the B1 decode kernels plus the B2 additions (add, matmul_vec_q4_0, matmul_vec_q4_k) and the B3 prefill GEMM (matmul_mat_q8_0), compiled at runtime by runtime_darwin.go (newLibraryWithSource).
+// mslSource is the Metal Shading Language source for the B1 decode kernels plus the B2 additions (add, matmul_vec_q4_0 / q4_k / q5_k / q6_k, rope_heads_norm) and the B3 prefill GEMM (matmul_mat_q8_0), compiled at runtime by runtime_darwin.go (newLibraryWithSource).
 // Kernel names are listed in B1Kernels / B2Kernels / B3Kernels; struct layouts must match the param structs in driver_darwin.m (all 4-byte scalars).
 //
 // Launch geometry (see driver_darwin.m):
 //   - matmul_vec_*: one simdgroup per output row, 4 rows per threadgroup (threadgroup = 4 * threadExecutionWidth threads)
 //   - matmul_mat_q8_0: one thread per (batch, row) output, grid = batch * rows rounded up to whole threadgroups (kernel bounds-checks)
 //   - rmsnorm / attn_qk_softmax_v: one threadgroup per vector / per query head, reductions via simd_sum/simd_max + threadgroup scratch (rmsnorm normalizes `rows` consecutive dim-vectors, one threadgroup each: rows = nHeads is the per-head QK-norm, rows = 1 the plain norm)
-//   - rope_heads / swiglu / add: one thread per element pair / element, grid rounded up to whole threadgroups (kernels bounds-check)
+//   - rope_heads / rope_heads_norm / swiglu / add: one thread per element pair / element, grid rounded up to whole threadgroups (kernels bounds-check)
 const mslSource = `
 #include <metal_stdlib>
 using namespace metal;
@@ -76,6 +76,27 @@ struct block_q4_K {
     uchar qs[128];
 };
 static_assert(sizeof(block_q4_K) == 144, "block_q4_K must match the ggml Q4_K layout");
+
+// ggml block_q5_K (pkg/quant BlockQ5_KSize = 176): fp16 d, fp16 dmin, 12 bytes of packed 6-bit scales/mins, 32 bytes of high bits (bit 2g / 2g+1 of qh[l] = bit 4 of the low / high nibble value of 64-group g, lane l), 128 bytes of nibbles.
+// This is the packed ggml layout, not the expanded 224-byte one the CUDA backend uses.
+struct block_q5_K {
+    half d;
+    half dmin;
+    uchar scales[12];
+    uchar qh[32];
+    uchar qs[128];
+};
+static_assert(sizeof(block_q5_K) == 176, "block_q5_K must match the ggml Q5_K layout (pkg/quant BlockQ5_KSize)");
+
+// ggml block_q6_K (pkg/quant BlockQ6_KSize = 210): 128 bytes of low nibbles, 64 bytes of high 2-bit pairs, 16 int8 scales, fp16 d (last).
+// This is the packed ggml layout, not the expanded 256-byte one the CUDA backend uses.
+struct block_q6_K {
+    uchar ql[128];
+    uchar qh[64];
+    char scales[16];
+    half d;
+};
+static_assert(sizeof(block_q6_K) == 210, "block_q6_K must match the ggml Q6_K layout (pkg/quant BlockQ6_KSize)");
 
 // ---- threadgroup reductions (partial has >= 32 floats: threadgroup <= 1024 threads, simd width >= 32) ----
 
@@ -302,6 +323,118 @@ kernel void matmul_vec_q4_k(
     }
 }
 
+// ---- matmul_vec_q5_k: ggml Q5_K super-blocks (256 values), cols % 256 == 0.
+// Same 64-value group layout as Q4_K (low nibbles of qs[g*32 + l] = value g*64 + l with scale/min 2g, high nibbles = value g*64 + 32 + l with 2g+1), plus bit 4 of every value from qh[l]: bit 2g (low nibble) / 2g+1 (high nibble) like pkg/quant DequantBlockQ5_K. ----
+
+kernel void matmul_vec_q5_k(
+    device const block_q5_K *W [[buffer(0)]],
+    device const float *x [[buffer(1)]],
+    device float *out [[buffer(2)]],
+    constant MatParams &p [[buffer(3)]],
+    uint tg [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sgw [[threads_per_simdgroup]])
+{
+    uint row = tg * ROWS_PER_TG + sg;
+    if (row >= p.rows) {
+        return;
+    }
+
+    uint nb = p.cols >> 8;
+    device const block_q5_K *blk = W + (ulong)row * nb;
+    float sum = 0.0f;
+    for (uint sb = 0; sb < nb; sb++) {
+        device const block_q5_K &b = blk[sb];
+        float d = float(b.d);
+        float dmin = float(b.dmin);
+        device const uchar *sc = &b.scales[0];
+        device const float *xs = x + (ulong)sb * 256u;
+        for (uint g = 0; g < 4; g++) {
+            uint s1, m1, s2, m2;
+            get_scale_min_k4(2 * g, sc, s1, m1);
+            get_scale_min_k4(2 * g + 1, sc, s2, m2);
+            float d1 = d * float(s1);
+            float d2 = d * float(s2);
+            float mm1 = dmin * float(m1);
+            float mm2 = dmin * float(m2);
+            uint u1 = 1u << (2 * g);
+            uint u2 = 2u << (2 * g);
+            for (uint l = lane; l < 32; l += sgw) {
+                uint q = b.qs[g * 32 + l];
+                uint h = b.qh[l];
+                float q1 = float((q & 0xFu) + ((h & u1) != 0 ? 16u : 0u));
+                float q2 = float((q >> 4) + ((h & u2) != 0 ? 16u : 0u));
+                sum += (d1 * q1 - mm1) * xs[g * 64 + l];
+                sum += (d2 * q2 - mm2) * xs[g * 64 + 32 + l];
+            }
+        }
+    }
+
+    sum = simd_sum(sum);
+    if (lane == 0) {
+        out[row] = sum;
+    }
+}
+
+// ---- matmul_vec_q6_k: ggml Q6_K super-blocks (256 values), cols % 256 == 0 (pkg/quant DequantBlockQ6_K).
+// Per 128-value half n: ql[64n ..), qh[32n ..), scales[8n ..); for l < 32 (is = l / 16) the four values are
+//   y+l      = d * sc[is]     * (((ql[l]      & 0xF) | ((qh[l] & 3) << 4)) - 32)
+//   y+l+32   = d * sc[is + 2] * (((ql[l + 32] & 0xF) | (((qh[l] >> 2) & 3) << 4)) - 32)
+//   y+l+64   = d * sc[is + 4] * (((ql[l]      >> 4)  | (((qh[l] >> 4) & 3) << 4)) - 32)
+//   y+l+96   = d * sc[is + 6] * (((ql[l + 32] >> 4)  | (((qh[l] >> 6) & 3) << 4)) - 32)
+// Lanes own l = lane, lane + width, ... so ql / qh reads are contiguous. ----
+
+kernel void matmul_vec_q6_k(
+    device const block_q6_K *W [[buffer(0)]],
+    device const float *x [[buffer(1)]],
+    device float *out [[buffer(2)]],
+    constant MatParams &p [[buffer(3)]],
+    uint tg [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sgw [[threads_per_simdgroup]])
+{
+    uint row = tg * ROWS_PER_TG + sg;
+    if (row >= p.rows) {
+        return;
+    }
+
+    uint nb = p.cols >> 8;
+    device const block_q6_K *blk = W + (ulong)row * nb;
+    float sum = 0.0f;
+    for (uint sb = 0; sb < nb; sb++) {
+        device const block_q6_K &b = blk[sb];
+        float d = float(b.d);
+        device const float *xs = x + (ulong)sb * 256u;
+        for (uint n = 0; n < 2; n++) {
+            device const uchar *ql = &b.ql[64 * n];
+            device const uchar *qh = &b.qh[32 * n];
+            device const char *sc = &b.scales[8 * n];
+            device const float *xn = xs + 128 * n;
+            for (uint l = lane; l < 32; l += sgw) {
+                uint is = l >> 4;
+                uint lo0 = ql[l];
+                uint lo1 = ql[l + 32];
+                uint hi = qh[l];
+                int q1 = int((lo0 & 0xFu) | (((hi >> 0) & 3u) << 4)) - 32;
+                int q2 = int((lo1 & 0xFu) | (((hi >> 2) & 3u) << 4)) - 32;
+                int q3 = int((lo0 >> 4) | (((hi >> 4) & 3u) << 4)) - 32;
+                int q4 = int((lo1 >> 4) | (((hi >> 6) & 3u) << 4)) - 32;
+                sum += d * float(sc[is]) * float(q1) * xn[l];
+                sum += d * float(sc[is + 2]) * float(q2) * xn[l + 32];
+                sum += d * float(sc[is + 4]) * float(q3) * xn[l + 64];
+                sum += d * float(sc[is + 6]) * float(q4) * xn[l + 96];
+            }
+        }
+    }
+
+    sum = simd_sum(sum);
+    if (lane == 0) {
+        out[row] = sum;
+    }
+}
+
 // ---- rmsnorm: dst = x * rsqrt(mean(x^2) + eps) * weight (dst may alias x).
 // One threadgroup per dim-vector: threadgroup r normalizes x[r*dim ..) into dst[r*dim ..) with the shared weight[dim] (grid of 1 = plain RMSNorm, grid of nHeads = per-head QK-norm) ----
 
@@ -360,6 +493,31 @@ kernel void rope_heads(
     float x1 = v[base + hd2 + i];
     v[base + i] = x0 * c - x1 * s;
     v[base + hd2 + i] = x0 * s + x1 * c;
+}
+
+// ---- rope_heads_norm: Llama NORM layout, adjacent pairs (2i, 2i + 1) like pkg/compute/rope/rope_norm.go; cs = cos[headDim/2] followed by sin[headDim/2] (same table as rope_heads) ----
+
+kernel void rope_heads_norm(
+    device float *v [[buffer(0)]],
+    device const float *cs [[buffer(1)]],
+    constant RopeParams &p [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    uint hd2 = p.headDim >> 1;
+    if (gid >= p.nHeads * hd2) {
+        return;
+    }
+
+    uint h = gid / hd2;
+    uint i = gid - h * hd2;
+    uint base = h * p.headDim + 2 * i;
+
+    float c = cs[i];
+    float s = cs[hd2 + i];
+    float x0 = v[base];
+    float x1 = v[base + 1];
+    v[base] = x0 * c - x1 * s;
+    v[base + 1] = x0 * s + x1 * c;
 }
 
 // ---- swiglu: gate = silu(gate) * up ----

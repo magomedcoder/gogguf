@@ -131,3 +131,56 @@ func TestB3RuntimeEncodesOneBatchPerCall(t *testing.T) {
 		t.Fatalf("batch_darwin.go encodes %d command-buffer batches, want 2 (FFN, attention)", got)
 	}
 }
+
+// Q5_K / Q6_K matvec kinds and the NORM rope launch are wired through driver.h, driver_darwin.m and the Go runtime
+func TestDriverQ5Q6AndRoPENormSurface(t *testing.T) {
+	h, m := readSource(t, "driver.h"), readSource(t, "driver_darwin.m")
+	for _, want := range []string{"GGUF_METAL_MAT_Q4_K = 3,", "GGUF_METAL_MAT_Q5_K = 4,", "GGUF_METAL_MAT_Q6_K = 5,"} {
+		if !strings.Contains(h, want) {
+			t.Fatalf("driver.h lacks %q", want)
+		}
+	}
+
+	for _, want := range []string{
+		`make_pso(m, "matmul_vec_q5_k")`,
+		`make_pso(m, "matmul_vec_q6_k")`,
+		`make_pso(m, "rope_heads_norm")`,
+		"case GGUF_METAL_MAT_Q5_K:",
+		"pso = m.matQ5K;",
+		"case GGUF_METAL_MAT_Q6_K:",
+		"pso = m.matQ6K;",
+		"m.ropeNorm",
+	} {
+		if !strings.Contains(m, want) {
+			t.Fatalf("driver_darwin.m lacks %q", want)
+		}
+	}
+
+	for _, fn := range []string{"gguf_metal_rope_heads_norm_off", "gguf_metal_rope_heads_norm"} {
+		if !strings.Contains(h, fn+"(") || !regexp.MustCompile(`(?m)^int `+fn+`\(.*\{`).MatchString(m) {
+			t.Fatalf("%s missing from driver.h / driver_darwin.m", fn)
+		}
+	}
+
+	rt, fused := readSource(t, "runtime_darwin.go"), readSource(t, "fused_darwin.go")
+	for _, want := range []string{"C.GGUF_METAL_MAT_Q5_K", "C.GGUF_METAL_MAT_Q6_K", "q5_k: make(map", "q6_k: make(map"} {
+		if !strings.Contains(rt, want) {
+			t.Fatalf("runtime_darwin.go lacks %q", want)
+		}
+	}
+
+	// the fused encoders take the matvec kind from the weight type and the rope kernel from the mode: no hardcoded Q8_0 / NeoX
+	if strings.Contains(fused, "GGUF_METAL_MAT_Q8_0") || strings.Contains(fused, "weightQ8") {
+		t.Fatal("fused_darwin.go still hardcodes Q8_0")
+	}
+
+	for _, want := range []string{"func (r *mtl) weightQuant(t dtype.DType", "func (r *mtl) encRoPE(mode compute.RoPEMode", "C.gguf_metal_rope_heads_norm_off(", "r.encRoPE(a.mode, "} {
+		if !strings.Contains(fused, want) {
+			t.Fatalf("fused_darwin.go lacks %q", want)
+		}
+	}
+
+	if !strings.Contains(rt, "C.gguf_metal_rope_heads") && !strings.Contains(fused, "C.gguf_metal_rope_heads_off(") {
+		t.Fatal("NeoX rope launch no longer reachable")
+	}
+}

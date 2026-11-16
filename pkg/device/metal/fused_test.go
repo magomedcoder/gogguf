@@ -21,6 +21,10 @@ func (f *fakeGPU) matMulQuant(t dtype.DType, _ string, raw []byte, rows, cols in
 		return compute.MatMulVecQ4_0Into(raw, rows, cols, vec, dst)
 	case dtype.Q4_K:
 		return compute.MatMulVecQ4_KInto(raw, rows, cols, vec, dst)
+	case dtype.Q5_K:
+		return compute.MatMulVecQ5_KInto(raw, rows, cols, vec, dst)
+	case dtype.Q6_K:
+		return compute.MatMulVecQ6_KInto(raw, rows, cols, vec, dst)
 	default:
 		return unavailable("matmul " + t.String())
 	}
@@ -45,14 +49,20 @@ func (f *fakeGPU) hiddenDownload(dst []float32) error {
 	return nil
 }
 
-func fakeRope(v []float32, nHeads, headDim int, cos, sin []float32) {
+// fakeRope rotates the heads with the host cos/sin table: NeoX pairs (i, i + half) or Llama NORM adjacent pairs (2i, 2i + 1), the same split the rope_heads / rope_heads_norm kernels make
+func fakeRope(mode compute.RoPEMode, v []float32, nHeads, headDim int, cos, sin []float32) {
 	half := headDim / 2
 	for h := range nHeads {
 		base := h * headDim
 		for i := range half {
-			x0, x1 := v[base+i], v[base+half+i]
-			v[base+i] = x0*cos[i] - x1*sin[i]
-			v[base+half+i] = x0*sin[i] + x1*cos[i]
+			i0, i1 := base+i, base+half+i
+			if mode == compute.RoPENorm {
+				i0, i1 = base+2*i, base+2*i+1
+			}
+
+			x0, x1 := v[i0], v[i1]
+			v[i0] = x0*cos[i] - x1*sin[i]
+			v[i1] = x0*sin[i] + x1*cos[i]
 		}
 	}
 }
@@ -73,15 +83,15 @@ func (f *fakeGPU) qkvRoPEAttention(a *qkvArgs, resident bool) error {
 
 	qDim, kvDim := a.nHeads*a.headDim, a.nKVHeads*a.headDim
 	q, k, v := make([]float32, qDim), make([]float32, kvDim), make([]float32, kvDim)
-	if err := compute.MatMulVecQ8_0Into(a.qRaw, qDim, a.embd, h[:a.embd], q); err != nil {
+	if err := f.matMulQuant(a.t, a.qName, a.qRaw, qDim, a.embd, h[:a.embd], q); err != nil {
 		return err
 	}
 
-	if err := compute.MatMulVecQ8_0Into(a.kRaw, kvDim, a.embd, h[:a.embd], k); err != nil {
+	if err := f.matMulQuant(a.t, a.kName, a.kRaw, kvDim, a.embd, h[:a.embd], k); err != nil {
 		return err
 	}
 
-	if err := compute.MatMulVecQ8_0Into(a.vRaw, kvDim, a.embd, h[:a.embd], v); err != nil {
+	if err := f.matMulQuant(a.t, a.vName, a.vRaw, kvDim, a.embd, h[:a.embd], v); err != nil {
 		return err
 	}
 
@@ -99,8 +109,8 @@ func (f *fakeGPU) qkvRoPEAttention(a *qkvArgs, resident bool) error {
 		}
 	}
 
-	fakeRope(q, a.nHeads, a.headDim, a.cos, a.sin)
-	fakeRope(k, a.nKVHeads, a.headDim, a.cos, a.sin)
+	fakeRope(a.mode, q, a.nHeads, a.headDim, a.cos, a.sin)
+	fakeRope(a.mode, k, a.nKVHeads, a.headDim, a.cos, a.sin)
 
 	if err := f.kvAppend(a.layer, a.kvPos, k, v, 1); err != nil {
 		return err
@@ -119,20 +129,20 @@ func (f *fakeGPU) qkvRoPEAttention(a *qkvArgs, resident bool) error {
 	return nil
 }
 
-func (f *fakeGPU) ffnRef(gate, up, down []byte, x []float32, embd, ffnDim int) ([]float32, error) {
+func (f *fakeGPU) ffnRef(t dtype.DType, gate, up, down []byte, x []float32, embd, ffnDim int) ([]float32, error) {
 	g, u := make([]float32, ffnDim), make([]float32, ffnDim)
-	if err := compute.MatMulVecQ8_0Into(gate, ffnDim, embd, x, g); err != nil {
+	if err := f.matMulQuant(t, "", gate, ffnDim, embd, x, g); err != nil {
 		return nil, err
 	}
 
-	if err := compute.MatMulVecQ8_0Into(up, ffnDim, embd, x, u); err != nil {
+	if err := f.matMulQuant(t, "", up, ffnDim, embd, x, u); err != nil {
 		return nil, err
 	}
 
 	compute.SwiGLUInPlace(g, u)
 
 	out := make([]float32, embd)
-	if err := compute.MatMulVecQ8_0Into(down, embd, ffnDim, g, out); err != nil {
+	if err := f.matMulQuant(t, "", down, embd, ffnDim, g, out); err != nil {
 		return nil, err
 	}
 
@@ -162,7 +172,7 @@ func (f *fakeGPU) attnFFNResidual(a *attnFFNArgs, resident bool) (bool, error) {
 	}
 
 	wo := make([]float32, a.embd)
-	if err := compute.MatMulVecQ8_0Into(a.woRaw, a.embd, a.attnDim, attn[:a.attnDim], wo); err != nil {
+	if err := f.matMulQuant(a.t, a.woName, a.woRaw, a.embd, a.attnDim, attn[:a.attnDim], wo); err != nil {
 		return false, err
 	}
 
@@ -175,7 +185,7 @@ func (f *fakeGPU) attnFFNResidual(a *attnFFNArgs, resident bool) (bool, error) {
 		return false, err
 	}
 
-	d, err := f.ffnRef(a.gateRaw, a.upRaw, a.downRaw, h, a.embd, a.ffn)
+	d, err := f.ffnRef(a.t, a.gateRaw, a.upRaw, a.downRaw, h, a.embd, a.ffn)
 	if err != nil {
 		return false, err
 	}
@@ -192,7 +202,7 @@ func (f *fakeGPU) attnFFNResidual(a *attnFFNArgs, resident bool) (bool, error) {
 }
 
 func (f *fakeGPU) ffnSwiGLU(a *ffnArgs) error {
-	d, err := f.ffnRef(a.gateRaw, a.upRaw, a.downRaw, a.x, a.embd, a.ffn)
+	d, err := f.ffnRef(a.t, a.gateRaw, a.upRaw, a.downRaw, a.x, a.embd, a.ffn)
 	if err != nil {
 		return err
 	}
@@ -233,7 +243,7 @@ func fakeQ8(rows, cols int, seed uint32) []byte {
 	return raw
 }
 
-// fakeQ4 builds rows x cols data for a 4-bit quant with the given block size / scale-header bytes: random payload, finite fp16 d (and dmin) in the first 2 / 4 bytes
+// fakeQ4 builds rows x cols data for a 4/5/6-bit quant with the given block size / block bytes: random payload plus finite fp16 scale header(s) (d, and dmin for the K-quants with a min; Q6_K keeps d in the last two bytes)
 func fakeQ4(rows, cols, qk, blockBytes int, seed uint32) []byte {
 	blocks := rows * cols / qk
 	raw := make([]byte, blocks*blockBytes)
@@ -244,13 +254,74 @@ func fakeQ4(rows, cols, qk, blockBytes int, seed uint32) []byte {
 
 	for b := range blocks {
 		off := b * blockBytes
+		if blockBytes == quant.BlockQ6_KSize {
+			raw[off+208], raw[off+209] = 0x00, 0x24 // d = 2^-6
+			continue
+		}
+
 		raw[off], raw[off+1] = 0x00, 0x24 // d = 2^-6
-		if blockBytes == quant.BlockQ4_KSize {
-			raw[off+2], raw[off+3] = 0x00, 0x20 // dmin = 2^-9
+		if blockBytes == quant.BlockQ4_KSize || blockBytes == quant.BlockQ5_KSize {
+			raw[off+2], raw[off+3] = 0x00, 0x20 // dmin = 2^-7
 		}
 	}
 
 	return raw
+}
+
+// fakeQuant builds rows x cols weights of any fused quant type (cols must be a multiple of the block width)
+func fakeQuant(t dtype.DType, rows, cols int, seed uint32) []byte {
+	switch t {
+	case dtype.Q8_0:
+		return fakeQ8(rows, cols, seed)
+	case dtype.Q4_0:
+		return fakeQ4(rows, cols, quant.QK4_0, quant.BlockQ4_0Size, seed)
+	case dtype.Q4_K:
+		return fakeQ4(rows, cols, quant.QK_K, quant.BlockQ4_KSize, seed)
+	case dtype.Q5_K:
+		return fakeQ4(rows, cols, quant.QK_K, quant.BlockQ5_KSize, seed)
+	case dtype.Q6_K:
+		return fakeQ4(rows, cols, quant.QK_K, quant.BlockQ6_KSize, seed)
+	default:
+		panic("fakeQuant: unsupported type " + t.String())
+	}
+}
+
+// refMatVec is the CPU reference matvec for a fused quant type
+func refMatVec(t dtype.DType, raw []byte, rows, cols int, vec []float32) []float32 {
+	out := make([]float32, rows)
+	var err error
+	switch t {
+	case dtype.Q8_0:
+		err = compute.MatMulVecQ8_0Into(raw, rows, cols, vec, out)
+	case dtype.Q4_0:
+		err = compute.MatMulVecQ4_0Into(raw, rows, cols, vec, out)
+	case dtype.Q4_K:
+		err = compute.MatMulVecQ4_KInto(raw, rows, cols, vec, out)
+	case dtype.Q5_K:
+		err = compute.MatMulVecQ5_KInto(raw, rows, cols, vec, out)
+	case dtype.Q6_K:
+		err = compute.MatMulVecQ6_KInto(raw, rows, cols, vec, out)
+	default:
+		err = errors.New("refMatVec: unsupported type " + t.String())
+	}
+
+	if err != nil {
+		panic(err)
+	}
+
+	return out
+}
+
+// relEqual compares with a tolerance relative to the largest reference magnitude (fused-layer outputs of the 4/5/6-bit fixtures are large: the random scales are not normalised)
+func relEqual(t *testing.T, what string, got, want []float32, rel float64) {
+	t.Helper()
+
+	var maxRef float64
+	for _, w := range want {
+		maxRef = math.Max(maxRef, math.Abs(float64(w)))
+	}
+
+	approxEqual(t, what, got, want, rel*math.Max(1, maxRef))
 }
 
 func approxEqual(t *testing.T, what string, got, want []float32, tol float64) {
@@ -267,8 +338,10 @@ func approxEqual(t *testing.T, what string, got, want []float32, tol float64) {
 	}
 }
 
-// layerFixture is a tiny Qwen3-like block (GQA 4:2, QK-norm, NeoX RoPE) with Q8_0 weights
+// layerFixture is a tiny Qwen3-like block (GQA 4:2, QK-norm) with weights of quant type t and RoPE layout mode (default: Q8_0 + NeoX)
 type layerFixture struct {
+	t                      dtype.DType
+	mode                   compute.RoPEMode
 	embd, nH, nKV, hd, ffn int
 	eps, base              float32
 
@@ -277,7 +350,14 @@ type layerFixture struct {
 }
 
 func newLayerFixture() *layerFixture {
+	return newQuantLayerFixture(dtype.Q8_0, compute.RoPENeoX)
+}
+
+// newQuantLayerFixture sizes the block so every matrix has cols % 256 == 0 for the K-quants (embd = qDim = ffn = 256), the small 64-wide shape otherwise
+func newQuantLayerFixture(t dtype.DType, mode compute.RoPEMode) *layerFixture {
 	l := &layerFixture{
+		t:    t,
+		mode: mode,
 		embd: 64,
 		nH:   4,
 		nKV:  2,
@@ -286,10 +366,14 @@ func newLayerFixture() *layerFixture {
 		eps:  1e-6,
 		base: 10000,
 	}
+	if t == dtype.Q4_K || t == dtype.Q5_K || t == dtype.Q6_K {
+		l.embd, l.hd, l.ffn = 256, 64, 256
+	}
+
 	qDim, kvDim := l.nH*l.hd, l.nKV*l.hd
-	l.q, l.k, l.v = fakeQ8(qDim, l.embd, 1), fakeQ8(kvDim, l.embd, 2), fakeQ8(kvDim, l.embd, 3)
-	l.wo = fakeQ8(l.embd, qDim, 4)
-	l.gate, l.up, l.down = fakeQ8(l.ffn, l.embd, 5), fakeQ8(l.ffn, l.embd, 6), fakeQ8(l.embd, l.ffn, 7)
+	l.q, l.k, l.v = fakeQuant(t, qDim, l.embd, 1), fakeQuant(t, kvDim, l.embd, 2), fakeQuant(t, kvDim, l.embd, 3)
+	l.wo = fakeQuant(t, l.embd, qDim, 4)
+	l.gate, l.up, l.down = fakeQuant(t, l.ffn, l.embd, 5), fakeQuant(t, l.ffn, l.embd, 6), fakeQuant(t, l.embd, l.ffn, 7)
 	l.attnNorm, l.ffnNorm = detFloats(l.embd, 8), detFloats(l.embd, 9)
 	l.qn, l.kn = detFloats(l.hd, 10), detFloats(l.hd, 11)
 
@@ -302,10 +386,9 @@ func (l *layerFixture) reference(x []float32, pos int, kc, vc *[]float32) []floa
 	h := make([]float32, l.embd)
 	_ = compute.RMSNormInto(h, x, l.attnNorm, l.eps)
 
-	q, k, v := make([]float32, qDim), make([]float32, kvDim), make([]float32, kvDim)
-	_ = compute.MatMulVecQ8_0Into(l.q, qDim, l.embd, h, q)
-	_ = compute.MatMulVecQ8_0Into(l.k, kvDim, l.embd, h, k)
-	_ = compute.MatMulVecQ8_0Into(l.v, kvDim, l.embd, h, v)
+	q := refMatVec(l.t, l.q, qDim, l.embd, h)
+	k := refMatVec(l.t, l.k, kvDim, l.embd, h)
+	v := refMatVec(l.t, l.v, kvDim, l.embd, h)
 
 	for i := range l.nH {
 		_ = compute.RMSNormInto(q[i*l.hd:(i+1)*l.hd], q[i*l.hd:(i+1)*l.hd], l.qn, l.eps)
@@ -315,8 +398,14 @@ func (l *layerFixture) reference(x []float32, pos int, kc, vc *[]float32) []floa
 		_ = compute.RMSNormInto(k[i*l.hd:(i+1)*l.hd], k[i*l.hd:(i+1)*l.hd], l.kn, l.eps)
 	}
 
-	compute.ApplyRoPEHeads(q, l.nH, l.hd, pos, l.base)
-	compute.ApplyRoPEHeads(k, l.nKV, l.hd, pos, l.base)
+	if l.mode == compute.RoPENorm {
+		compute.ApplyRoPEHeadsNorm(q, l.nH, l.hd, pos, l.base)
+		compute.ApplyRoPEHeadsNorm(k, l.nKV, l.hd, pos, l.base)
+	} else {
+		compute.ApplyRoPEHeads(q, l.nH, l.hd, pos, l.base)
+		compute.ApplyRoPEHeads(k, l.nKV, l.hd, pos, l.base)
+	}
+
 	*kc, *vc = append(*kc, k...), append(*vc, v...)
 
 	seq := len(*kc) / kvDim
@@ -324,8 +413,7 @@ func (l *layerFixture) reference(x []float32, pos int, kc, vc *[]float32) []floa
 	_ = compute.AttentionScoresInto(attn, q, *kc, *vc, make([]float32, seq), seq, l.nH, l.nKV, l.hd)
 
 	out := append([]float32(nil), x...)
-	wo := make([]float32, l.embd)
-	_ = compute.MatMulVecQ8_0Into(l.wo, l.embd, qDim, attn, wo)
+	wo := refMatVec(l.t, l.wo, l.embd, qDim, attn)
 	for i := range out {
 		out[i] += wo[i]
 	}
@@ -333,13 +421,10 @@ func (l *layerFixture) reference(x []float32, pos int, kc, vc *[]float32) []floa
 	hn := make([]float32, l.embd)
 	_ = compute.RMSNormInto(hn, out, l.ffnNorm, l.eps)
 
-	g, u := make([]float32, l.ffn), make([]float32, l.ffn)
-	_ = compute.MatMulVecQ8_0Into(l.gate, l.ffn, l.embd, hn, g)
-	_ = compute.MatMulVecQ8_0Into(l.up, l.ffn, l.embd, hn, u)
+	g, u := refMatVec(l.t, l.gate, l.ffn, l.embd, hn), refMatVec(l.t, l.up, l.ffn, l.embd, hn)
 	compute.SwiGLUInPlace(g, u)
 
-	d := make([]float32, l.embd)
-	_ = compute.MatMulVecQ8_0Into(l.down, l.embd, l.ffn, g, d)
+	d := refMatVec(l.t, l.down, l.embd, l.ffn, g)
 	for i := range out {
 		out[i] += d[i]
 	}
@@ -358,11 +443,11 @@ func (l *layerFixture) cosSin(pos int) (cos, sin []float32) {
 func (l *layerFixture) qkv(b *Backend, layer, pos int, h, attn, kOut, vOut []float32) error {
 	cos, sin := l.cosSin(pos)
 
-	return b.QKVRoPEAttentionQuantCached(dtype.Q8_0, compute.RoPENeoX, "q", "k", "v", "qn", "kn", "an", l.q, l.k, l.v, l.qn, l.kn, l.attnNorm, h, cos, sin, attn, kOut, vOut, l.embd, l.nH, l.nKV, l.hd, layer, pos, pos+1, l.eps)
+	return b.QKVRoPEAttentionQuantCached(l.t, l.mode, "q", "k", "v", "qn", "kn", "an", l.q, l.k, l.v, l.qn, l.kn, l.attnNorm, h, cos, sin, attn, kOut, vOut, l.embd, l.nH, l.nKV, l.hd, layer, pos, pos+1, l.eps)
 }
 
 func (l *layerFixture) attnFFN(b *Backend, x, attn []float32) error {
-	return b.AttnFFNResidualQuantCached(dtype.Q8_0, "wo", "fn", "gate", "up", "down", l.wo, l.gate, l.up, l.down, l.ffnNorm, x, attn, l.embd, l.nH*l.hd, l.ffn, l.eps)
+	return b.AttnFFNResidualQuantCached(l.t, "wo", "fn", "gate", "up", "down", l.wo, l.gate, l.up, l.down, l.ffnNorm, x, attn, l.embd, l.nH*l.hd, l.ffn, l.eps)
 }
 
 func newFusedBackend(t *testing.T, l *layerFixture) (*Backend, *fakeGPU) {
@@ -646,8 +731,8 @@ func TestFusedContractsAndUnavailable(t *testing.T) {
 		t.Fatal("AttnFFN with x == nil and no residency: expected error")
 	}
 
-	// non-Q8_0 types and non-NeoX RoPE are not fused: ErrUnavailable so callers fall back to the per-op path
-	for _, ty := range []dtype.DType{dtype.Q4_0, dtype.Q4_K, dtype.Q6_K, dtype.F32} {
+	// types without a fused kernel and unknown RoPE modes: ErrUnavailable so callers fall back to the per-op path
+	for _, ty := range []dtype.DType{dtype.Q4_1, dtype.Q5_0, dtype.Q2_K, dtype.Q3_K, dtype.Q8_K, dtype.F32} {
 		err := b.QKVRoPEAttentionQuantCached(ty, compute.RoPENeoX, "q", "k", "v", "qn", "kn", "an", l.q, l.k, l.v, l.qn, l.kn, l.attnNorm, make([]float32, l.embd), cos, sin, nil, nil, nil, l.embd, l.nH, l.nKV, l.hd, 0, 0, 1, l.eps)
 		if !errors.Is(err, ErrUnavailable) {
 			t.Fatalf("QKV %s = %v, expected ErrUnavailable", ty, err)
@@ -664,9 +749,9 @@ func TestFusedContractsAndUnavailable(t *testing.T) {
 		}
 	}
 
-	err := b.QKVRoPEAttentionQuantCached(dtype.Q8_0, compute.RoPENorm, "q", "k", "v", "qn", "kn", "an", l.q, l.k, l.v, l.qn, l.kn, l.attnNorm, make([]float32, l.embd), cos, sin, nil, nil, nil, l.embd, l.nH, l.nKV, l.hd, 0, 0, 1, l.eps)
+	err := b.QKVRoPEAttentionQuantCached(dtype.Q8_0, compute.RoPEMode(99), "q", "k", "v", "qn", "kn", "an", l.q, l.k, l.v, l.qn, l.kn, l.attnNorm, make([]float32, l.embd), cos, sin, nil, nil, nil, l.embd, l.nH, l.nKV, l.hd, 0, 0, 1, l.eps)
 	if !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("QKV RoPENorm = %v, expected ErrUnavailable", err)
+		t.Fatalf("QKV unknown RoPE mode = %v, expected ErrUnavailable", err)
 	}
 
 	// other fused entry points stay unavailable
@@ -735,28 +820,21 @@ func TestFusedLogitsFromDevice(t *testing.T) {
 
 	approxEqual(t, "logits F32", logits, wantF32, 1e-4)
 
-	// Q4_0 / Q4_K heads (embd 256 for the K-quant)
+	// Q4_0 / Q4_K / Q5_K / Q6_K heads (embd 256 for the K-quants)
 	for _, tc := range []struct {
-		t         dtype.DType
-		qk, bytes int
-		embd      int
-	}{{dtype.Q4_0, quant.QK4_0, quant.BlockQ4_0Size, 64}, {dtype.Q4_K, quant.QK_K, quant.BlockQ4_KSize, 256}} {
+		t    dtype.DType
+		embd int
+	}{{dtype.Q4_0, 64}, {dtype.Q4_K, 256}, {dtype.Q5_K, 256}, {dtype.Q6_K, 256}} {
 		xs, ns := detFloats(tc.embd, 410), detFloats(tc.embd, 411)
 		if err := b.HiddenUpload(xs); err != nil {
 			t.Fatal(err)
 		}
 
-		raw := fakeQ4(vocab, tc.embd, tc.qk, tc.bytes, 412)
+		raw := fakeQuant(tc.t, vocab, tc.embd, 412)
 		hs := make([]float32, tc.embd)
 		_ = compute.RMSNormInto(hs, xs, ns, 1e-6)
 
-		var wantQ []float32
-		if tc.t == dtype.Q4_0 {
-			wantQ, _ = compute.MatMulVecQ4_0(raw, vocab, tc.embd, hs)
-		} else {
-			wantQ, _ = compute.MatMulVecQ4_K(raw, vocab, tc.embd, hs)
-		}
-
+		wantQ := refMatVec(tc.t, raw, vocab, tc.embd, hs)
 		if err := b.LogitsFromDevice(tc.t, "on"+tc.t.String(), ns, "head"+tc.t.String(), raw, nil, logits, vocab, tc.embd, 1e-6); err != nil {
 			t.Fatalf("%s: %v", tc.t, err)
 		}
@@ -769,8 +847,8 @@ func TestFusedLogitsFromDevice(t *testing.T) {
 		t.Fatal("embd != resident hidden length: expected error")
 	}
 
-	if err := b.LogitsFromDevice(dtype.Q6_K, "on", norm, "head", headQ8, nil, logits, vocab, embd, 1e-6); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("Q6_K head = %v, expected ErrUnavailable", err)
+	if err := b.LogitsFromDevice(dtype.Q2_K, "on", norm, "head", headQ8, nil, logits, vocab, embd, 1e-6); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Q2_K head = %v, expected ErrUnavailable", err)
 	}
 
 	if err := b.LogitsFromDevice(dtype.Q8_0, "on", norm, "head", headQ8, nil, logits[:3], vocab, embd, 1e-6); err == nil {
@@ -806,7 +884,7 @@ func TestFusedFFNSwiGLUQuantCached(t *testing.T) {
 	}
 }
 
-// Wave 3: Q4_0 / Q4_K matvec entry points validate geometry and dispatch to the runtime kernel
+// Q4_0 / Q4_K / Q5_K / Q6_K matvec entry points validate geometry and dispatch to the runtime kernel
 func TestBackendQ4MatVec(t *testing.T) {
 	b := &Backend{rt: &fakeGPU{}}
 
@@ -819,6 +897,8 @@ func TestBackendQ4MatVec(t *testing.T) {
 	}{
 		{"Q4_0", dtype.Q4_0, quant.QK4_0, quant.BlockQ4_0Size, b.MatMulVecQ4_0Cached, compute.MatMulVecQ4_0},
 		{"Q4_K", dtype.Q4_K, quant.QK_K, quant.BlockQ4_KSize, b.MatMulVecQ4_KCached, compute.MatMulVecQ4_K},
+		{"Q5_K", dtype.Q5_K, quant.QK_K, quant.BlockQ5_KSize, b.MatMulVecQ5_KCached, compute.MatMulVecQ5_K},
+		{"Q6_K", dtype.Q6_K, quant.QK_K, quant.BlockQ6_KSize, b.MatMulVecQ6_KCached, compute.MatMulVecQ6_K},
 	} {
 		rows, cols := 5, tc.qk*2
 		raw := fakeQ4(rows, cols, tc.qk, tc.bytes, 600)
@@ -858,8 +938,219 @@ func TestBackendQ4MatVec(t *testing.T) {
 		t.Fatalf("scaffold Q4_K = %v, expected ErrUnavailable", err)
 	}
 
+	if _, err := scaffold.MatMulVecQ5_KCached("w", nil, 1, 256, nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("scaffold Q5_K = %v, expected ErrUnavailable", err)
+	}
+
+	if _, err := scaffold.MatMulVecQ6_KCached("w", nil, 1, 256, nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("scaffold Q6_K = %v, expected ErrUnavailable", err)
+	}
+
 	// quants without a kernel stay unavailable
-	if _, err := b.MatMulVecQ5_KCached("w", nil, 1, 256, nil); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("Q5_K = %v, expected ErrUnavailable", err)
+	if _, err := b.MatMulVecQ2_KCached("w", nil, 1, 256, nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Q2_K = %v, expected ErrUnavailable", err)
+	}
+}
+
+// ---- fused dtype / RoPE-mode parity on the fake runtime ----
+
+var fusedParityTypes = []dtype.DType{dtype.Q8_0, dtype.Q4_0, dtype.Q4_K, dtype.Q5_K, dtype.Q6_K}
+
+func TestFusedQuantSupportedSet(t *testing.T) {
+	for _, ty := range fusedParityTypes {
+		if err := fusedQuantSupported("op", ty); err != nil {
+			t.Fatalf("fusedQuantSupported(%s) = %v", ty, err)
+		}
+	}
+
+	for _, ty := range []dtype.DType{dtype.F32, dtype.F16, dtype.Q4_1, dtype.Q5_0, dtype.Q5_1, dtype.Q2_K, dtype.Q3_K, dtype.Q8_K} {
+		if err := fusedQuantSupported("op", ty); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("fusedQuantSupported(%s) = %v, expected ErrUnavailable", ty, err)
+		}
+	}
+
+	// every fused type has a matvec geometry (the shape check the fused entry points run)
+	for _, ty := range fusedQuants {
+		if _, _, ok := quantGeometry(ty); !ok {
+			t.Fatalf("fused type %s has no quantGeometry", ty)
+		}
+	}
+}
+
+// resident decode (h == nil, x == nil) and host mode for every fused quant type x NeoX / NORM RoPE equal the host reference over several tokens
+func TestFusedQuantResidencyParity(t *testing.T) {
+	for _, ty := range fusedParityTypes {
+		for _, mode := range []compute.RoPEMode{compute.RoPENeoX, compute.RoPENorm} {
+			t.Run(fmt.Sprintf("%s/mode%d", ty, int(mode)), func(t *testing.T) {
+				l := newQuantLayerFixture(ty, mode)
+				b, f := newFusedBackend(t, l)
+
+				var kc, vc []float32
+				x := detFloats(l.embd, 700)
+				for pos := range 3 {
+					want := l.reference(x, pos, &kc, &vc)
+
+					if err := b.HiddenUpload(x); err != nil {
+						t.Fatal(err)
+					}
+
+					if err := l.qkv(b, 0, pos, nil, nil, nil, nil); err != nil {
+						t.Fatalf("pos %d qkv: %v", pos, err)
+					}
+
+					if !b.HiddenActive() {
+						t.Fatal("QKV must keep residency")
+					}
+
+					if err := l.attnFFN(b, nil, nil); err != nil {
+						t.Fatalf("pos %d attnFFN: %v", pos, err)
+					}
+
+					got := make([]float32, l.embd)
+					if err := b.HiddenDownload(got); err != nil {
+						t.Fatal(err)
+					}
+
+					relEqual(t, fmt.Sprintf("resident %s pos %d", ty, pos), got, want, 1e-5)
+					x = want
+				}
+
+				// host mode: x / h supplied, residency never enabled, mirrors filled
+				var kh, vh []float32
+				x = detFloats(l.embd, 710)
+				want := l.reference(x, 0, &kh, &vh)
+				h := make([]float32, l.embd)
+				_ = compute.RMSNormInto(h, x, l.attnNorm, l.eps)
+
+				attn := make([]float32, l.nH*l.hd)
+				kOut, vOut := make([]float32, l.nKV*l.hd), make([]float32, l.nKV*l.hd)
+				b.KVCacheReset()
+				if err := l.qkv(b, 0, 0, h, attn, kOut, vOut); err != nil {
+					t.Fatal(err)
+				}
+
+				relEqual(t, "kOut", kOut, kh, 1e-5)
+				relEqual(t, "vOut", vOut, vh, 1e-5)
+
+				got := append([]float32(nil), x...)
+				if err := l.attnFFN(b, got, attn); err != nil {
+					t.Fatal(err)
+				}
+
+				relEqual(t, "host layer "+ty.String(), got, want, 1e-5)
+
+				if b.HiddenActive() {
+					t.Fatal("host-mode call must not enable residency")
+				}
+
+				// FFN only
+				out := make([]float32, l.embd)
+				if err := b.FFNSwiGLUQuantCached(ty, "gate", "up", "down", l.gate, l.up, l.down, h, out, l.embd, l.ffn); err != nil {
+					t.Fatal(err)
+				}
+
+				g, u := refMatVec(ty, l.gate, l.ffn, l.embd, h), refMatVec(ty, l.up, l.ffn, l.embd, h)
+				compute.SwiGLUInPlace(g, u)
+				relEqual(t, "FFNSwiGLUQuantCached "+ty.String(), out, refMatVec(ty, l.down, l.embd, l.ffn, g), 1e-5)
+
+				// the fused calls reached the runtime (a Q8_0 reader on this data would not match the reference above)
+				if countCalls(f, "qkv") == 0 || countCalls(f, "attnFFN") == 0 {
+					t.Fatalf("fake runtime saw calls %v", f.calls)
+				}
+			})
+		}
+	}
+}
+
+// the NORM fused path rotates adjacent pairs: it must differ from the NeoX result on the same weights, and the K it leaves in the cache must be the NORM rotation of the NeoX-unrotated K
+func TestFusedRoPENormDiffersFromNeoX(t *testing.T) {
+	neox, norm := newQuantLayerFixture(dtype.Q8_0, compute.RoPENeoX), newQuantLayerFixture(dtype.Q8_0, compute.RoPENorm)
+	x := detFloats(neox.embd, 720)
+
+	run := func(l *layerFixture) []float32 {
+		b, _ := newFusedBackend(t, l)
+		h := make([]float32, l.embd)
+		_ = compute.RMSNormInto(h, x, l.attnNorm, l.eps)
+
+		kOut := make([]float32, l.nKV*l.hd)
+		if err := l.qkv(b, 0, 3, h, nil, kOut, nil); err != nil {
+			t.Fatal(err)
+		}
+
+		return kOut
+	}
+
+	kNeoX, kNorm := run(neox), run(norm)
+
+	same := true
+	for i := range kNeoX {
+		if kNeoX[i] != kNorm[i] {
+			same = false
+			break
+		}
+	}
+
+	if same {
+		t.Fatal("fused NORM and NeoX produced identical K at pos 3")
+	}
+
+	// independent check of the NORM K: matvec + QK-norm on the host, then ApplyRoPEHeadsNorm
+	h := make([]float32, norm.embd)
+	_ = compute.RMSNormInto(h, x, norm.attnNorm, norm.eps)
+	want := refMatVec(norm.t, norm.k, norm.nKV*norm.hd, norm.embd, h)
+	for i := range norm.nKV {
+		_ = compute.RMSNormInto(want[i*norm.hd:(i+1)*norm.hd], want[i*norm.hd:(i+1)*norm.hd], norm.kn, norm.eps)
+	}
+
+	compute.ApplyRoPEHeadsNorm(want, norm.nKV, norm.hd, 3, norm.base)
+	relEqual(t, "fused NORM K", kNorm, want, 1e-5)
+}
+
+// ApplyRoPEHeadsNorm: validation, dispatch (fake = host reference) and the scaffold contract
+func TestBackendApplyRoPEHeadsNorm(t *testing.T) {
+	var scaffold Backend
+	if err := scaffold.ApplyRoPEHeadsNorm(make([]float32, 8), 1, 8, 0, 10000); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("scaffold ApplyRoPEHeadsNorm = %v, expected ErrUnavailable", err)
+	}
+
+	b := &Backend{
+		rt: &fakeGPU{},
+	}
+	const nHeads, headDim = 3, 16
+	v := detFloats(nHeads*headDim+4, 730) // longer than needed: the tail must stay untouched
+
+	want := append([]float32(nil), v...)
+	compute.ApplyRoPEHeadsNorm(want, nHeads, headDim, 9, 10000)
+
+	got := append([]float32(nil), v...)
+	if err := b.ApplyRoPEHeadsNorm(got, nHeads, headDim, 9, 10000); err != nil {
+		t.Fatal(err)
+	}
+
+	approxEqual(t, "ApplyRoPEHeadsNorm", got, want, 1e-6)
+
+	for i := nHeads * headDim; i < len(v); i++ {
+		if got[i] != v[i] {
+			t.Fatalf("tail element %d modified", i)
+		}
+	}
+
+	neox := append([]float32(nil), v...)
+	if err := b.ApplyRoPEHeads(neox, nHeads, headDim, 9, 10000); err != nil {
+		t.Fatal(err)
+	}
+
+	if neox[1] == got[1] && neox[2] == got[2] {
+		t.Fatal("NeoX and NORM layouts produced the same rotation")
+	}
+
+	for _, bad := range []struct{ nHeads, headDim int }{{0, 16}, {1, 0}, {1, 7}} {
+		if err := b.ApplyRoPEHeadsNorm(v, bad.nHeads, bad.headDim, 0, 10000); err == nil {
+			t.Fatalf("ApplyRoPEHeadsNorm(nHeads=%d headDim=%d): expected error", bad.nHeads, bad.headDim)
+		}
+	}
+
+	if err := b.ApplyRoPEHeadsNorm(v[:nHeads*headDim-1], nHeads, headDim, 0, 10000); err == nil {
+		t.Fatal("short v: expected error")
 	}
 }
