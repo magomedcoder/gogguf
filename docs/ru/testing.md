@@ -32,19 +32,32 @@ go test -tags=integration ./test/integration/...
 
 CI (`.github/workflows/ci.yml`):
 
-| Job                   | Что гоняет                                                        | Модели / заметки                                   |
-|-----------------------|-------------------------------------------------------------------|----------------------------------------------------|
-| `test`                | `go vet` + `go test ./...` + сборка CLI + smoke usage `gogguf`    | без GGUF; matrix: Linux / Windows / macOS          |
-| `cross-build`         | CPU cross-compile CLI                                             | linux/darwin/windows * amd64/arm64                 |
-| `integration`         | `./pkg/model/qwen3/` + `-tags=integration ./test/integration/...` | Qwen3-1.7B + Llama-3.2-1B; `.bin` фикстуры в репо  |
-| `integration-mistral` | `-tags=integration -run TestMistral`                              | Mistral-7B (отдельный job: больший download / RAM) |
-| `cuda`                | `-tags=cuda` пакеты device/model + CPU<->GPU integration          | Qwen3-1.7B; **skip** без NVIDIA GPU                |
+| Job                   | Что гоняет                                                                | Модели / заметки                                          |
+|-----------------------|---------------------------------------------------------------------------|-----------------------------------------------------------|
+| `test`                | `go vet` + `go test ./...` + сборка CLI + smoke usage `gogguf`            | без GGUF; matrix: Linux / Windows / macOS                 |
+| `cross-build`         | CPU cross-compile CLI                                                     | linux/darwin/windows * amd64/arm64                        |
+| `integration`         | `./pkg/model/qwen3/` + `-tags=integration ./test/integration/...`         | Qwen3-1.7B + Llama-3.2-1B; `.bin` фикстуры в репо         |
+| `integration-mistral` | `-tags=integration -run TestMistral`                                      | Mistral-7B (отдельный job: больший download / RAM)        |
+| `cuda`                | `-tags=cuda` пакеты device/model + CPU<->GPU integration                  | Qwen3-1.7B; **skip** без NVIDIA GPU                       |
+| `metal-static`        | `-tags metal ./pkg/device/metal/...` (fakeGPU + MSL/driver static)        | Linux; без Apple GPU                                      |
+| `metal-macos`         | cgo `go build -tags metal` + `go test -tags metal ./pkg/device/metal/...` | macOS; on-device parity **skip** без Metal; без HF `-ngl` |
 
 CUDA локально (Linux + NVIDIA) - см. [platforms.md](platforms.md):
 
 ```bash
 CGO_ENABLED=1 go test -tags=cuda ./pkg/device/cuda/...
 CGO_ENABLED=1 go test -tags='cuda,integration' ./test/integration/
+```
+
+Metal локально - см. [platforms.md](platforms.md):
+
+```bash
+# Linux / любая ОС: static + fakeGPU (без Metal)
+go test -tags metal ./pkg/device/metal/...
+
+# macOS (cgo + Xcode command line tools; live runtime нужен CGO_ENABLED=1)
+CGO_ENABLED=1 go build -tags metal -o build/gogguf ./cmd/gogguf
+CGO_ENABLED=1 go test -tags metal ./pkg/device/metal/...
 ```
 
 ## Фикстуры других архитектур

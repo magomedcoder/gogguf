@@ -108,7 +108,9 @@ go build -tags metal -o build/gogguf ./cmd/gogguf
 go test -tags metal ./pkg/device/metal/   # GPU parity tests (skip without Metal)
 ```
 
-Metal limits: B1 per-op dispatch is one synchronous command buffer per op; B2 (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K, NeoX or NORM RoPE) fuses a layer into two command buffers with a device-resident residual; B3 prefill is one GEMM launch per matmul, one command buffer per batch FFN / batch attention. Not yet benchmarked or smoke-tested on a Mac (see the Metal protocol in [tools.md](tools.md)); Q4_0 follows the `pkg/quant` nibble layout; Q5_K / Q6_K / fused quants / NORM RoPE are parity-tested against the CPU on a fake runtime (Linux) and the on-device tests skip without Metal.
+Metal limits: B1 per-op dispatch is one synchronous command buffer per op; B2 (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K, NeoX or NORM RoPE) fuses a layer into two command buffers with a device-resident residual; B3 prefill is one GEMM launch per matmul, one command buffer per batch FFN / batch attention. Not yet benchmarked or CLI `-ngl` smoke-tested on a Mac (see the Metal protocol in [tools.md](tools.md)); Q4_0 follows the `pkg/quant` nibble layout; Q5_K / Q6_K / fused quants / NORM RoPE are parity-tested against the CPU on a fake runtime (Linux) and the on-device tests skip without Metal.
+
+CI (`.github/workflows/ci.yml`): **`metal-static`** on Ubuntu runs `go test -tags metal ./pkg/device/metal/...` (fakeGPU + MSL/driver static); **`metal-macos`** builds the CLI with `CGO_ENABLED=1 -tags metal` and runs the same package tests (on-device parity when Metal is available). Full HF `gogguf run -ngl` golden is not in CI yet. Details: [testing.md](testing.md).
 
 ## Windows
 

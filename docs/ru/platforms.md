@@ -108,7 +108,9 @@ go build -tags metal -o build/gogguf ./cmd/gogguf
 go test -tags metal ./pkg/device/metal/   # parity-тесты GPU (skip без Metal)
 ```
 
-Ограничения Metal: B1 - один синхронный command buffer на операцию; B2 (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K, RoPE NeoX или NORM) сводит слой к двум command buffer с device-resident residual; B3 prefill - один GEMM launch на matmul, один command buffer на batch FFN / batch attention. Бенчмарки и smoke на Mac пока не прогнаны (протокол Metal - в [tools.md](tools.md)); Q4_0 следует nibble-раскладке `pkg/quant`; Q5_K / Q6_K / fused quant / NORM RoPE проверены на parity с CPU через fake runtime (Linux), тесты на устройстве пропускаются без Metal.
+Ограничения Metal: B1 - один синхронный command buffer на операцию; B2 (Q8_0 / Q4_0 / Q4_K / Q5_K / Q6_K, RoPE NeoX или NORM) сводит слой к двум command buffer с device-resident residual; B3 prefill - один GEMM launch на matmul, один command buffer на batch FFN / batch attention. Бенчмарки и CLI `-ngl` smoke на Mac пока не прогнаны (протокол Metal - в [tools.md](tools.md)); Q4_0 следует nibble-раскладке `pkg/quant`; Q5_K / Q6_K / fused quant / NORM RoPE проверены на parity с CPU через fake runtime (Linux), тесты на устройстве пропускаются без Metal.
+
+CI (`.github/workflows/ci.yml`): **`metal-static`** на Ubuntu гоняет `go test -tags metal ./pkg/device/metal/...` (fakeGPU + MSL/driver static); **`metal-macos`** собирает CLI с `CGO_ENABLED=1 -tags metal` и те же пакетные тесты (on-device parity, когда есть Metal). Полный HF `gogguf run -ngl` golden в CI пока нет. Подробности: [testing.md](testing.md).
 
 ## Windows
 

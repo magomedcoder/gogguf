@@ -187,3 +187,40 @@ jobs:
           CGO_ENABLED=1 go test -tags='cuda,integration' -count=1 -timeout 30m \
             -run 'TestFullLayersCPUVsGPU|TestFullLogitsCPUVsGPU' \
             ./test/integration/
+
+  metal-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: go.sum
+
+      - name: Metal package tests (static + fakeGPU; no Metal device)
+        run: go test -tags metal -count=1 -timeout 10m ./pkg/device/metal/...
+
+  metal-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: go.sum
+
+      - name: Build Metal CLI
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          mkdir -p build
+          go build -tags metal -o build/gogguf ./cmd/gogguf
+          go build -tags metal -o build/tools ./cmd/tools
+
+      - name: Metal package tests (cgo + on-device parity when Metal ready)
+        env:
+          CGO_ENABLED: "1"
+        run: go test -tags metal -count=1 -timeout 20m ./pkg/device/metal/...
