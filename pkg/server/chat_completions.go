@@ -91,9 +91,10 @@ type chatStreamChunk struct {
 }
 
 type chatStreamChoice struct {
-	Index        int             `json:"index"`
-	Delta        chatStreamDelta `json:"delta"`
-	FinishReason *string         `json:"finish_reason"`
+	Index        int                 `json:"index"`
+	Delta        chatStreamDelta     `json:"delta"`
+	FinishReason *string             `json:"finish_reason"`
+	Logprobs     *chatChoiceLogprobs `json:"logprobs,omitempty"` // per-token content when stream + logprobs=true
 }
 
 type chatStreamDelta struct {
@@ -324,7 +325,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	fp := systemFingerprint(modelName)
 	if req.Stream {
-		genParams.Logprobs = false // stream logprobs not wired yet
 		includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
 		s.serveChatStream(w, conv, prompt, modelName, genParams, includeUsage, len(req.Tools) > 0 || respFmt == "json_object", stops, respFmt, fp)
 		return
@@ -378,6 +378,32 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// chatTokenLogprobFrom builds one OpenAI content logprob entry (decode maps token IDs to text).
+func chatTokenLogprobFrom(decode func(int) string, e runtime.TokenLogprob) chatTokenLogprob {
+	tok := decode(e.TokenID)
+	item := chatTokenLogprob{
+		Token:   tok,
+		Logprob: e.Logprob,
+		Bytes:   []byte(tok),
+	}
+	if len(e.Top) == 0 {
+		item.TopLogprobs = []chatTopLogprob{}
+		return item
+	}
+
+	item.TopLogprobs = make([]chatTopLogprob, 0, len(e.Top))
+	for _, t := range e.Top {
+		tt := decode(t.ID)
+		item.TopLogprobs = append(item.TopLogprobs, chatTopLogprob{
+			Token:   tt,
+			Logprob: t.Logprob,
+			Bytes:   []byte(tt),
+		})
+	}
+
+	return item
+}
+
 func buildChatLogprobs(sess *runtime.GenerationSession) *chatChoiceLogprobs {
 	entries := sess.Logprobs()
 	if len(entries) == 0 {
@@ -386,32 +412,21 @@ func buildChatLogprobs(sess *runtime.GenerationSession) *chatChoiceLogprobs {
 
 	content := make([]chatTokenLogprob, 0, len(entries))
 	for _, e := range entries {
-		tok := sess.DecodeToken(e.TokenID)
-		item := chatTokenLogprob{
-			Token:   tok,
-			Logprob: e.Logprob,
-			Bytes:   []byte(tok),
-		}
+		content = append(content, chatTokenLogprobFrom(sess.DecodeToken, e))
+	}
 
-		if len(e.Top) > 0 {
-			item.TopLogprobs = make([]chatTopLogprob, 0, len(e.Top))
-			for _, t := range e.Top {
-				tt := sess.DecodeToken(t.ID)
-				item.TopLogprobs = append(item.TopLogprobs, chatTopLogprob{
-					Token:   tt,
-					Logprob: t.Logprob,
-					Bytes:   []byte(tt),
-				})
-			}
-		} else {
-			item.TopLogprobs = []chatTopLogprob{}
-		}
+	return &chatChoiceLogprobs{Content: content}
+}
 
-		content = append(content, item)
+// lastChatLogprobs is the newest recorded token for a stream content chunk (nil when Logprobs was off).
+func lastChatLogprobs(sess *runtime.GenerationSession) *chatChoiceLogprobs {
+	entries := sess.Logprobs()
+	if len(entries) == 0 {
+		return nil
 	}
 
 	return &chatChoiceLogprobs{
-		Content: content,
+		Content: []chatTokenLogprob{chatTokenLogprobFrom(sess.DecodeToken, entries[len(entries)-1])},
 	}
 }
 
@@ -447,7 +462,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	created := time.Now().Unix()
 
-	writeChunk := func(delta chatStreamDelta, finish *string, usage *usageTokens) {
+	writeChunk := func(delta chatStreamDelta, finish *string, usage *usageTokens, logprobs *chatChoiceLogprobs) {
 		chunk := chatStreamChunk{
 			ID:                id,
 			Object:            "chat.completion.chunk",
@@ -458,6 +473,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 				Index:        0,
 				Delta:        delta,
 				FinishReason: finish,
+				Logprobs:     logprobs,
 			}},
 			Usage: usage,
 		}
@@ -465,14 +481,18 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 		flusher.Flush()
 	}
 
-	writeChunk(chatStreamDelta{Role: "assistant"}, nil, nil)
+	writeChunk(chatStreamDelta{Role: "assistant"}, nil, nil, nil)
 
 	params.OnToken = func(tokenID int) bool {
 		if bufferOutput {
 			return true
 		}
 
-		writeChunk(chatStreamDelta{Content: sess.DecodeToken(tokenID)}, nil, nil)
+		var lp *chatChoiceLogprobs
+		if params.Logprobs {
+			lp = lastChatLogprobs(sess)
+		}
+		writeChunk(chatStreamDelta{Content: sess.DecodeToken(tokenID)}, nil, nil, lp)
 		return true
 	}
 
@@ -496,9 +516,16 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 		}
 	}
 
+	// bufferOutput (tools / json_object): emit content once; attach full session logprobs on that chunk when requested
+	var flushLogprobs *chatChoiceLogprobs
+	if bufferOutput && params.Logprobs {
+		flushLogprobs = buildChatLogprobs(sess)
+	}
+
 	if parsed.HasToolCalls() {
 		if parsed.Content != "" {
-			writeChunk(chatStreamDelta{Content: parsed.Content}, nil, nil)
+			writeChunk(chatStreamDelta{Content: parsed.Content}, nil, nil, flushLogprobs)
+			flushLogprobs = nil // only once with the first content-bearing chunk
 		}
 		for i, tc := range parsed.ToolCalls {
 			writeChunk(chatStreamDelta{ToolCalls: []chatStreamToolCall{{
@@ -509,10 +536,12 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				},
-			}}}, nil, nil)
+			}}}, nil, nil, flushLogprobs)
+			flushLogprobs = nil
 		}
 	} else if bufferOutput && text != "" {
-		writeChunk(chatStreamDelta{Content: parsed.Content}, nil, nil)
+		writeChunk(chatStreamDelta{Content: parsed.Content}, nil, nil, flushLogprobs)
+		flushLogprobs = nil
 	}
 
 	finish := openaiFinishReason(parsed.HasToolCalls(), sess.StopReason())
@@ -525,7 +554,7 @@ func (s *Server) serveChatStream(w http.ResponseWriter, conv *runtime.Conversati
 		}
 	}
 
-	writeChunk(chatStreamDelta{}, &finish, usage)
+	writeChunk(chatStreamDelta{}, &finish, usage, nil)
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()

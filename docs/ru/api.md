@@ -71,29 +71,29 @@ Embeddings не делают `Reset()` чужого chat KV: после embeddin
 
 `Content-Type: application/json`
 
-| Поле                    | Тип           | По умолчанию | Описание                                       |
-|-------------------------|---------------|--------------|------------------------------------------------|
-| `messages`              | array         | -            | `{role, content}` (обязательно)                |
-| `model`                 | string        | имя из GGUF  | идентификатор модели                           |
-| `max_tokens`            | int           | `128`        | максимум новых токенов                         |
-| `max_completion_tokens` | int           | -            | алиас `max_tokens` (предпочтителен в OpenAI)   |
-| `temperature`           | float         | `0`          | `0` = greedy                                   |
-| `top_p`                 | float         | `1`          | nucleus sampling                               |
-| `frequency_penalty`     | float         | `0`          | при `> 0` мапится во внутренний repeat penalty |
-| `presence_penalty`      | float         | `0`          | OpenAI presence penalty (−2...2)               |
-| `n`                     | int           | `1`          | только `1` (`n > 1` -> 400)                    |
-| `stop`                  | string/array  | -            | стоп-последовательности                        |
-| `stream`                | bool          | `false`      | SSE (`data: [DONE]` в конце)                   |
-| `stream_options`        | object        | -            | `{ "include_usage": true }`                    |
-| `seed`                  | int           | -            | seed sampler RNG                               |
-| `user`                  | string        | -            | ключ сессии без `X-Session-Id`                 |
-| `logit_bias`            | object        | -            | `{"token_id": bias, ...}`                      |
-| `response_format`       | object        | -            | `text` / `json_object` (`json_schema` -> 400)  |
-| `logprobs`              | bool          | `false`      | non-stream: logprobs в `choices[0].logprobs`   |
-| `top_logprobs`          | int           | `0`          | `0..20` альтернатив (нужен `logprobs=true`)    |
-| `tools`                 | array         | -            | описания инструментов                          |
-| `tool_choice`           | string/object | `auto`       | `auto` / `none` / `required` / по имени        |
-| `parallel_tool_calls`   | bool          | `false`      | несколько tool_calls за один ход               |
+| Поле                    | Тип           | По умолчанию | Описание                                                                                       |
+|-------------------------|---------------|--------------|------------------------------------------------------------------------------------------------|
+| `messages`              | array         | -            | `{role, content}` (обязательно)                                                                |
+| `model`                 | string        | имя из GGUF  | идентификатор модели                                                                           |
+| `max_tokens`            | int           | `128`        | максимум новых токенов                                                                         |
+| `max_completion_tokens` | int           | -            | алиас `max_tokens` (предпочтителен в OpenAI)                                                   |
+| `temperature`           | float         | `0`          | `0` = greedy                                                                                   |
+| `top_p`                 | float         | `1`          | nucleus sampling                                                                               |
+| `frequency_penalty`     | float         | `0`          | при `> 0` мапится во внутренний repeat penalty                                                 |
+| `presence_penalty`      | float         | `0`          | OpenAI presence penalty (−2...2)                                                               |
+| `n`                     | int           | `1`          | только `1` (`n > 1` -> 400)                                                                    |
+| `stop`                  | string/array  | -            | стоп-последовательности                                                                        |
+| `stream`                | bool          | `false`      | SSE (`data: [DONE]` в конце)                                                                   |
+| `stream_options`        | object        | -            | `{ "include_usage": true }`                                                                    |
+| `seed`                  | int           | -            | seed sampler RNG                                                                               |
+| `user`                  | string        | -            | ключ сессии без `X-Session-Id`                                                                 |
+| `logit_bias`            | object        | -            | `{"token_id": bias, ...}`                                                                      |
+| `response_format`       | object        | -            | `text` / `json_object` (`json_schema` -> 400)                                                  |
+| `logprobs`              | bool          | `false`      | logprobs в `choices[0].logprobs` (non-stream: весь список; stream: один entry на content-чанк) |
+| `top_logprobs`          | int           | `0`          | `0..20` альтернатив (нужен `logprobs=true`; работает со stream)                                |
+| `tools`                 | array         | -            | описания инструментов                                                                          |
+| `tool_choice`           | string/object | `auto`       | `auto` / `none` / `required` / по имени                                                        |
+| `parallel_tool_calls`   | bool          | `false`      | несколько tool_calls за один ход                                                               |
 
 `content` - строка или массив `{type:"text", text:"..."}`. Не-text части (например `image_url`) -> **400**.
 
@@ -126,7 +126,7 @@ Embeddings не делают `Reset()` чужого chat KV: после embeddin
 }
 ```
 
-Streaming: SSE-чанки, `finish_reason` в последнем чанке, затем `data: [DONE]`.
+Streaming: SSE-чанки, `finish_reason` в последнем чанке, затем `data: [DONE]`. При `logprobs: true` каждый content-чанк несёт `choices[0].logprobs.content` (один новый токен); `top_logprobs` заполняет `top_logprobs` внутри entry. Role / finish чанки без `logprobs`. При буферизации вывода (`tools` или `response_format=json_object`) logprobs один раз на flushed content-чанке (полный `content[]`).
 
 ```bash
 curl -s 127.0.0.1:8000/v1/chat/completions \
@@ -135,7 +135,7 @@ curl -s 127.0.0.1:8000/v1/chat/completions \
 
 curl -N 127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Привет"}],"max_tokens":32,"stream":true}'
+  -d '{"messages":[{"role":"user","content":"Привет"}],"max_tokens":32,"stream":true,"logprobs":true,"top_logprobs":5}'
 ```
 
 ## `POST /v1/completions`

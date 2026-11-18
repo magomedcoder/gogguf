@@ -71,29 +71,29 @@ Same object as in the list, or `404` if the id does not match the loaded model.
 
 `Content-Type: application/json`
 
-| Field                   | Type          | Default   | Description                                                                |
-|-------------------------|---------------|-----------|----------------------------------------------------------------------------|
-| `messages`              | array         | -         | `{role, content}` (required)                                               |
-| `model`                 | string        | GGUF name | model id                                                                   |
-| `max_tokens`            | int           | `128`     | max new tokens                                                             |
-| `max_completion_tokens` | int           | -         | alias for `max_tokens` (preferred by OpenAI)                               |
-| `temperature`           | float         | `0`       | `0` = greedy                                                               |
-| `top_p`                 | float         | `1`       | nucleus sampling                                                           |
-| `frequency_penalty`     | float         | `0`       | mapped to internal repeat penalty when `> 0`                               |
-| `presence_penalty`      | float         | `0`       | OpenAI-style presence penalty (−2...2)                                     |
-| `n`                     | int           | `1`       | only `1` supported (`n > 1` -> 400)                                        |
-| `stop`                  | string/array  | -         | stop sequences                                                             |
-| `stream`                | bool          | `false`   | SSE streaming (`data: [DONE]` at end)                                      |
-| `stream_options`        | object        | -         | `{ "include_usage": true }` for usage in stream                            |
-| `seed`                  | int           | -         | sampler RNG seed                                                           |
-| `user`                  | string        | -         | session key when `X-Session-Id` is absent                                  |
-| `logit_bias`            | object        | -         | `{"token_id": bias, ...}` added to logits                                  |
-| `response_format`       | object        | -         | `{ "type": "text" }` or `{ "type": "json_object" }` (`json_schema` -> 400) |
-| `logprobs`              | bool          | `false`   | non-stream: per-token logprobs in `choices[0].logprobs`                    |
-| `top_logprobs`          | int           | `0`       | `0..20` alternatives per token (requires `logprobs=true`)                  |
-| `tools`                 | array         | -         | OpenAI-style tool definitions                                              |
-| `tool_choice`           | string/object | `auto`    | `auto` / `none` / `required` / named                                       |
-| `parallel_tool_calls`   | bool          | `false`   | allow multiple tool calls in one turn                                      |
+| Field                   | Type          | Default   | Description                                                                                             |
+|-------------------------|---------------|-----------|---------------------------------------------------------------------------------------------------------|
+| `messages`              | array         | -         | `{role, content}` (required)                                                                            |
+| `model`                 | string        | GGUF name | model id                                                                                                |
+| `max_tokens`            | int           | `128`     | max new tokens                                                                                          |
+| `max_completion_tokens` | int           | -         | alias for `max_tokens` (preferred by OpenAI)                                                            |
+| `temperature`           | float         | `0`       | `0` = greedy                                                                                            |
+| `top_p`                 | float         | `1`       | nucleus sampling                                                                                        |
+| `frequency_penalty`     | float         | `0`       | mapped to internal repeat penalty when `> 0`                                                            |
+| `presence_penalty`      | float         | `0`       | OpenAI-style presence penalty (−2...2)                                                                  |
+| `n`                     | int           | `1`       | only `1` supported (`n > 1` -> 400)                                                                     |
+| `stop`                  | string/array  | -         | stop sequences                                                                                          |
+| `stream`                | bool          | `false`   | SSE streaming (`data: [DONE]` at end)                                                                   |
+| `stream_options`        | object        | -         | `{ "include_usage": true }` for usage in stream                                                         |
+| `seed`                  | int           | -         | sampler RNG seed                                                                                        |
+| `user`                  | string        | -         | session key when `X-Session-Id` is absent                                                               |
+| `logit_bias`            | object        | -         | `{"token_id": bias, ...}` added to logits                                                               |
+| `response_format`       | object        | -         | `{ "type": "text" }` or `{ "type": "json_object" }` (`json_schema` -> 400)                              |
+| `logprobs`              | bool          | `false`   | per-token logprobs in `choices[0].logprobs` (non-stream full list; stream: one entry per content chunk) |
+| `top_logprobs`          | int           | `0`       | `0..20` alternatives per token (requires `logprobs=true`; works with stream)                            |
+| `tools`                 | array         | -         | OpenAI-style tool definitions                                                                           |
+| `tool_choice`           | string/object | `auto`    | `auto` / `none` / `required` / named                                                                    |
+| `parallel_tool_calls`   | bool          | `false`   | allow multiple tool calls in one turn                                                                   |
 
 `content` may be a string or an array of `{type:"text", text:"..."}` parts. Non-text parts (e.g. `image_url`) -> **400**.
 
@@ -127,7 +127,7 @@ Non-streaming response:
 }
 ```
 
-Streaming uses SSE chunks with `finish_reason` on the last chunk, then `data: [DONE]`.
+Streaming uses SSE chunks with `finish_reason` on the last chunk, then `data: [DONE]`. With `logprobs: true`, each content chunk also carries `choices[0].logprobs.content` (one new token); `top_logprobs` fills `top_logprobs` inside that entry. Role / finish chunks omit `logprobs`. When output is buffered (`tools` or `response_format=json_object`), logprobs are attached once on the flushed content chunk (full `content[]`).
 
 ```bash
 curl -s 127.0.0.1:8000/v1/chat/completions \
@@ -136,7 +136,7 @@ curl -s 127.0.0.1:8000/v1/chat/completions \
 
 curl -N 127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":true}'
+  -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":true,"logprobs":true,"top_logprobs":5}'
 ```
 
 ## `POST /v1/completions`
