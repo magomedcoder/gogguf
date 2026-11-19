@@ -141,12 +141,26 @@ curl -N 127.0.0.1:8000/v1/chat/completions \
 
 ## `POST /v1/completions`
 
-Legacy Completions API: `prompt` (string or string array) -> generation. Supports `stream`, `max_tokens`, sampling, `stop`, `echo`. Prefer `/v1/chat/completions` for chat templates.
+Legacy Completions API. Prefer `/v1/chat/completions` for chat templates.
+
+| Field                                     | Type                          | Default | Description                                                                                                                                                                                       |
+|-------------------------------------------|-------------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `prompt`                                  | string / `[]string` / `[]int` | -       | text, joined string array, or token IDs (`[][]int` batch -> 400)                                                                                                                                  |
+| `suffix`                                  | string                        | -       | appended to prefill only (not echoed; not OpenAI insert semantics)                                                                                                                                |
+| `max_tokens`                              | int                           | -       | generation length                                                                                                                                                                                 |
+| `stream`                                  | bool                          | `false` | SSE                                                                                                                                                                                               |
+| `echo`                                    | bool                          | `false` | prepend original prompt text (token prompts: decoded) to `text`                                                                                                                                   |
+| `logprobs`                                | int                           | -       | `0..5`; omit to disable. Parallel arrays on `choices[0].logprobs` (`tokens`, `token_logprobs`, `top_logprobs`, `text_offset`) for **generated** tokens only; stream = one index per content chunk |
+| `stop` / sampling / `logit_bias` / `seed` | -                             | -       | same idea as chat                                                                                                                                                                                 |
 
 ```bash
 curl -s 127.0.0.1:8000/v1/completions \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"Once upon a time","max_tokens":32}'
+  -d '{"prompt":"Once upon a time","max_tokens":32,"logprobs":5}'
+
+curl -s 127.0.0.1:8000/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":[1,2,3],"max_tokens":16,"suffix":"\n"}'
 ```
 
 ## `POST /v1/embeddings`

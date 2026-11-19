@@ -209,13 +209,26 @@ func TestCompletionsBadRequest(t *testing.T) {
 
 func TestParseCompletionsPrompt(t *testing.T) {
 	got, err := parseCompletionsPrompt(json.RawMessage(`"hi"`))
-	if err != nil || got != "hi" {
-		t.Fatalf("string: got=%q err=%v", got, err)
+	if err != nil || got.isTok || got.text != "hi" {
+		t.Fatalf("string: got=%+v err=%v", got, err)
 	}
 
 	got, err = parseCompletionsPrompt(json.RawMessage(`["a","b"]`))
-	if err != nil || got != "ab" {
-		t.Fatalf("array: got=%q err=%v", got, err)
+	if err != nil || got.isTok || got.text != "ab" {
+		t.Fatalf("array: got=%+v err=%v", got, err)
+	}
+
+	got, err = parseCompletionsPrompt(json.RawMessage(`[1,2,3]`))
+	if err != nil || !got.isTok || len(got.tokens) != 3 || got.tokens[0] != 1 {
+		t.Fatalf("tokens: got=%+v err=%v", got, err)
+	}
+
+	if _, err := parseCompletionsPrompt(json.RawMessage(`[]`)); err == nil {
+		t.Fatal("expected error for empty prompt array")
+	}
+
+	if _, err := parseCompletionsPrompt(json.RawMessage(`[[1,2],[3]]`)); err == nil {
+		t.Fatal("expected error for batch token prompts")
 	}
 
 	if _, err := parseCompletionsPrompt(json.RawMessage(`null`)); err == nil {

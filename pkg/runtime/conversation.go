@@ -52,9 +52,29 @@ func (conv *Conversation) TokenCount() int {
 	return len(conv.tokens)
 }
 
-// StartGeneration runs incremental prefill and returns a decode session.
+// EncodeText encodes text with the conversation tokenizer (for completions suffix append).
+func (conv *Conversation) EncodeText(text string) ([]int, error) {
+	return conv.ctx.tok.Encode(text)
+}
+
+// DecodeTokens decodes token IDs to text (for completions echo of token prompts).
+func (conv *Conversation) DecodeTokens(ids []int) string {
+	return conv.ctx.tok.Decode(ids)
+}
+
+// StartGeneration encodes the prompt, runs incremental prefill and returns a decode session.
 func (conv *Conversation) StartGeneration(prompt string) (*GenerationSession, error) {
-	return conv.startGeneration(prompt)
+	promptTokens, err := conv.ctx.tok.Encode(prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	return conv.startGenerationTokens(promptTokens)
+}
+
+// StartGenerationTokens runs incremental prefill from token IDs (no encode; OpenAI completions prompt arrays).
+func (conv *Conversation) StartGenerationTokens(promptTokens []int) (*GenerationSession, error) {
+	return conv.startGenerationTokens(append([]int(nil), promptTokens...))
 }
 
 // Commit appends generated tokens to cache history.
@@ -115,7 +135,7 @@ func (conv *Conversation) Rollback(tokenLen int) {
 
 func (conv *Conversation) Generate(prompt string, params GenerateParams) (string, error) {
 	snap := len(conv.tokens)
-	sess, err := conv.startGeneration(prompt)
+	sess, err := conv.StartGeneration(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -140,12 +160,7 @@ func (conv *Conversation) GenerateStream(prompt string, params GenerateParams, w
 	return err
 }
 
-func (conv *Conversation) startGeneration(prompt string) (*GenerationSession, error) {
-	promptTokens, err := conv.ctx.tok.Encode(prompt)
-	if err != nil {
-		return nil, err
-	}
-
+func (conv *Conversation) startGenerationTokens(promptTokens []int) (*GenerationSession, error) {
 	if ctxLen := conv.ctx.engine.ContextLength(); ctxLen > 0 && len(promptTokens) > ctxLen {
 		return nil, fmt.Errorf("runtime: prompt %d tokens exceeds context_length=%d", len(promptTokens), ctxLen)
 	}
@@ -163,6 +178,7 @@ func (conv *Conversation) startGeneration(prompt string) (*GenerationSession, er
 	startPos := cached
 
 	var logits []float32
+	var err error
 	if len(newTokens) > 0 {
 		logits, err = conv.ctx.engine.Model.Forward(newTokens, startPos)
 		if err != nil {

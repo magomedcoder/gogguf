@@ -140,12 +140,26 @@ curl -N 127.0.0.1:8000/v1/chat/completions \
 
 ## `POST /v1/completions`
 
-Legacy Completions API: `prompt` (строка или массив строк) -> генерация. Поддерживаются `stream`, `max_tokens`, sampling, `stop`, `echo`. Для chat templates предпочтительно `/v1/chat/completions`.
+Legacy Completions API. Для chat templates предпочтительно `/v1/chat/completions`.
+
+| Поле                                      | Тип                           | По умолчанию | Описание                                                                                                                                |
+|-------------------------------------------|-------------------------------|--------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| `prompt`                                  | string / `[]string` / `[]int` | -            | текст, склеенный массив строк или token IDs (`[][]int` batch -> 400)                                                                    |
+| `suffix`                                  | string                        | -            | только в prefill (не в echo; не OpenAI insert)                                                                                          |
+| `max_tokens`                              | int                           | -            | длина генерации                                                                                                                         |
+| `stream`                                  | bool                          | `false`      | SSE                                                                                                                                     |
+| `echo`                                    | bool                          | `false`      | префикс исходного prompt в `text` (для token prompt - decode)                                                                           |
+| `logprobs`                                | int                           | -            | `0..5`; без поля = выкл. Parallel arrays в `choices[0].logprobs` только для **generated** токенов; stream = один индекс на content-чанк |
+| `stop` / sampling / `logit_bias` / `seed` | -                             | -            | как в chat                                                                                                                              |
 
 ```bash
 curl -s 127.0.0.1:8000/v1/completions \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"Переведи фразу Привет мир на английский:","max_tokens":32}'
+  -d '{"prompt":"Переведи фразу Привет мир на английский:","max_tokens":32,"logprobs":5}'
+
+curl -s 127.0.0.1:8000/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":[1,2,3],"max_tokens":16,"suffix":"\n"}'
 ```
 
 ## `POST /v1/embeddings`
